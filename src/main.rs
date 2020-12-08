@@ -18,17 +18,14 @@ struct Pixel {
 fn write_ppm(mut writer: impl Write) -> io::Result<()> {
     let mut rng = rand::thread_rng();
     writeln!(writer, "P3 {} {} {}\n", LENGTH, WIDTH, RANGE)?;
-    let mut rgb = Pixel {
-        red: 0,
-        green: 0,
-        blue: 0,
-    };
     for _row in 0..5 {
         let mut blockrow = "".to_string();
         for _col in 0..5 {
-            rgb.red = rng.gen_range(100, 250);
-            rgb.green = rng.gen_range(0, 200);
-            rgb.blue = rng.gen_range(50, 200);
+            let rgb = Pixel {
+                red: rng.gen_range(100, 250),
+                green: rng.gen_range(0, 200),
+                blue: rng.gen_range(50, 200),
+            };
             for _blockrow in 0..100 {
                 blockrow += &format!("{} {} {} ", rgb.red, rgb.green, rgb.blue);
             }
