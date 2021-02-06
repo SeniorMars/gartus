@@ -49,8 +49,8 @@ fn writer_image(mut writer: impl Write) -> io::Result<()> {
 }
 
 fn write_blocks(mut writer: impl Write) -> io::Result<()> {
-    let mut rng = rand::thread_rng();
     writeln!(writer, "P3 {} {} {}\n", HEIGHT, WIDTH, RANGE)?;
+    let mut rng = rand::thread_rng();
     let mut blockrow = String::new();
     for _row in 0..8 {
         blockrow.clear();
