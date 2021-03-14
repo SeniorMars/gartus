@@ -3,7 +3,6 @@
 
 all:
 	cargo run --release
-	display image.ppm
 
 clean: 
 	cargo clean
