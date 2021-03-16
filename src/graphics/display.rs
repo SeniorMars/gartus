@@ -19,6 +19,7 @@ pub struct Canvas {
     pub line: Pixel,
 }
 
+#[allow(dead_code)]
 impl Canvas {
     pub fn new(height: u32, width: u32, range: u8) -> Self {
         Self {
@@ -112,22 +113,15 @@ impl Canvas {
 }
 
 // finally the homework :(
+#[allow(dead_code)]
 impl Canvas {
-    pub fn draw_line(&mut self, color: Pixel, x0: f64, y0: f64, x1: f64, y1: f64) {
-        let (x0, y0, x1, y1) = if x0 > x1 {
+    pub fn draw_line(&mut self, color: Pixel, x0: i32, y0: i32, x1: i32, y1: i32) {
+        let (mut x0, mut y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)
         } else {
             (x0, y0, x1, y1)
         };
-        let (mut x0, mut y0, x1, y1) = (x0 as i32, y0 as i32, x1 as i32, y1 as i32);
-        // let slope = (y1 - y0) / (x1 - x0);
         let (delta_y, delta_x) = (2 * (y1 - y0), -2 * (x1 - x0));
-        if delta_x == 0 {
-            for y in y0..=y1 {
-                self.plot(color, x0, y)
-            }
-            return ();
-        }
 
         if (x1 - x0).abs() >= (y1 - y0).abs() {
             if delta_y > 0 {
@@ -168,7 +162,7 @@ impl Canvas {
             } else {
                 // octant 7
                 let mut d = delta_y / 2 - delta_x;
-                for y in (y0..=y1).rev() {
+                for y in (y1..=y0).rev() {
                     self.plot(color, x0, y);
                     if d > 0 {
                         x0 += 1;

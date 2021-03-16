@@ -6,3 +6,4 @@ all:
 
 clean: 
 	cargo clean
+	rm *.ppm
