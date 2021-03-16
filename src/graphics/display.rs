@@ -36,11 +36,13 @@ impl Canvas {
     }
 
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
-        let new_y = self.height as i32 - 1 - y;
-        if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
-            let index = self.get_index(x as u32, new_y as u32);
-            self.pixels[index] = new_color
-        }
+        let index = self.get_index(x as u32, y as u32);
+        self.pixels[index] = new_color
+        // let new_y = self.height as i32 - 1 - y;
+        // if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
+        //     let index = self.get_index(x as u32, new_y as u32);
+        //     self.pixels[index] = new_color
+        // }
     }
 
     pub fn set_line_pixel(&mut self, new_color: Pixel) {
@@ -62,11 +64,9 @@ impl Canvas {
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
         let mut file = File::create(file_name)?;
         let mut writer = BufWriter::new(&mut file);
-        writeln!(writer, "P3 {} {} {}\n", self.height, self.width, self.range)?;
+        writeln!(writer, "P3 {} {} {}", self.height, self.width, self.range)?;
         for pixel in self.pixels.iter() {
-            writer.write(&[pixel.red])?;
-            writer.write(&[pixel.green])?;
-            writer.write(&[pixel.blue])?;
+            writeln!(writer, "{} {} {} ", pixel.red, pixel.green, pixel.blue)?;
         }
         writer.flush()?;
         Ok(())
