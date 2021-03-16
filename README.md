@@ -1,3 +1,4 @@
 # line_rs
 Line alg in rust
-[OWL](./img.png)
+![Rainbow-Owl](./img.png)
+![White-Owl](./white.png)
