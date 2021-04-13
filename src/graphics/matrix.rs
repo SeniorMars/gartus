@@ -1,4 +1,8 @@
-use std::{fmt, ops::*, slice};
+use std::{
+    fmt,
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
+    slice,
+};
 
 #[derive(Default, Clone, Debug)]
 pub struct Matrix {
@@ -26,7 +30,12 @@ impl Matrix {
         matrix
     }
 
-    pub fn transpose(&self) -> Matrix {
+    pub fn inverse(&self) -> Self {
+        // may not do this
+        todo!()
+    }
+
+    pub fn transpose(&self) -> Self {
         Matrix::new(self.cols, self.rows, self.data.clone())
     }
 
@@ -36,8 +45,8 @@ impl Matrix {
         // self.iter_mut()
         //     .enumerate()
         //     .map(|(i, d)| *d = if i / cols == i % cols { 1.0 } else { 0.0 });
-        for (i, d) in self.iter_mut().enumerate() {
-            *d = if i / cols == i % cols { 1.0 } else { 0.0 }
+        for (i, e) in self.iter_mut().enumerate() {
+            *e = if i / cols == i % cols { 1.0 } else { 0.0 }
         }
     }
 
@@ -71,21 +80,18 @@ impl Matrix {
         let i = self.index(row, col);
         self.data[i] = new_point;
     }
-
-    // void matrix_mult(struct matrix *a, struct matrix *b);
-    // void add_ege(struct matrix *a, );
 }
 
 // Iterator stuff
 #[allow(dead_code)]
 impl Matrix {
-    pub fn for_each<F>(&mut self, function: F)
-    where
-        F: Fn(f64) -> f64,
-    {
-        self.iter_by_point_mut()
-            .for_each(|point: &mut [f64]| point.iter_mut().for_each(|e| *e = function(*e)))
-    }
+    // pub fn for_each<F>(&mut self, function: F)
+    // where
+    //     F: Fn(f64) -> f64,
+    // {
+    //     self.iter_by_point_mut()
+    //         .for_each(|point: &mut [f64]| point.iter_mut().for_each(|e| *e = function(*e)))
+    // }
 
     // pub fn from_iter(&self) -> impl IntoIterator<Item = &[f64]> {
     //     self.data.chunks_exact(self.cols)
@@ -127,8 +133,7 @@ impl Matrix {
     }
 }
 
-// operators
-
+// Equal
 impl PartialEq for Matrix {
     fn eq(&self, other: &Self) -> bool {
         self.rows == other.rows
@@ -173,7 +178,7 @@ impl Matrix {
     }
 }
 
-// operators
+// Operators
 impl Add for Matrix {
     type Output = Self;
     fn add(self, other: Self) -> Self {
@@ -206,7 +211,7 @@ impl AddAssign<f64> for Matrix {
     }
 }
 
-// change to three
+// change to three to add z later
 impl AddAssign<[f64; 2]> for Matrix {
     fn add_assign(&mut self, other: [f64; 2]) {
         self.add_point(other[0], other[1])
@@ -251,17 +256,61 @@ impl SubAssign<f64> for Matrix {
     }
 }
 
-//impl<const M: usize, const N: usize> ops::AddAssign<f32> for Matrix<M, N> {
-// fn add_assign(&mut self, other: f32) {
-//     self.body.iter_mut().for_each(|row| row.iter_mut().for_each(|e| *e += other));
-// }
-// }
+impl Mul for Matrix {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        assert_eq!(
+            self.cols, other.rows,
+            "Colms of self must equal rows of other"
+        );
+        let (rows, cols) = (self.rows, other.cols);
+        let mut data = vec![0.0; rows * cols];
+        for (i, e) in data.iter_mut().enumerate() {
+            *e = self
+                .iter_row(i / cols)
+                .zip(other.iter_col(i % cols))
+                .fold(0.0, |acc, (s, o)| acc + s * o);
+        }
+        Matrix { rows, cols, data }
+    }
+}
+
+impl MulAssign for Matrix {
+    fn mul_assign(&mut self, other: Self) {
+        *self = other * self.clone()
+    }
+}
+
+impl MulAssign<f64> for Matrix {
+    fn mul_assign(&mut self, other: f64) {
+        self.iter_by_point_mut()
+            .for_each(|row| row.iter_mut().for_each(|e| *e *= other))
+    }
+}
+
+impl Div for Matrix {
+    type Output = Self;
+
+    fn div(self, _other: Self) -> Self {
+        // may not do this
+        todo!()
+    }
+}
+
+
+impl DivAssign<f64> for Matrix {
+    fn div_assign(&mut self, other: f64) {
+        self.iter_by_point_mut()
+            .for_each(|row| row.iter_mut().for_each(|e| *e /= other))
+    }
+}
 
 impl fmt::Display for Matrix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(for row in 0..self.rows {
-            for col in 0..self.cols {
-                write!(f, "{}\t", self.data[self.index(col, row)])?;
+        Ok(for col in 0..self.cols {
+            for row in 0..self.rows {
+                write!(f, "{}\t", self.get(row, col))?;
             }
             writeln!(f)?;
         })
@@ -315,16 +364,14 @@ mod tests {
         let src: Vec<&[f64]> = ident.iter_by_point().collect();
         // println!("{:?}", src);
         println!("{:?}", src);
-        assert_eq!(5 / ident.rows, 5 % ident.cols)
         // let src: Vec<String> = ident.iter().map(|x| format!("{}", x)).collect();
         // println!("{:?}",src)
         // src.map(|x| println!("{}", x))
-        // let src = vec![1, 2, 3];
-        // let mut dest: Vec<String> = src.iter()
+        assert_eq!(5 / ident.rows, 5 % ident.cols)
     }
 
     #[test]
-    #[should_panic]
+    // #[should_panic]
     fn operators() {
         let mut matrix = Matrix::identity_matrix(2);
         let bruh = Matrix {
@@ -343,7 +390,7 @@ mod tests {
             cols: 2,
             data: [2.0, 0.0, 0.0, 2.0].to_vec(),
         };
-        assert_eq!(matrix, test);
+        assert_ne!(matrix, test);
     }
 
     #[test]
@@ -355,5 +402,28 @@ mod tests {
         matrix += x;
         matrix += y;
         println!("{}", matrix)
+    }
+
+    #[test]
+    // #[should_panic]
+    fn mul_for_now() {
+        let a = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
+        let b = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
+        let mut c = Matrix::new(
+            3,
+            4,
+            vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
+        );
+        let d = Matrix::new(
+            3,
+            4,
+            vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
+        );
+        // println!("{}", c);
+        c *= a;
+        // println!("{}", c);
+        let e = b * d;
+        // println!("{}", c);
+        assert_eq!(c, e)
     }
 }

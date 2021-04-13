@@ -5,18 +5,20 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct Pixel {
     pub red: u8,
     pub green: u8,
     pub blue: u8,
 }
 
+#[derive(Default, Debug, Clone)]
 pub struct Canvas {
     height: u32,
     width: u32,
     range: u8,
     pixels: Vec<Pixel>,
+    pub upper_left_system: bool,
     pub line: Pixel,
 }
 
@@ -28,6 +30,7 @@ impl Canvas {
             width,
             range,
             pixels: vec![Pixel::default(); (height * width) as usize],
+            upper_left_system: false,
             line: Pixel::default(),
         }
     }
@@ -49,12 +52,15 @@ impl Canvas {
     }
 
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
-        // let index = self.index(x as usize, y as usize);
-        // self.pixels[index] = new_color
-        let new_y = self.height as i32 - 1 - y;
-        if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
-            let index = self.index(x as usize, new_y as usize);
+        if self.upper_left_system {
+            let index = self.index(x as usize, y as usize);
             self.pixels[index] = new_color
+        } else {
+            let new_y = self.height as i32 - 1 - y;
+            if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
+                let index = self.index(x as usize, new_y as usize);
+                self.pixels[index] = new_color
+            }
         }
     }
 
