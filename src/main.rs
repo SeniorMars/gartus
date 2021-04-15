@@ -24,17 +24,16 @@ fn main() -> io::Result<()> {
     for corr in geass_corrs.chunks(2) {
         geass.add_point(corr[0] as f64, corr[1] as f64, 0.0)
     }
-    let mut dilate = Matrix::scale(0.5, 0.5, 0.5);
-    dilate *= geass;
 
-    img.set_line_color(191, 70, 61);
+    let mut dilate = Matrix::scale(0.5, 0.5, 0.5);
+    let mut reflect = Matrix::reflect_xz();
     let file_name = "geass";
+    dilate *= geass;
+    reflect *= dilate.clone();
+    img.set_line_color(191, 70, 61);
     img.draw_lines_for_animation(&dilate, &file_name)?;
+    img.draw_lines_for_animation(&reflect, &file_name)?;
     img.animation(&file_name)
-    // img.display()
-    // owl.save_binary("binary.ppm")?;
-    // owl.save_ascii("ascii.ppm")?;
-    // owl.save_extension("white.png")
 }
 
 #[cfg(test)]

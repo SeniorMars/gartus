@@ -136,50 +136,49 @@ impl Matrix {
 // transformations
 #[allow(dead_code)]
 impl Matrix {
-    pub fn reflect_x() -> Self {
-        let mut t = Self::new(4, 4, vec![]);
-        // either this or zeros
-        t.fill(1.0);
-        t.set(0, 1, 0.0);
-        t.set(1, 0, 0.0);
-        t.set(1, 1, -1.0);
-        t
-    }
-
-    pub fn reflect_y() -> Self {
-        let mut t = Self::new(4, 4, vec![]);
-        t.fill(1.0);
+    // reflection over y-axis
+    pub fn reflect_yz() -> Self {
+        let mut t = Self::identity_matrix(4);
         t.set(0, 0, -1.0);
-        t.set(0, 1, 0.0);
-        t.set(1, 0, 0.0);
+        t
+    }
+
+    // reflection over x-axis
+    pub fn reflect_xz() -> Self {
+        let mut t = Self::identity_matrix(4);
         t.set(1, 1, -1.0);
         t
     }
 
-    pub fn reflect_yx() -> Self {
-        let mut t = Self::new(4, 4, vec![]);
-        t.fill(1.0);
+    // reflect over z
+    pub fn reflect_xy() -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(2, 2, -1.0);
+        t
+    }
+
+    pub fn reflect_45() -> Self {
+        let mut t = Self::identity_matrix(4);
         t.set(0, 0, 0.0);
+        t.set(1, 0, 1.0);
+        t.set(0, 1, 1.0);
         t.set(1, 1, 0.0);
         t
     }
 
-    pub fn reflect_negxy() -> Self {
-        let mut t = Self::new(4, 4, vec![]);
-        t.fill(1.0);
+    pub fn reflect_neg45() -> Self {
+        let mut t = Self::identity_matrix(4);
         t.set(0, 0, 0.0);
-        t.set(1, 1, 0.0);
         t.set(1, 0, -1.0);
         t.set(0, 1, -1.0);
+        t.set(1, 1, 0.0);
         t
     }
+
     pub fn reflect_origin() -> Self {
         let mut t = Self::new(4, 4, vec![]);
-        t.fill(1.0);
         t.set(0, 0, -1.0);
         t.set(1, 1, -1.0);
-        t.set(1, 0, 0.0);
-        t.set(0, 1, 0.0);
         t
     }
 

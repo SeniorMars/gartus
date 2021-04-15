@@ -57,18 +57,21 @@ impl Canvas {
         self.pixels.iter_mut()
     }
 
-    fn index(&self, x: usize, y: usize) -> usize {
-        y * self.width as usize + x
+    fn index(&self, x: u32, y: u32) -> usize {
+        (y * self.width + x) as usize
     }
 
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
+        // deal with negative numbers
+        let x = if x < 0 {self.width as i32 - 1 + x} else {x};
+        let y = if y < 0 {self.height as i32 - 1 + y} else {y};
         if self.upper_left_system {
-            let index = self.index(x as usize, y as usize);
+            let index = self.index(x as u32, y as u32);
             self.pixels[index] = new_color
         } else {
             let new_y = self.height as i32 - 1 - y;
             if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
-                let index = self.index(x as usize, new_y as usize);
+                let index = self.index(x as u32, new_y as u32);
                 self.pixels[index] = new_color
             }
         }
