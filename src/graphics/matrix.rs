@@ -22,6 +22,10 @@ impl Matrix {
         Self { rows, cols, data }
     }
 
+    pub fn num_points(&self) -> usize {
+        self.rows
+    }
+
     pub fn identity_matrix(size: usize) -> Self {
         let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
         for i in 0..size {
@@ -51,11 +55,7 @@ impl Matrix {
     }
 
     fn index(&self, row: usize, col: usize) -> usize {
-        if self.rows >= self.cols {
-            row * self.cols + col
-        } else {
-            col * self.rows + row
-        }
+        row * self.cols + col
     }
 
     pub fn fill(&mut self, n: f64) {
@@ -133,6 +133,103 @@ impl Matrix {
     }
 }
 
+// transformations
+#[allow(dead_code)]
+impl Matrix {
+    pub fn reflect_x() -> Self {
+        let mut t = Self::new(4, 4, vec![]);
+        // either this or zeros
+        t.fill(1.0);
+        t.set(0, 1, 0.0);
+        t.set(1, 0, 0.0);
+        t.set(1, 1, -1.0);
+        t
+    }
+
+    pub fn reflect_y() -> Self {
+        let mut t = Self::new(4, 4, vec![]);
+        t.fill(1.0);
+        t.set(0, 0, -1.0);
+        t.set(0, 1, 0.0);
+        t.set(1, 0, 0.0);
+        t.set(1, 1, -1.0);
+        t
+    }
+
+    pub fn reflect_yx() -> Self {
+        let mut t = Self::new(4, 4, vec![]);
+        t.fill(1.0);
+        t.set(0, 0, 0.0);
+        t.set(1, 1, 0.0);
+        t
+    }
+
+    pub fn reflect_negxy() -> Self {
+        let mut t = Self::new(4, 4, vec![]);
+        t.fill(1.0);
+        t.set(0, 0, 0.0);
+        t.set(1, 1, 0.0);
+        t.set(1, 0, -1.0);
+        t.set(0, 1, -1.0);
+        t
+    }
+    pub fn reflect_origin() -> Self {
+        let mut t = Self::new(4, 4, vec![]);
+        t.fill(1.0);
+        t.set(0, 0, -1.0);
+        t.set(1, 1, -1.0);
+        t.set(1, 0, 0.0);
+        t.set(0, 1, 0.0);
+        t
+    }
+
+    pub fn translate(x: f64, y: f64, z: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(3, 0, x);
+        t.set(3, 1, y);
+        t.set(3, 2, z);
+        t
+    }
+
+    pub fn scale(x: f64, y: f64, z: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(0, 0, x);
+        t.set(1, 1, y);
+        t.set(2, 2, z);
+        t
+    }
+
+    pub fn rotate_x(theta: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        let angle = theta.to_radians();
+        t.set(1, 1, angle.cos());
+        t.set(2, 1, -angle.sin());
+        t.set(1, 2, angle.sin());
+        t.set(2, 2, angle.cos());
+        t
+    }
+
+    pub fn rotate_y(theta: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        let angle = theta.to_radians();
+        t.set(0, 0, angle.cos());
+        t.set(0, 2, -angle.sin());
+        t.set(2, 0, angle.sin());
+        t.set(2, 2, angle.cos());
+        t
+    }
+
+    pub fn rotate_z(theta: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        let angle = theta.to_radians();
+        t.set(0, 0, angle.cos());
+        t.set(1, 0, -angle.sin());
+        t.set(0, 1, angle.sin());
+        t.set(1, 1, angle.cos());
+        t
+    }
+}
+
 // Equal
 impl PartialEq for Matrix {
     fn eq(&self, other: &Self) -> bool {
@@ -149,32 +246,32 @@ impl PartialEq for Matrix {
 // add + append
 #[allow(dead_code)]
 impl Matrix {
-    // TODO: add z //
-    pub fn add_point(&mut self, x: f64, y: f64) {
+    pub fn add_point(&mut self, x: f64, y: f64, z: f64) {
         self.data.push(x);
         self.data.push(y);
-        self.data.push(0.0);
+        self.data.push(z);
         self.data.push(1.0);
         self.rows += 1;
     }
 
-    // add z, + 1
-    pub fn add_edge(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) {
-        self.add_point(x0, y0);
-        self.add_point(x1, y1);
+    pub fn add_edge(&mut self, x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) {
+        self.add_point(x0, y0, z0);
+        self.add_point(x1, y1, z1);
     }
 
     pub fn append_row(&mut self, row: &mut Vec<f64>) {
         assert_eq!(
             self.cols,
-            row.len() + 2,
+            row.len() + 1,
             "self.cols and edge len are not equal"
         );
-        // I don't implment z or 1 - for now
-        row.push(0.0);
         row.push(1.0);
         self.data.append(row);
         self.rows += 1;
+    }
+
+    pub fn mul(&mut self, other: Self) {
+        *self = other * self.clone()
     }
 }
 
@@ -211,10 +308,9 @@ impl AddAssign<f64> for Matrix {
     }
 }
 
-// change to three to add z later
-impl AddAssign<[f64; 2]> for Matrix {
-    fn add_assign(&mut self, other: [f64; 2]) {
-        self.add_point(other[0], other[1])
+impl AddAssign<[f64; 3]> for Matrix {
+    fn add_assign(&mut self, other: [f64; 3]) {
+        self.add_point(other[0], other[1], other[2])
     }
 }
 
@@ -297,7 +393,6 @@ impl Div for Matrix {
         todo!()
     }
 }
-
 
 impl DivAssign<f64> for Matrix {
     fn div_assign(&mut self, other: f64) {
@@ -397,11 +492,15 @@ mod tests {
     // #[should_panic]
     fn add_points() {
         let mut matrix = Matrix::new(0, 4, Vec::with_capacity(8));
-        let x = [0.0, 0.1];
-        let y = vec![0.2, 0.3];
+        let x = [0.0, 0.1, 0.2];
+        let y = vec![0.3, 1.3, 2.3];
         matrix += x;
         matrix += y;
-        println!("{}", matrix)
+        matrix += x;
+        matrix += x;
+        println!("{}", matrix);
+        matrix.to_identity();
+        println!("{}", matrix);
     }
 
     #[test]

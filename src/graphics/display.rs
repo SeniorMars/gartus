@@ -17,6 +17,7 @@ pub struct Canvas {
     height: u32,
     width: u32,
     range: u8,
+    anim_index: u32,
     pixels: Vec<Pixel>,
     pub upper_left_system: bool,
     pub line: Pixel,
@@ -29,7 +30,20 @@ impl Canvas {
             height,
             width,
             range,
+            anim_index: 0,
             pixels: vec![Pixel::default(); (height * width) as usize],
+            upper_left_system: false,
+            line: Pixel::default(),
+        }
+    }
+
+    pub fn new_with_bg(height: u32, width: u32, range: u8, bg: Pixel) -> Self {
+        Self {
+            height,
+            width,
+            range,
+            anim_index: 0,
+            pixels: vec![bg; (height * width) as usize],
             upper_left_system: false,
             line: Pixel::default(),
         }
@@ -44,11 +58,7 @@ impl Canvas {
     }
 
     fn index(&self, x: usize, y: usize) -> usize {
-        if self.width >= self.height {
-            y * self.width as usize + x
-        } else {
-            x * self.height as usize + y
-        }
+        y * self.width as usize + x
     }
 
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
@@ -79,7 +89,11 @@ impl Canvas {
             *i = Pixel::default()
         }
     }
+}
 
+// saving
+#[allow(dead_code)]
+impl Canvas {
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
         let mut file = File::create(file_name)?;
         let mut writer = BufWriter::new(&mut file);
@@ -130,13 +144,12 @@ impl Canvas {
         child.stdin.as_mut().unwrap().write_all(&content.as_bytes())
     }
 
-    // not safe
     // TODO: make a better version
     pub fn animation(&self, file_name: &str) -> io::Result<()> {
         println!("Making a new animation: {}.gif", file_name);
         Command::new("convert")
             .arg("-delay")
-            .arg("1.7")
+            .arg("2.7")
             .arg(&format!("anim/{}*", file_name))
             .arg(&format!("{}.gif", file_name))
             .stdin(Stdio::piped())
@@ -151,10 +164,9 @@ impl Canvas {
     pub fn draw_lines(&mut self, matrix: &Matrix) {
         let mut iter = matrix.iter_by_point();
         while let Some(point) = iter.next() {
-            // TODO: Update so it can fit Z coords and 1 <11-04-21, Karl> //
-            let (x0, y0) = (point[0], point[1]);
-            let (x1, y1) = match iter.next() {
-                Some(p1) => (p1[0], p1[1]),
+            let (x0, y0, _z0) = (point[0], point[1], point[3]);
+            let (x1, y1, _z1) = match iter.next() {
+                Some(p1) => (p1[0], p1[1], p1[2]),
                 None => panic!("Need at least 2 points to draw"),
             };
 
@@ -162,7 +174,23 @@ impl Canvas {
         }
     }
 
+    pub fn draw_lines_for_animation(&mut self, matrix: &Matrix, filename: &str) -> io::Result<()> {
+        let mut iter = matrix.iter_by_point();
+        while let Some(point) = iter.next() {
+            let (x0, y0, _z0) = (point[0], point[1], point[3]);
+            let (x1, y1, _z1) = match iter.next() {
+                Some(p1) => (p1[0], p1[1], p1[2]),
+                None => panic!("Need at least 2 points to draw"),
+            };
+
+            self.save_binary(&format!("anim/{}{}.ppm", filename, self.anim_index))?;
+            self.draw_line(self.line, x0, y0, x1, y1);
+        }
+        self.save_binary(&format!("anim/{}{}.ppm", filename, self.anim_index))
+    }
+
     pub fn draw_line(&mut self, color: Pixel, x0: f64, y0: f64, x1: f64, y1: f64) {
+        self.anim_index += 1;
         let (x0, y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)
         } else {
