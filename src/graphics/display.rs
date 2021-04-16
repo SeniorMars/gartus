@@ -2,7 +2,7 @@ use crate::graphics::matrix::*;
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
 };
 
 #[derive(Default, Debug, Copy, Clone)]
@@ -63,8 +63,8 @@ impl Canvas {
 
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
         // deal with negative numbers
-        let x = if x < 0 {self.width as i32 - 1 + x} else {x};
-        let y = if y < 0 {self.height as i32 - 1 + y} else {y};
+        let x = if x < 0 { self.width as i32 - 1 + x } else { x };
+        let y = if y < 0 { self.height as i32 - 1 + y } else { y };
         if self.upper_left_system {
             let index = self.index(x as u32, y as u32);
             self.pixels[index] = new_color
@@ -92,6 +92,12 @@ impl Canvas {
             *i = Pixel::default()
         }
     }
+
+    pub fn fill_color(&mut self, bg: Pixel) {
+        for i in self.iter_mut() {
+            *i = bg
+        }
+    }
 }
 
 // saving
@@ -111,11 +117,11 @@ impl Canvas {
     pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
         let mut file = File::create(file_name)?;
         let mut writer = BufWriter::new(&mut file);
-        writer.write(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
+        writer.write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
         for pixel in self.iter() {
-            writer.write(&pixel.red.to_be_bytes())?;
-            writer.write(&pixel.green.to_be_bytes())?;
-            writer.write(&pixel.blue.to_be_bytes())?;
+            writer.write_all(&pixel.red.to_be_bytes())?;
+            writer.write_all(&pixel.green.to_be_bytes())?;
+            writer.write_all(&pixel.blue.to_be_bytes())?;
         }
         writer.flush()?;
         Ok(())
@@ -147,8 +153,16 @@ impl Canvas {
         child.stdin.as_mut().unwrap().write_all(&content.as_bytes())
     }
 
+    pub fn view_animation(&self, file_name: &str) -> io::Result<Child> {
+        Command::new("animate")
+            .arg(file_name)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+    }
+
     // TODO: make a better version
-    pub fn animation(&self, file_name: &str) -> io::Result<()> {
+    pub fn animation(&self, file_name: &str) -> io::Result<Child> {
         println!("Making a new animation: {}.gif", file_name);
         Command::new("convert")
             .arg("-delay")
@@ -157,8 +171,7 @@ impl Canvas {
             .arg(&format!("{}.gif", file_name))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .spawn()?;
-        Ok(())
+            .spawn()
     }
 }
 
@@ -186,10 +199,10 @@ impl Canvas {
                 None => panic!("Need at least 2 points to draw"),
             };
 
-            self.save_binary(&format!("anim/{}{}.ppm", filename, self.anim_index))?;
+            self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))?;
             self.draw_line(self.line, x0, y0, x1, y1);
         }
-        self.save_binary(&format!("anim/{}{}.ppm", filename, self.anim_index))
+        self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))
     }
 
     pub fn draw_line(&mut self, color: Pixel, x0: f64, y0: f64, x1: f64, y1: f64) {

@@ -227,6 +227,27 @@ impl Matrix {
         t.set(1, 1, angle.cos());
         t
     }
+
+    pub fn shearing_x(sh_y: f64, sh_z: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(0, 1, sh_y);
+        t.set(0, 2, sh_z);
+        t
+    }
+
+    pub fn shearing_y(sh_x: f64, sh_z: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(1, 0, sh_x);
+        t.set(1, 2, sh_z);
+        t
+    }
+
+    pub fn shearing_z(sh_x: f64, sh_y: f64) -> Self {
+        let mut t = Self::identity_matrix(4);
+        t.set(2, 0, sh_x);
+        t.set(2, 1, sh_y);
+        t
+    }
 }
 
 // Equal
@@ -235,10 +256,6 @@ impl PartialEq for Matrix {
         self.rows == other.rows
             && self.cols == other.cols
             && self.iter().zip(other.iter()).all(|(a, b)| a == b)
-    }
-
-    fn ne(&self, other: &Self) -> bool {
-        !self.eq(other)
     }
 }
 
@@ -402,12 +419,13 @@ impl DivAssign<f64> for Matrix {
 
 impl fmt::Display for Matrix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(for col in 0..self.cols {
+        for col in 0..self.cols {
             for row in 0..self.rows {
                 write!(f, "{}\t", self.get(row, col))?;
             }
             writeln!(f)?;
-        })
+        }
+        Ok(())
     }
 }
 
