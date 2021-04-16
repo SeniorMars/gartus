@@ -1,7 +1,10 @@
 .POSIX:
-.PHONY: all clean test
+.PHONY: run release clean test rmf
 
-all:
+run:
+	cargo run
+
+release:
 	cargo run --release
 
 test:
@@ -9,4 +12,7 @@ test:
 
 clean: 
 	cargo clean
-	rm *.ppm *.png
+
+rmf:
+	rm pics/*.ppm pics/*.png
+	rm anim/*.ppm
