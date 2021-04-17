@@ -2,7 +2,7 @@ use crate::graphics::matrix::*;
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
 };
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -10,6 +10,13 @@ pub struct Pixel {
     pub red: u8,
     pub green: u8,
     pub blue: u8,
+}
+
+#[allow(dead_code)]
+impl Pixel {
+    pub fn new(red: u8, green: u8, blue: u8) -> Self {
+        Self {red, green, blue}
+    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -208,26 +215,6 @@ impl Canvas {
         child.stdin.as_mut().unwrap().write_all(&content.as_bytes())
     }
 
-    pub fn view_animation(&self, file_name: &str) -> io::Result<Child> {
-        Command::new("animate")
-            .arg(file_name)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-    }
-
-    // TODO: make a better version
-    pub fn animation(&self, file_name: &str) -> io::Result<Child> {
-        println!("Making a new animation: {}.gif", file_name);
-        Command::new("convert")
-            .arg("-delay")
-            .arg("2.7")
-            .arg(&format!("anim/{}*", file_name))
-            .arg(&format!("{}.gif", file_name))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-    }
 }
 
 // ploting / drawing

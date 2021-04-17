@@ -198,8 +198,22 @@ impl Matrix {
         t
     }
 
-    pub fn rotate_point() {
-        
+    pub fn rotate_point(theta: f64, x: f64, y: f64, z: f64) -> Self {
+        let mut m = Self::identity_matrix(4);
+        let angle = theta.to_radians();
+        let c = angle.cos();
+        let s = angle.sin();
+        let t = 1.0 - c;
+        m.set(0, 0, (t * x * x) + c);
+        m.set(0, 1, (t * x * y) - (s * z));
+        m.set(0, 2, (t * x * z) + (s * z));
+        m.set(1, 0, (t * x * y) + (s * z));
+        m.set(1, 1, (t * y * y) + c);
+        m.set(1, 2, (t * y * z) - (s * x));
+        m.set(2, 0, (t * x * z) - (s * y));
+        m.set(2, 1, (t * y * z) + (s * x));
+        m.set(2, 2, (t * z * z) + c);
+        m
     }
 
     pub fn rotate_x(theta: f64) -> Self {
@@ -211,7 +225,6 @@ impl Matrix {
         t.set(2, 2, angle.cos());
         t
     }
-
 
     pub fn rotate_y(theta: f64) -> Self {
         let mut t = Self::identity_matrix(4);
@@ -291,23 +304,35 @@ impl Matrix {
         self.rows += 1;
     }
 
-    pub fn mul(&mut self, other: Self) {
-        *self = other * self.clone()
+    pub fn mult_matrix(&self, other: &Self) -> Self {
+        assert_eq!(
+            self.cols, other.rows,
+            "Colms of self must equal rows of other"
+        );
+        let (rows, cols) = (self.rows, other.cols);
+        let mut data = vec![0.0; rows * cols];
+        for (i, e) in data.iter_mut().enumerate() {
+            *e = self
+                .iter_row(i / cols)
+                .zip(other.iter_col(i % cols))
+                .fold(0.0, |acc, (s, o)| acc + s * o);
+        }
+        Matrix { rows, cols, data }
     }
 
-    pub fn mult_vector(&self, vector: Vec<f64>) -> Vec<f64> {
+    pub fn mult_vector(&self, mut vector: Vec<f64>) {
         assert_eq!(
             self.rows, self.cols,
             "Multiply only with identity matrix transformation"
         );
-        let mut new = vec![1.0, 1.0, 1.0, 1.0];
+        let copy = vector.clone();
+        // let mut new = vec![1.0, 1.0, 1.0, 1.0];
         for i in 0..4 {
-            new[i] = self.get(0, i) * vector[0]
-                + self.get(1, i) * vector[1]
-                + self.get(2, i) * vector[2]
-                + self.get(3, i) * vector[3]
+            vector[i] = self.get(0, i) * copy[0]
+                + self.get(1, i) * copy[1]
+                + self.get(2, i) * copy[2]
+                + self.get(3, i) * copy[3]
         }
-        new
     }
 }
 
@@ -388,29 +413,36 @@ impl SubAssign<f64> for Matrix {
     }
 }
 
-impl Mul for Matrix {
-    type Output = Self;
+impl Mul for &Matrix {
+    type Output = Matrix;
+    fn mul(self, other: Self) -> Self::Output {
+        self.mult_matrix(other)
+    }
+}
 
-    fn mul(self, other: Self) -> Self {
-        assert_eq!(
-            self.cols, other.rows,
-            "Colms of self must equal rows of other"
-        );
-        let (rows, cols) = (self.rows, other.cols);
-        let mut data = vec![0.0; rows * cols];
-        for (i, e) in data.iter_mut().enumerate() {
-            *e = self
-                .iter_row(i / cols)
-                .zip(other.iter_col(i % cols))
-                .fold(0.0, |acc, (s, o)| acc + s * o);
-        }
-        Matrix { rows, cols, data }
+impl Mul<&Matrix> for Matrix {
+    type Output = Matrix;
+    fn mul(self, rhs: &Matrix) -> Self::Output {
+        self.mult_matrix(rhs)
+    }
+}
+
+impl Mul for Matrix {
+    type Output = Matrix;
+    fn mul(self, other: Self) -> Self::Output {
+        self.mult_matrix(&other)
     }
 }
 
 impl MulAssign for Matrix {
     fn mul_assign(&mut self, other: Self) {
         *self = other * self.clone()
+    }
+}
+
+impl MulAssign<&Matrix> for Matrix {
+    fn mul_assign(&mut self, other: &Matrix) {
+        *self = other * &self
     }
 }
 
