@@ -5,7 +5,7 @@ use std::{
     process::{Child, Command, Stdio},
 };
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub struct Pixel {
     pub red: u8,
     pub green: u8,
@@ -22,7 +22,7 @@ pub struct Canvas {
     pub upper_left_system: bool,
     pub line: Pixel,
 }
-
+// geass, kirby dance, bulbasuar, 3d shapes water bottle cylinder
 #[allow(dead_code)]
 impl Canvas {
     pub fn new(height: u32, width: u32, range: u8) -> Self {
@@ -61,16 +61,70 @@ impl Canvas {
         (y * self.width + x) as usize
     }
 
+    fn deal_with_negs(&self, x: i32, y: i32) -> (i32, i32, i32, i32) {
+        let (width, height) = (self.width as i32, self.height as i32);
+        let x = if x > width {
+            x % width
+        } else if x < 0 {
+            let r = x % width;
+            if r != 0 {
+                r + width
+            } else {
+                r
+            }
+        } else {
+            x
+        };
+
+        let y = if y > height {
+            y % height
+        } else if y < 0 {
+            let r = y % height;
+            if r != 0 {
+                r + height
+            } else {
+                r
+            }
+        } else {
+            y
+        };
+        (x, y, width, height)
+    }
+
+    pub fn get_pixel(&self, x: i32, y: i32) -> Pixel {
+        let (x, y, width, height) = self.deal_with_negs(x, y);
+        // println!("i32:{} as {}", x, x as u32);
+        if self.upper_left_system {
+            let index = self.index(x as u32, y as u32);
+            self.pixels[index]
+        } else {
+            let new_y = height - 1 - y;
+            if x >= 0 && x < width && new_y >= 0 && new_y < height {
+                let index = self.index(x as u32, new_y as u32);
+                self.pixels[index]
+            } else {
+                // should never reach this
+                return Pixel::default();
+            }
+        }
+    }
+
+    pub fn get_width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.height
+    }
+
     pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
-        // deal with negative numbers
-        let x = if x < 0 { self.width as i32 - 1 + x } else { x };
-        let y = if y < 0 { self.height as i32 - 1 + y } else { y };
+        let (x, y, width, height) = self.deal_with_negs(x, y);
         if self.upper_left_system {
             let index = self.index(x as u32, y as u32);
             self.pixels[index] = new_color
         } else {
-            let new_y = self.height as i32 - 1 - y;
-            if x >= 0 && x < self.width as i32 && new_y >= 0 && new_y < self.height as i32 {
+            let new_y = height - 1 - y;
+            if x >= 0 && x < width && new_y >= 0 && new_y < height {
                 let index = self.index(x as u32, new_y as u32);
                 self.pixels[index] = new_color
             }
@@ -117,7 +171,8 @@ impl Canvas {
     pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
         let mut file = File::create(file_name)?;
         let mut writer = BufWriter::new(&mut file);
-        writer.write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
+        writer
+            .write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
         for pixel in self.iter() {
             writer.write_all(&pixel.red.to_be_bytes())?;
             writer.write_all(&pixel.green.to_be_bytes())?;
@@ -175,8 +230,29 @@ impl Canvas {
     }
 }
 
+// ploting / drawing
 #[allow(dead_code)]
 impl Canvas {
+    pub fn fill(&mut self, x: i32, y: i32, fill_color: Pixel, boundary_color: Pixel) {
+        let current = self.get_pixel(x, y);
+        if current != boundary_color && current != fill_color {
+            self.plot(fill_color, x as i32, y as i32);
+            // assert!(x > self.width  as i32 || y > self.height as i32, "WTF");
+            self.fill(x + 1, y, fill_color, boundary_color);
+            self.fill(x, y + 1, fill_color, boundary_color);
+            self.fill(x - 1, y, fill_color, boundary_color);
+            self.fill(x, y - 1, fill_color, boundary_color);
+            // self.fill(x + 1, y, fill_color, boundary_color);
+            // self.fill(x, y + 1, fill_color, boundary_color);
+            // self.fill(x - 1, y, fill_color, boundary_color);
+            // self.fill(x, y - 1, fill_color, boundary_color);
+            // self.fill(x - 1, y - 1, fill_color, boundary_color);
+            // self.fill(x - 1, y + 1, fill_color, boundary_color);
+            // self.fill(x + 1, y - 1, fill_color, boundary_color);
+            // self.fill(x + 1, y + 1, fill_color, boundary_color);
+        }
+    }
+
     pub fn draw_lines(&mut self, matrix: &Matrix) {
         let mut iter = matrix.iter_by_point();
         while let Some(point) = iter.next() {

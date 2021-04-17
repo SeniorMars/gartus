@@ -198,6 +198,10 @@ impl Matrix {
         t
     }
 
+    pub fn rotate_point() {
+        
+    }
+
     pub fn rotate_x(theta: f64) -> Self {
         let mut t = Self::identity_matrix(4);
         let angle = theta.to_radians();
@@ -207,6 +211,7 @@ impl Matrix {
         t.set(2, 2, angle.cos());
         t
     }
+
 
     pub fn rotate_y(theta: f64) -> Self {
         let mut t = Self::identity_matrix(4);
@@ -288,6 +293,21 @@ impl Matrix {
 
     pub fn mul(&mut self, other: Self) {
         *self = other * self.clone()
+    }
+
+    pub fn mult_vector(&self, vector: Vec<f64>) -> Vec<f64> {
+        assert_eq!(
+            self.rows, self.cols,
+            "Multiply only with identity matrix transformation"
+        );
+        let mut new = vec![1.0, 1.0, 1.0, 1.0];
+        for i in 0..4 {
+            new[i] = self.get(0, i) * vector[0]
+                + self.get(1, i) * vector[1]
+                + self.get(2, i) * vector[2]
+                + self.get(3, i) * vector[3]
+        }
+        new
     }
 }
 
