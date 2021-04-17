@@ -1,6 +1,7 @@
 mod graphics;
 use graphics::display::*;
 use graphics::matrix::*;
+use graphics::utils;
 use std::io;
 
 fn main() -> io::Result<()> {
@@ -18,6 +19,7 @@ fn main() -> io::Result<()> {
         311, 448, 311, 448, 308, 388, 308, 388, 275, 358, 275, 358, 229, 323, 229, 323, 199, 285,
         199, 285, 170, 216,
     ];
+
 
     for corr in geass_corrs.chunks(2) {
         geass.add_point(corr[0] as f64, corr[1] as f64, 0.0)
@@ -68,6 +70,6 @@ fn main() -> io::Result<()> {
         // copy.display()?;
         copy.save_binary(&format!("anim/geass{:04}.ppm", i))?;
     }
-    // utils::animation("h", "h.gif")?;
+    utils::animation("geass", "geass.gif")?;
     Ok(())
 }

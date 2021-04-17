@@ -1,2 +1,8 @@
 # matrix_rs
-Matrix for graphics implmentation in rust
+Basic matrix library for computer graphics in Rust
+
+[Final Image](./gifs/geass.gif)
+
+Other works found in `./gifs/`
+
+
