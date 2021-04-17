@@ -14,5 +14,5 @@ clean:
 	cargo clean
 
 rmf:
+	rm anim/*.ppm anim/*.png
 	rm pics/*.ppm pics/*.png
-	rm anim/*.ppm

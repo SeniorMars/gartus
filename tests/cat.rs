@@ -1,5 +1,5 @@
-use matrix_rs::graphics::display::*;
 use std::io;
+use transform_rs::graphics::display::*;
 
 #[test]
 fn cat() -> io::Result<()> {
@@ -113,7 +113,6 @@ fn cat() -> io::Result<()> {
         (369) as f64,
     );
 
-
     cat.draw_line(
         cat.line,
         (538 - 150) as f64,
@@ -123,16 +122,16 @@ fn cat() -> io::Result<()> {
     );
     cat.draw_line(
         cat.line,
-        (536- 150) as f64,
+        (536 - 150) as f64,
         (325) as f64,
-        (578- 150) as f64,
+        (578 - 150) as f64,
         (307) as f64,
     );
     cat.draw_line(
         cat.line,
-        (534- 150) as f64,
+        (534 - 150) as f64,
         (360) as f64,
-        (579- 150) as f64,
+        (579 - 150) as f64,
         (369) as f64,
     );
     // cat.display()

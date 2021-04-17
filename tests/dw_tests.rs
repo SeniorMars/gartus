@@ -1,5 +1,5 @@
-use matrix_rs::graphics::matrix::*;
-use matrix_rs::graphics::display::*;
+use transform_rs::graphics::matrix::*;
+use transform_rs::graphics::display::*;
 use std::io;
 
 #[test]
