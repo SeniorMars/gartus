@@ -5,6 +5,7 @@ use std::io;
 fn cat() -> io::Result<()> {
     let mut cat = Canvas::new(610, 610, 255);
     let mut head: Vec<(i32, i32)> = Vec::new();
+    cat.upper_left_system = true;
     cat.set_line_color(255, 255, 255);
 
     head.push((350 - 150, 222));
