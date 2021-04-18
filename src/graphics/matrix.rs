@@ -158,14 +158,20 @@ impl Matrix {
         self.add_point(x1, y1, z1);
     }
 
-    pub fn append_row(&mut self, row: &mut Vec<f64>) {
+    pub fn add_edge_vec(&mut self, edge: Vec<f64>) {
+        assert_eq!(6, edge.len());
+        self.add_point(edge[0], edge[1], edge[2]);
+        self.add_point(edge[3], edge[4], edge[5]);
+    }
+
+    pub fn append_point(&mut self, point: &mut Vec<f64>) {
         assert_eq!(
             self.cols,
-            row.len() + 1,
-            "self.cols and edge len are not equal"
+            point.len() + 1,
+            "self.cols and new row's len are not equal"
         );
-        row.push(1.0);
-        self.data.append(row);
+        point.push(1.0);
+        self.data.append(point);
         self.rows += 1;
     }
 
@@ -241,8 +247,8 @@ impl AddAssign<[f64; 3]> for Matrix {
 }
 
 impl AddAssign<Vec<f64>> for Matrix {
-    fn add_assign(&mut self, mut other: Vec<f64>) {
-        self.append_row(&mut other)
+    fn add_assign(&mut self, other: Vec<f64>) {
+        self.add_edge_vec(other)
     }
 }
 

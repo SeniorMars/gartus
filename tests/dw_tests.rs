@@ -1,6 +1,14 @@
 use transform_rs::graphics::matrix::*;
 use transform_rs::graphics::display::*;
+use transform_rs::parser::Parser;
 use std::io;
+
+#[test]
+fn script_test() {
+    let mut dw = Parser::new("./script", 500, 500, Pixel::new(0, 255, 0));
+    dw.parse_file()
+}
+
 
 #[test]
 fn matrix_test() {
