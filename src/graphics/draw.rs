@@ -17,8 +17,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// let background_color = Pixel::new(0, 0, 0);
@@ -58,8 +58,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// let background_color = Pixel::new(0, 0, 0);
@@ -97,9 +97,9 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::graphics::matrix::Matrix;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.set_line_pixel(color);
@@ -131,9 +131,9 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::graphics::matrix::Matrix;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.set_line_pixel(color);
@@ -171,8 +171,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)

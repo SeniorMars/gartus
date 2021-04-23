@@ -29,7 +29,7 @@ impl Pixel {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Pixel;
     /// let color = Pixel::new(0, 64, 255);
     /// ```
     pub fn new(red: u8, green: u8, blue: u8) -> Self {
@@ -70,7 +70,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// ```
     pub fn new(height: u32, width: u32, range: u8) -> Self {
@@ -100,8 +100,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
     /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// ```
@@ -123,7 +123,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// let width = image.get_width();
     /// ```
@@ -137,7 +137,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// let height = image.get_height();
     /// ```
@@ -155,8 +155,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let mut image = Canvas::new(500, 500, 255);
     /// let new_color = Pixel::new(12, 20, 30);
     /// image.set_line_pixel(new_color);
@@ -177,7 +177,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let mut image = Canvas::new(500, 500, 255);
     /// image.set_line_color(55, 95, 100);
     /// ```
@@ -243,8 +243,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let image = Canvas::new(500, 500, 255);
     /// let color = image.get_pixel(250, 250);
     /// ```
@@ -278,8 +278,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let mut image = Canvas::new(500, 500, 255);
     /// let color = Pixel::new(1, 1, 1);
     /// image.plot(color, 100, 100);
@@ -304,8 +304,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
     /// let mut image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// image.clear_canvas()
@@ -326,8 +326,8 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
-    /// use curves_rs::graphics::display::Pixel;
+    /// use crate::graphics::display::Canvas;
+    /// use crate::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
     /// let mut image = Canvas::new(500, 500, 255);
     /// image.fill_color(background_color)
@@ -353,7 +353,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
@@ -379,7 +379,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
@@ -407,7 +407,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// image.save_extension("pics/test.png").expect("Could not save file")
     /// ```
@@ -431,7 +431,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Canvas;
+    /// use crate::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
     /// image.display().expect("Could not display image")
     /// ```

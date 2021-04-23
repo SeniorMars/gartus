@@ -1,5 +1,5 @@
 use std::io;
-use curves_rs::graphics::display::*;
+use crate::graphics::display::*;
 
 #[test]
 fn cat() -> io::Result<()> {

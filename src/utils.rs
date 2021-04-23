@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 ///
 /// Basic usage:
 /// ```
-/// use curves_rs::utils;
+/// use crate::utils;
 /// utils::animation("cool_picture", "final.gif");
 /// ```
 pub fn animation(file_name_prefix: &str, output: &str) {
@@ -40,7 +40,7 @@ pub fn animation(file_name_prefix: &str, output: &str) {
 ///
 /// Basic usage:
 /// ```
-/// use curves_rs::utils;
+/// use crate::utils;
 /// utils::view_animation("final.gif");
 /// ```
 pub fn view_animation(file_name: &str) {

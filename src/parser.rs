@@ -65,8 +65,8 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::parser::Parser;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, purplish);
     /// ```
@@ -96,8 +96,8 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::parser::Parser;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
     /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);
@@ -118,8 +118,8 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use curves_rs::graphics::display::Pixel;
-    /// use curves_rs::parser::Parser;
+    /// use crate::graphics::display::Pixel;
+    /// use crate::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
     /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);
