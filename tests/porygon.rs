@@ -1,6 +1,6 @@
-use crate::graphics::display::*;
-use crate::graphics::matrix::*;
-use crate::utils;
+use curves_rs::graphics::display::*;
+use curves_rs::graphics::matrix::*;
+use curves_rs::utils;
 
 #[test]
 pub fn make_pory() {

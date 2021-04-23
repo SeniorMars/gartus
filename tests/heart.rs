@@ -1,5 +1,5 @@
-use crate::graphics::display::*;
-use crate::graphics::matrix::*;
+use curves_rs::graphics::display::*;
+use curves_rs::graphics::matrix::*;
 
 fn main() {
     let mut heart = Canvas::new(610, 610, 255);
