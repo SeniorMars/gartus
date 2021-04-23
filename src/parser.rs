@@ -10,7 +10,13 @@ use std::fs;
 /// The file follows the following format:
 ///      Every command is a single character that takes up a line
 ///      Any command that requires arguments must have those arguments
-///      in the second line. The commands are as follows: 
+///      in the second line. The commands are as follows:
+///          circle: add a circle to the edge matrix -
+///                takes 4 arguments (cx, cy, cz, r)
+///          hermite: add a hermite curve to the edge matrix -
+///                takes 8 arguments (x0, y0, x1, y1, rx0, ry0, rx1, ry1)
+///          bezier: add a bezier curve to the edge matrix -
+///                takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
 ///          line: add a line to the edge matrix -
 ///                takes 6 arguemnts (x0, y0, z0, x1, y1, z1)
 ///          ident: set the transform matrix to the identity matrix -
@@ -23,7 +29,7 @@ use std::fs;
 ///          rotate: create a rotation matrix,
 ///                  then multiply the transform matrix by the rotation matrix -
 ///                  takes 2 arguments (axis, theta) axis should be x y or z
-///          reflect: create a reflection matrix, 
+///          reflect: create a reflection matrix,
 ///                  then multiply the transform matrix by the rotation matrix -
 ///                  takes a argument (axis) - should be x y or z
 ///          apply: apply the current transformation matrix to the edge matrix
@@ -50,7 +56,7 @@ pub struct Parser {
 }
 
 #[allow(dead_code)]
-impl Parser{
+impl Parser {
     /// Returns a parser that can parse through `file_name`
     ///
     /// # Arguments
@@ -65,8 +71,8 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use crate::graphics::display::Pixel;
-    /// use crate::parser::Parser;
+    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, purplish);
     /// ```
@@ -96,13 +102,20 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use crate::graphics::display::Pixel;
-    /// use crate::parser::Parser;
+    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
     /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);
     /// ```
-    pub fn new_with_bg(file_name: &str, width: u32, height: u32, range: u8, color: Pixel, bg: Pixel) -> Self {
+    pub fn new_with_bg(
+        file_name: &str,
+        width: u32,
+        height: u32,
+        range: u8,
+        color: Pixel,
+        bg: Pixel,
+    ) -> Self {
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(0, 4, Vec::new()),
@@ -118,8 +131,8 @@ impl Parser{
     ///
     /// Basic usage:
     /// ```
-    /// use crate::graphics::display::Pixel;
-    /// use crate::parser::Parser;
+    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
     /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);

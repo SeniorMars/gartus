@@ -5,7 +5,7 @@ use std::io;
 
 #[test]
 fn script_test() {
-    let mut dw = Parser::new("./script", 500, 500, 255, Pixel::new(0, 255, 0));
+    let mut dw = Parser::new("./tests/script_transform", 500, 500, 255, Pixel::new(0, 255, 0));
     dw.parse_file()
 }
 

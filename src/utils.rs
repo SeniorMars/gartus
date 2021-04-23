@@ -1,7 +1,4 @@
 use std::process::{Command, Stdio};
-
-// TODO: make a better version
-#[allow(dead_code)]
 /// Returns a new animation given a file name prefix.
 ///
 /// # Arguments
@@ -13,8 +10,8 @@ use std::process::{Command, Stdio};
 ///
 /// Basic usage:
 /// ```
-/// use crate::utils;
-/// utils::animation("cool_picture", "final.gif");
+/// use crate::curves_rs::utils;
+/// utils::animation("cool_picture", "gifs/final.gif");
 /// ```
 pub fn animation(file_name_prefix: &str, output: &str) {
     println!("Making a new animation: {}", output);
@@ -29,7 +26,6 @@ pub fn animation(file_name_prefix: &str, output: &str) {
     let _result = child.wait().expect("Could not make animation");
 }
 
-#[allow(dead_code)]
 /// Open's a given animation using imagemagick's `animate`.
 ///
 /// # Arguments
@@ -40,7 +36,7 @@ pub fn animation(file_name_prefix: &str, output: &str) {
 ///
 /// Basic usage:
 /// ```
-/// use crate::utils;
+/// use crate::curves_rs::utils;
 /// utils::view_animation("final.gif");
 /// ```
 pub fn view_animation(file_name: &str) {

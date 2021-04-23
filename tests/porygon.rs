@@ -45,10 +45,10 @@ pub fn make_pory() {
     }
     dilate *= matrix;
     translate *= dilate;
-    let filename = "porygon";
     porygon.set_line_pixel(outline);
-    porygon.draw_lines_for_animation(&translate, filename);
+    porygon.draw_lines(&translate);
     porygon.draw_line(dark_blue, 221.5, 325.0, 168.5, 280.0);
+    let filename = "porygon";
     let fill_colors: Vec<Pixel> = vec![
         light_blue, dark_blue, light_blue, light_blue, light_blue, light_blue, dark_red, dark_blue,
         dark_blue, dark_blue, dark_blue, dark_blue, light_blue, light_blue, light_blue, light_blue,
@@ -62,10 +62,10 @@ pub fn make_pory() {
         150, 235, 259, 177, 242,
     ];
     for (vector, color) in fill_points.chunks(2).zip(fill_colors) {
-        porygon.fill_with_animation(vector[0], vector[1], color, outline, filename)
+        porygon.fill(vector[0], vector[1], color, outline)
     }
     porygon
-        .save_binary(&format!("anim/{}{:08}.ppm", filename, 100000))
+        .save_binary(&format!("anim/{}{:08}.ppm", filename, 139))
         .expect("Could not save to file");
-    utils::animation("porygon", "porygon.gif");
+    utils::animation(filename, &format!("gifs/{}.gif", filename));
 }
