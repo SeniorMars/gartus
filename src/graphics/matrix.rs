@@ -56,7 +56,7 @@ impl Matrix {
     /// let num = matrix.get_num_points();
     /// ```
     pub fn get_num_points(&self) -> usize {
-        self.rows
+        self.cols
     }
 
     /// Returns a new N by N identity [Matrix].
@@ -134,7 +134,7 @@ impl Matrix {
     }
 
     fn index(&self, row: usize, col: usize) -> usize {
-        row * self.cols + col
+        col * self.rows + row
     }
 
     /// Fills every element of self.data with a specific float.
@@ -224,6 +224,16 @@ impl Matrix {
     }
 }
 
+impl IntoIterator for Matrix {
+    type Item = f64;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
 // Iterator stuff
 #[allow(dead_code)]
 impl Matrix {
@@ -234,7 +244,6 @@ impl Matrix {
     //     self.iter_by_point_mut()
     //         .for_each(|point: &mut [f64]| point.iter_mut().for_each(|e| *e = function(*e)))
     // }
-
     // pub fn from_iter(&self) -> impl IntoIterator<Item = &[f64]> {
     //     self.data.chunks_exact(self.cols)
     // }
@@ -261,14 +270,27 @@ impl Matrix {
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_row(0);
     /// ```
-    pub fn iter_row(&self, r: usize) -> impl Iterator<Item = &f64> + '_ {
-        let start = r * self.cols;
-        self.data[start..self.cols + start].iter()
+    pub fn iter_row(&self, row: usize) -> impl Iterator<Item = &f64> + '_ {
+        self.iter().skip(row).step_by(self.rows)
     }
 
-    fn iter_row_mut(&mut self, r: usize) -> impl Iterator<Item = &mut f64> + '_ {
-        let start = r * self.cols;
-        self.data[start..self.cols + start].iter_mut()
+    /// Returns a mutable iterator that iterates over a specific row.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The index of the row to be interated over
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_row_mut(0);
+    /// ```
+    pub fn iter_row_mut(&mut self, row: usize) -> impl Iterator<Item = &mut f64> + '_ {
+        let r = self.rows;
+        self.iter_mut().skip(row).step_by(r)
     }
 
     /// Returns a iterator that iterates over a specific column.
@@ -286,7 +308,8 @@ impl Matrix {
     /// let iter = ident.iter_col(0);
     /// ```
     pub fn iter_col(&self, column: usize) -> impl Iterator<Item = &f64> + '_ {
-        self.iter().skip(column).step_by(self.cols)
+        let start = column * self.rows;
+        self.data[start..self.rows + start].iter()
     }
 
     /// Returns a mutable iterator that iterates over a specific column.
@@ -301,11 +324,11 @@ impl Matrix {
     /// ```
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
-    /// let mut iter = ident.iter_col(0);
+    /// let iter = ident.iter_col_mut(0);
     /// ```
     pub fn iter_col_mut(&mut self, column: usize) -> impl Iterator<Item = &mut f64> + '_ {
-        let col = self.cols;
-        self.iter_mut().skip(column).step_by(col)
+        let start = column * self.rows;
+        self.data[start..self.rows + start].iter_mut()
     }
 
     /// Returns a iterator that iterates over the [Matrix]'s points.
@@ -319,7 +342,7 @@ impl Matrix {
     /// let iter = ident.iter_by_point();
     /// ```
     pub fn iter_by_point(&self) -> slice::ChunksExact<'_, f64> {
-        self.data.chunks_exact(self.cols)
+        self.data.chunks_exact(self.rows)
     }
 
     /// Returns a mutable iterator that iterates over the [Matrix]'s points.
@@ -333,7 +356,7 @@ impl Matrix {
     /// let mut iter = ident.iter_by_point_mut();
     /// ```
     pub fn iter_by_point_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
-        self.data.chunks_exact_mut(self.cols)
+        self.data.chunks_exact_mut(self.rows)
     }
 }
 
@@ -370,7 +393,7 @@ impl Matrix {
         self.data.push(y);
         self.data.push(z);
         self.data.push(1.0);
-        self.rows += 1;
+        self.cols += 1;
     }
 
     /// Appends a point in the form of a vector to the edge [Matrix].
@@ -396,7 +419,7 @@ impl Matrix {
         );
         point.push(1.0);
         self.data.append(point);
-        self.rows += 1;
+        self.cols += 1;
     }
 
     /// Adds a new edge to an edge [Matrix].
@@ -445,7 +468,30 @@ impl Matrix {
         self.add_point(edge[3], edge[4], edge[5]);
     }
 
-    /// Returns a the result of multiplying self by another [Matrix].
+    /// Adds other's data to Self
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - A reference to a Matrix with the new dataset
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// let mut ident1 = Matrix::identity_matrix(4);
+    /// let result = ident1.add_dataset(&Matrix::identity_matrix(4));
+    /// ```
+    pub fn add_dataset(&mut self, other: &Self) {
+        assert!(
+            self.rows == other.rows,
+            "To add a dataset Matices must have the same number of rows"
+        );
+        self.data.extend(&other.data);
+        self.cols += other.cols;
+    }
+
+    /// Returns the result of multiplying self by another [Matrix].
     /// Self's columns must be the same size as the other's Matrix's rwos.
     ///
     /// # Arguments
@@ -462,15 +508,15 @@ impl Matrix {
     /// ```
     pub fn mult_matrix(&self, other: &Self) -> Self {
         assert_eq!(
-            self.cols, other.rows,
-            "Colms of self must equal rows of other"
+            self.rows, other.cols,
+            "rows of self must equal cols of other"
         );
-        let (rows, cols) = (self.rows, other.cols);
+        let (rows, cols) = (other.rows, self.cols);
         let mut data = vec![0.0; rows * cols];
         for (i, e) in data.iter_mut().enumerate() {
             *e = self
-                .iter_row(i / cols)
-                .zip(other.iter_col(i % cols))
+                .iter_col(i / rows)
+                .zip(other.iter_row(i % rows))
                 .fold(0.0, |acc, (s, o)| acc + s * o);
         }
         Matrix { rows, cols, data }
@@ -523,13 +569,24 @@ impl Add for Matrix {
     }
 }
 
-impl AddAssign for Matrix {
+impl AddAssign<Self> for Matrix {
     fn add_assign(&mut self, other: Self) {
         assert!(
             self.cols == other.cols && self.rows == other.rows,
             "To add Matices must be the same size"
         );
         self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a += b)
+    }
+}
+
+impl AddAssign<&Self> for Matrix {
+    fn add_assign(&mut self, other: &Self) {
+        assert!(
+            self.cols == other.cols,
+            "To add Matices must be the same size"
+        );
+        self.data.extend(&other.data);
+        self.cols += other.cols;
     }
 }
 
@@ -590,10 +647,10 @@ impl Mul for &Matrix {
     }
 }
 
-impl Mul<&Matrix> for Matrix {
+impl Mul<&Self> for Matrix {
     type Output = Matrix;
-    fn mul(self, rhs: &Matrix) -> Self::Output {
-        self.mult_matrix(rhs)
+    fn mul(self, other: &Matrix) -> Self::Output {
+        self.mult_matrix(other)
     }
 }
 
@@ -610,7 +667,7 @@ impl MulAssign for Matrix {
     }
 }
 
-impl MulAssign<&Matrix> for Matrix {
+impl MulAssign<&Self> for Matrix {
     fn mul_assign(&mut self, other: &Matrix) {
         *self = other * &self
     }
@@ -641,9 +698,9 @@ impl DivAssign<f64> for Matrix {
 
 impl fmt::Display for Matrix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for col in 0..self.cols {
-            for row in 0..self.rows {
-                write!(f, "{}\t", self.get(row, col))?;
+        for row in 0..self.rows {
+            for col in 0..self.cols {
+                write!(f, "{:.6}\t", self.get(row, col))?;
             }
             writeln!(f)?;
         }
@@ -656,6 +713,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // #[should_panic]
     fn new_matrix() {
         let nums: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
         let edge: Matrix = Matrix::new(3, 3, nums);
@@ -672,7 +730,7 @@ mod tests {
     fn rows_and_cols() {
         let nums: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
         let edge: Matrix = Matrix::new(3, 3, nums.clone());
-        let row_one: Vec<f64> = edge.iter_row(1).copied().collect();
+        let row_one: Vec<f64> = edge.iter_col(1).copied().collect();
         let mut points = edge.iter_by_point();
         println!("{:?}", points.next());
         println!("{:?}", points.next());
@@ -683,7 +741,7 @@ mod tests {
     fn swap() {
         let mut ident = Matrix::identity_matrix(3);
         ident.swap_rows(0, 2);
-        // println!("ident:\n{}", ident);
+        println!("ident:\n{}", ident);
         // println!("test:\n{}", test);
         assert_eq!(
             ident,
@@ -744,17 +802,18 @@ mod tests {
 
     #[test]
     // #[should_panic]
+    #[allow(clippy::many_single_char_names)]
     fn mul_for_now() {
-        let a = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
-        let b = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
+        let a = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
+        let b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
         let mut c = Matrix::new(
-            3,
             4,
+            3,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
-        let d = Matrix::new(
-            3,
+        let d: Matrix = Matrix::new(
             4,
+            3,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
         // println!("{}", c);
@@ -763,5 +822,12 @@ mod tests {
         let e = b * d;
         // println!("{}", c);
         assert_eq!(c, e)
+    }
+
+    #[test]
+    fn iter_test() {
+        for i in Matrix::identity_matrix(4).into_iter() {
+            println!("{}", i);
+        }
     }
 }

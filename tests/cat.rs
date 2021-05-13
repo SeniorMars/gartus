@@ -1,7 +1,8 @@
-use std::io;
 use curves_rs::graphics::display::*;
+use std::io;
 
 #[test]
+#[allow(clippy::vec_init_then_push)]
 fn cat() -> io::Result<()> {
     let mut cat = Canvas::new(610, 610, 255);
     let mut head: Vec<(i32, i32)> = Vec::new();
@@ -94,45 +95,45 @@ fn cat() -> io::Result<()> {
     cat.draw_line(
         cat.line,
         (371 - 150) as f64,
-        (341) as f64,
+        341_f64,
         (317 - 150) as f64,
-        (337) as f64,
+        337_f64,
     );
     cat.draw_line(
         cat.line,
         (370 - 150) as f64,
-        (325) as f64,
+        325_f64,
         (321 - 150) as f64,
-        (307) as f64,
+        307_f64,
     );
     cat.draw_line(
         cat.line,
         (375 - 150) as f64,
-        (360) as f64,
+        360_f64,
         (327 - 150) as f64,
-        (369) as f64,
+        369_f64,
     );
 
     cat.draw_line(
         cat.line,
         (538 - 150) as f64,
-        (341) as f64,
+        341_f64,
         (585 - 150) as f64,
-        (337) as f64,
+        337_f64,
     );
     cat.draw_line(
         cat.line,
         (536 - 150) as f64,
-        (325) as f64,
+        325_f64,
         (578 - 150) as f64,
-        (307) as f64,
+        307_f64,
     );
     cat.draw_line(
         cat.line,
         (534 - 150) as f64,
-        (360) as f64,
+        360_f64,
         (579 - 150) as f64,
-        (369) as f64,
+        369_f64,
     );
     // cat.display()
     // cat.save_binary("binary.ppm")?;

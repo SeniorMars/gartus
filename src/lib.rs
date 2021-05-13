@@ -1,7 +1,7 @@
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 //! An amateur computer graphics engine made in Rust.
 //!
-//! Provides an "art canvas" to work with drawings, a mini matrix library 
+//! Provides an "art canvas" to work with drawings, a mini matrix library
 //! with several 3D transformations, and a parser to read scripts.
 //! This library is still a work in progress project. Be warn.
 
@@ -12,6 +12,6 @@ pub mod graphics;
 /// a detailed specification. More information found in the module.
 pub mod parser;
 /// This module provides utilities that might be needed to use more
-/// advance features that are not fully integrated into parser 
+/// advance features that are not fully integrated into parser
 /// or graphics modules.
 pub mod utils;

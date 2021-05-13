@@ -46,7 +46,7 @@ pub struct Canvas {
     width: u32,
     /// The maximum depth of the canvas
     range: u8,
-    /// The "body" of the canvas that holds all the pixels that will be displayed
+    /// The "body" of the canvas that holds all the [Pixel]s that will be displayed
     pixels: Vec<Pixel>,
     /// A counter that will be used when saving images for animations
     pub(in crate::graphics) anim_index: u32,
@@ -311,9 +311,7 @@ impl Canvas {
     /// image.clear_canvas()
     /// ```
     pub fn clear_canvas(&mut self) {
-        for i in self.iter_mut() {
-            *i = Pixel::default()
-        }
+        self.iter_mut().for_each(|i| *i = Pixel::default());
     }
 
     /// Fills the entire [Canvas] with one [Pixel]
@@ -333,11 +331,27 @@ impl Canvas {
     /// image.fill_color(background_color)
     /// ```
     pub fn fill_color(&mut self, bg: Pixel) {
-        for i in self.iter_mut() {
-            *i = bg
-        }
+        self.iter_mut().for_each(|i| *i = bg);
     }
 }
+
+impl IntoIterator for Canvas {
+    type Item = Pixel;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.pixels.into_iter()
+    }
+}
+
+// impl Iterator for Canvas {
+//     type Item = Pixel;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.pixels.iter()
+//     }
+// }
 
 // saving
 #[allow(dead_code)]
@@ -361,11 +375,11 @@ impl Canvas {
         let mut file = File::create(file_name)?;
         let mut writer = BufWriter::new(&mut file);
         writeln!(writer, "P3 {} {} {}", self.height, self.width, self.range)?;
-        for pixel in self.iter() {
-            write!(writer, "{} {} {} ", pixel.red, pixel.green, pixel.blue)?;
-        }
-        writer.flush()?;
-        Ok(())
+        self.iter().for_each(|pixel| {
+            write!(writer, "{} {} {} ", pixel.red, pixel.green, pixel.blue)
+                .expect("Could not write into file")
+        });
+        writer.flush()
     }
 
     /// Saves the current state of an image as a binary ppm file.
@@ -388,13 +402,18 @@ impl Canvas {
         let mut writer = BufWriter::new(&mut file);
         writer
             .write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
-        for pixel in self.iter() {
-            writer.write_all(&pixel.red.to_be_bytes())?;
-            writer.write_all(&pixel.green.to_be_bytes())?;
-            writer.write_all(&pixel.blue.to_be_bytes())?;
-        }
-        writer.flush()?;
-        Ok(())
+        self.iter().for_each(|pixel| {
+            writer
+                .write_all(&pixel.red.to_be_bytes())
+                .expect("Could not write as binary");
+            writer
+                .write_all(&pixel.green.to_be_bytes())
+                .expect("Could not write as binary");
+            writer
+                .write_all(&pixel.blue.to_be_bytes())
+                .expect("Could not write as binary");
+        });
+        writer.flush()
     }
 
     /// Saves the current state of an image to any extension.
@@ -413,9 +432,9 @@ impl Canvas {
     /// ```
     pub fn save_extension(&self, file_name: &str) -> io::Result<()> {
         let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
-        for pixel in self.iter() {
+        self.iter().for_each(|pixel| {
             content.push_str(&format!("{} {} {} ", &pixel.red, &pixel.green, &pixel.blue))
-        }
+        });
         let mut child = Command::new("convert")
             .arg("-")
             .arg(file_name)
@@ -437,9 +456,9 @@ impl Canvas {
     /// ```
     pub fn display(&self) -> io::Result<()> {
         let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
-        for pixel in self.iter() {
+        self.iter().for_each(|pixel| {
             content.push_str(&format!("{} {} {} ", &pixel.red, &pixel.green, &pixel.blue))
-        }
+        });
         let mut child = Command::new("display")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

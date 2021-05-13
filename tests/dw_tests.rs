@@ -1,19 +1,24 @@
-use curves_rs::graphics::matrix::*;
 use curves_rs::graphics::display::*;
+use curves_rs::graphics::matrix::*;
 use curves_rs::parser::Parser;
 use std::io;
 
 #[test]
 fn script_test() {
-    let mut dw = Parser::new("./tests/script_transform", 500, 500, 255, Pixel::new(0, 255, 0));
+    let mut dw = Parser::new(
+        "./tests/script_transform",
+        500,
+        500,
+        255,
+        Pixel::new(0, 255, 0),
+    );
     dw.parse_file()
 }
 
-
 #[test]
 fn matrix_test() {
-    let mut edge_matrix = Matrix::new(0, 4, Vec::with_capacity(4 * 2));
-    println!("{}", edge_matrix);
+    let mut edge_matrix = Matrix::new(4, 0, Vec::with_capacity(4 * 2));
+    // println!("{}", edge_matrix);
     println!("Testing add_edge. Adding (1, 2, 3), (4, 5, 6) m2");
     edge_matrix.add_edge(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
     println!("{}", edge_matrix);
@@ -33,14 +38,13 @@ fn matrix_test() {
     );
     println!("{}", m1);
     println!("Testing Matrix mult. m1 * m2 =");
-    m1 *= edge_matrix.clone();
+    m1 *= edge_matrix;
     println!("{}", m1);
     assert_eq!(
         m1,
-        Matrix::new(2, 4, vec![40.0, 47.0, 54.0, 7.0, 76.0, 92.0, 108.0, 16.0])
+        Matrix::new(4, 2, vec![40.0, 47.0, 54.0, 7.0, 76.0, 92.0, 108.0, 16.0])
     )
 }
-
 
 #[test]
 fn dw_line_test() -> io::Result<()> {
@@ -79,7 +83,7 @@ fn dw_line_test() -> io::Result<()> {
     // saving
     // screen.animation("test")
     // screen.display()?;
-    screen.save_binary("./pics/binary.ppm")?;
-    screen.save_ascii("./pics/ascii.ppm")?;
+    screen.save_binary("./pics/binary2.ppm")?;
+    screen.save_ascii("./pics/ascii2.ppm")?;
     screen.save_extension("./pics/img.png")
 }

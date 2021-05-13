@@ -22,7 +22,8 @@ pub fn animation(file_name_prefix: &str, output: &str) {
         .arg(output)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn().unwrap();
+        .spawn()
+        .unwrap();
     let _result = child.wait().expect("Could not make animation");
 }
 
@@ -46,5 +47,6 @@ pub fn view_animation(file_name: &str) {
         .arg(&file_name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn().expect("Could not view animation");
+        .spawn()
+        .expect("Could not view animation");
 }

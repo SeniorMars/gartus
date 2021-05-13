@@ -1,20 +1,12 @@
 use curves_rs::graphics::display::*;
 use curves_rs::graphics::matrix::*;
-use curves_rs::utils;
 
 #[test]
 pub fn make_pory() {
     let outline = Pixel::new(235, 219, 178);
-    let white = Pixel::new(243, 244, 248);
     let purplish = Pixel::new(17, 46, 81);
-    let light_red = Pixel::new(255, 76, 80);
-    let dark_red = Pixel::new(191, 70, 61);
-    let dark_blue = Pixel::new(69, 175, 214);
-    let light_blue = Pixel::new(92, 216, 252);
     let mut porygon = Canvas::new_with_bg(512, 512, 255, purplish);
-    let mut matrix = Matrix::new(0, 4, Vec::new());
-    let mut dilate = Matrix::scale(0.5, 0.5, 0.5);
-    let mut translate = Matrix::translate(0.0, 45.0, 0.0);
+    let mut matrix = Matrix::new(4, 0, Vec::new());
     porygon.upper_left_system = true;
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
@@ -40,32 +32,14 @@ pub fn make_pory() {
         423, 607, 280, 517, 280, 517, 221, 520, 221, 520, 241, 480, 241, 480, 221, 520, 221, 520,
         354, 611, 354, 611, 423, 607, 423, 607, 451, 575, 451, 575, 443, 560, 443, 560, 337, 470,
     ];
-    for corr in corrs.chunks(2) {
+
+    for corr in corrs.chunks_exact(2) {
         matrix.add_point(corr[0] as f64, corr[1] as f64, 0.0);
     }
-    dilate *= matrix;
-    translate *= dilate;
+
     porygon.set_line_pixel(outline);
-    porygon.draw_lines(&translate);
-    porygon.draw_line(dark_blue, 221.5, 325.0, 168.5, 280.0);
-    let filename = "porygon";
-    let fill_colors: Vec<Pixel> = vec![
-        light_blue, dark_blue, light_blue, light_blue, light_blue, light_blue, dark_red, dark_blue,
-        dark_blue, dark_blue, dark_blue, dark_blue, light_blue, light_blue, light_blue, light_blue,
-        light_red, dark_blue, dark_blue, light_blue, dark_red, dark_red, light_red, light_red,
-        dark_blue, dark_blue, light_blue, light_blue, white,
-    ];
-    let fill_points = [
-        284, 365, 336, 330, 301, 329, 306, 297, 332, 290, 349, 295, 269, 304, 227, 309, 172, 307,
-        198, 313, 160, 330, 146, 284, 128, 293, 146, 284, 210, 257, 254, 261, 299, 263, 374, 246,
-        405, 194, 353, 237, 245, 214, 210, 183, 275, 153, 202, 156, 206, 227, 189, 207, 164, 214,
-        150, 235, 259, 177, 242,
-    ];
-    for (vector, color) in fill_points.chunks(2).zip(fill_colors) {
-        porygon.fill(vector[0], vector[1], color, outline)
-    }
-    porygon
-        .save_binary(&format!("anim/{}{:08}.ppm", filename, 139))
-        .expect("Could not save to file");
-    utils::animation(filename, &format!("gifs/{}.gif", filename));
+    porygon.draw_lines(&matrix.mult_matrix(
+        &Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0)),
+    ));
+    porygon.display().expect("could not display")
 }
