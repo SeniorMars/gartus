@@ -1,5 +1,6 @@
 use curves_rs::graphics::display::*;
 use curves_rs::graphics::matrix::*;
+// use curves_rs::utils;
 
 #[test]
 // #[should_panic]
@@ -23,17 +24,19 @@ fn geass() {
         geass.add_point(corr[0] as f64, corr[1] as f64, 0.0)
     }
 
-    // let mut rfp1p1 = Matrix::translate(-400.0, -400.0, 0.0);
-    // let mut reflect = Matrix::reflect_xz();
-    // let mut half = Matrix::reflect_45();
-    // let mut last_half = Matrix::reflect_yz();
-    // let redish = Pixel::new(191, 70, 61);
+    let mut base = Matrix::translate(-400.0, -400.0, 0.0);
+    let mut reflect = Matrix::reflect_xz();
+    let mut half = Matrix::reflect_45();
+    let mut last_half = Matrix::reflect_yz();
 
-    // rfp1p1 *= geass.clone();
-    // reflect *= rfp1p1.clone();
-    // last_half *= half.clone();
-    // half *= rfp1p1.clone();
-    // last_half *= rfp1p1.clone();
+    base *= geass.clone();
+    reflect *= base.clone();
+    last_half *= half.clone();
+    last_half *= base.clone();
+    half *= base.clone();
+    base.add_dataset(&reflect);
+    base.add_dataset(&half);
+    base.add_dataset(&last_half);
 
     let white = Pixel::new(255, 255, 255);
     img.set_line_pixel(white);
@@ -43,6 +46,17 @@ fn geass() {
             .mult_matrix(&Matrix::translate(360.0, 370.0, 0.0)),
     );
     img.fill(406, 413, white, white);
-    img.set_line_pixel(redish);
-    img.display().expect("error")
+    img.set_line_pixel(Pixel::new(191, 70, 61));
+    for i in 0..180 {
+        let mut copy = img.clone();
+        copy.draw_lines(&base.mult_matrix(
+            &Matrix::rotate_y(i as f64).mult_matrix(&Matrix::translate(400.0, 400.0, 0.0)),
+        ));
+        // copy.save_extension(&format!("anim/geass{:04}.png", i))
+        //     .expect("Could not save image")
+    }
+    img.display().expect("Could not display image")
+    // let file_name = "./geass.gif";
+    // utils::animation("geass", file_name);
+    // utils::view_animation(file_name)
 }

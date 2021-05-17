@@ -43,7 +43,8 @@ pub fn animation(file_name_prefix: &str, output: &str) {
 pub fn view_animation(file_name: &str) {
     // animate doesn't play nicely
     println!("Playing animation: {}", &file_name);
-    Command::new("animate")
+    // Command::new("animate")
+    Command::new("sxiv")
         .arg(&file_name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

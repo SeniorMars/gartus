@@ -5,6 +5,7 @@ use std::io;
 #[allow(clippy::vec_init_then_push)]
 fn cat() -> io::Result<()> {
     let mut cat = Canvas::new(610, 610, 255);
+
     let mut head: Vec<(i32, i32)> = Vec::new();
     cat.upper_left_system = true;
     cat.set_line_color(255, 255, 255);
@@ -53,6 +54,7 @@ fn cat() -> io::Result<()> {
             )
         }
     }
+
     let mut eye_right: Vec<(i32, i32)> = Vec::new();
     eye_right.push((466 - 150, 320));
     eye_right.push((518 - 150, 308));
@@ -73,6 +75,7 @@ fn cat() -> io::Result<()> {
             )
         }
     }
+
     let mut mouth: Vec<(i32, i32)> = Vec::new();
     mouth.push((441 - 150, 372));
     mouth.push((461 - 150, 372));
