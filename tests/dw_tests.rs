@@ -10,7 +10,7 @@ fn script_test() {
         500,
         500,
         255,
-        Pixel::new(0, 255, 0),
+        &Pixel::new(0, 255, 0),
     );
     dw.parse_file()
 }

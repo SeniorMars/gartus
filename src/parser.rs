@@ -77,15 +77,15 @@ impl Parser {
     /// use crate::curves_rs::graphics::display::Pixel;
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
-    /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, purplish);
+    /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
-    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: Pixel) -> Self {
+    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &Pixel) -> Self {
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
             canvas: Canvas::new(width, height, range),
-            color,
+            color: *color,
         }
     }
 
@@ -109,22 +109,22 @@ impl Parser {
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
-    /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);
+    /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// ```
     pub fn new_with_bg(
         file_name: &str,
         width: u32,
         height: u32,
         range: u8,
-        color: Pixel,
-        bg: Pixel,
+        color: &Pixel,
+        bg: &Pixel,
     ) -> Self {
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
             canvas: Canvas::new_with_bg(width, height, range, bg),
-            color,
+            color: *color,
         }
     }
 
@@ -138,7 +138,7 @@ impl Parser {
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
-    /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, purplish, outline);
+    /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// porygon.parse_file();
     /// ```
     pub fn parse_file(&mut self) {
@@ -201,13 +201,13 @@ impl Parser {
                 }
                 "display" => {
                     self.canvas.clear_canvas();
-                    self.canvas.set_line_pixel(self.color);
+                    self.canvas.set_line_pixel(&self.color);
                     self.canvas.draw_lines(&self.edge_matrix);
                     self.canvas.display().unwrap();
                 }
                 "save" => {
                     self.canvas.clear_canvas();
-                    self.canvas.set_line_pixel(self.color);
+                    self.canvas.set_line_pixel(&self.color);
                     self.canvas.draw_lines(&self.edge_matrix);
                     let file_name = iter.next().expect("Error reading line");
                     self.canvas.save_extension(file_name).unwrap();
@@ -223,12 +223,17 @@ impl Parser {
     }
 
     /// Set the parser's color.
-    pub fn set_color(&mut self, color: Pixel) {
-        self.color = color;
+    pub fn set_color(&mut self, color: &Pixel) {
+        self.color = *color;
     }
 
     /// Get a reference to the parser's trans matrix.
     pub fn trans_matrix(&self) -> &Matrix {
         &self.trans_matrix
+    }
+
+    /// Get a reference to the parser's edge matrix.
+    pub fn edge_matrix(&self) -> &Matrix {
+        &self.edge_matrix
     }
 }

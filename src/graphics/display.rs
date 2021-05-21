@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
+    ops::{Index, IndexMut},
     process::{Command, Stdio},
 };
 
@@ -35,6 +36,52 @@ impl Pixel {
     pub fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
+/// A convention that represents a Pixel based on hue, saturation, and light
+pub struct HSL {
+    /// Hue
+    pub hue: f64,
+    /// saturation
+    pub saturation: f64,
+    /// light
+    pub light: f64,
+}
+
+#[allow(dead_code)]
+impl HSL {
+    /// Returns a HSL that can be used in [Canvas]
+    ///
+    /// # Arguments
+    ///
+    /// * `hue` - A f64 that represents hue
+    /// * `saturation` - A f64 that represents
+    /// * `light` - A f64 that represent light
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::HSL;
+    /// let color = HSL::new(0.0, 0.0, 0.0);
+    /// ```
+    pub fn new(hue: f64, saturation: f64, light: f64) -> Self {
+        Self {
+            hue,
+            saturation,
+            light,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+#[allow(clippy::upper_case_acronyms)]
+enum Color {
+    HSL,
+    Pixel,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -103,14 +150,43 @@ impl Canvas {
     /// use crate::curves_rs::graphics::display::Canvas;
     /// use crate::curves_rs::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
-    /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
+    /// let image = Canvas::new_with_bg(500, 500, 255, &background_color);
     /// ```
-    pub fn new_with_bg(height: u32, width: u32, range: u8, background_color: Pixel) -> Self {
+    pub fn new_with_bg(height: u32, width: u32, range: u8, background_color: &Pixel) -> Self {
         Self {
             height,
             width,
             range,
-            pixels: vec![background_color; (height * width) as usize],
+            pixels: vec![*background_color; (height * width) as usize],
+            anim_index: 0,
+            upper_left_system: false,
+            line: Pixel::default(),
+        }
+    }
+
+    /// Returns a blank [Canvas] that can be filled
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - An unsigned int that will represent height of the [Canvas]
+    /// * `width` - An unsigned int that will represent width of the [Canvas]
+    /// * `range` - An unsigned int that will represent maximum depth
+    /// of colors in the [Canvas]
+    /// background color that will fill the [Canvas]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// let image = Canvas::empty(500, 500, 255);
+    /// ```
+    pub fn empty(height: u32, width: u32, range: u8) -> Self {
+        Self {
+            height,
+            width,
+            range,
+            pixels: Vec::with_capacity((height * width) as usize),
             anim_index: 0,
             upper_left_system: false,
             line: Pixel::default(),
@@ -125,9 +201,9 @@ impl Canvas {
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
-    /// let width = image.get_width();
+    /// let width = image.width();
     /// ```
-    pub fn get_width(&self) -> u32 {
+    pub fn width(&self) -> u32 {
         self.width
     }
 
@@ -139,9 +215,9 @@ impl Canvas {
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
     /// let image = Canvas::new(500, 500, 255);
-    /// let height = image.get_height();
+    /// let height = image.height();
     /// ```
-    pub fn get_height(&self) -> u32 {
+    pub fn height(&self) -> u32 {
         self.height
     }
 
@@ -159,10 +235,10 @@ impl Canvas {
     /// use crate::curves_rs::graphics::display::Pixel;
     /// let mut image = Canvas::new(500, 500, 255);
     /// let new_color = Pixel::new(12, 20, 30);
-    /// image.set_line_pixel(new_color);
+    /// image.set_line_pixel(&new_color);
     /// ```
-    pub fn set_line_pixel(&mut self, new_color: Pixel) {
-        self.line = new_color
+    pub fn set_line_pixel(&mut self, new_color: &Pixel) {
+        self.line = *new_color
     }
 
     /// Sets the color of the drawing line to a different color given three ints.
@@ -187,17 +263,42 @@ impl Canvas {
         self.line.blue = blue
     }
 
+    /// Fills in an empty canvas
+    ///
+    /// # Arguments
+    ///
+    /// * `new_pixels` - A vector of pixels that represents new data
+    /// to append to an empty canvas
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::display::Pixel;
+    /// let mut image = Canvas::empty(1, 1, 255);
+    /// let mut data = vec![Pixel::default()];
+    /// image.fill_canvas(data)
+    /// ```
+    pub fn fill_canvas(&mut self, mut new_pixels: Vec<Pixel>) {
+        assert!(
+            new_pixels.len() == (self.width * self.height) as usize,
+            "New data pust fill canvas"
+        );
+        self.pixels.append(&mut new_pixels)
+    }
+
+    /// Sets an (X, Y) pair to the proper spot in Pixels
+    fn index(&self, x: u32, y: u32) -> usize {
+        (y * self.width + x) as usize
+    }
+
     fn iter(&self) -> impl Iterator<Item = &Pixel> + '_ {
         self.pixels.iter()
     }
 
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut Pixel> + '_ {
         self.pixels.iter_mut()
-    }
-
-    /// Sets an (X, Y) pair to the proper spot in Pixels
-    fn index(&self, x: u32, y: u32) -> usize {
-        (y * self.width + x) as usize
     }
 
     /// Deals with negative numbers by wrapping the [Canvas]
@@ -231,7 +332,7 @@ impl Canvas {
         (x, y, width, height)
     }
 
-    /// Returns a [Pixel] given a (X, Y) coordinate pair that corresponds to the body of the
+    /// Returns a reference to the (x, y) [Pixel] of body of in the
     /// [Canvas].
     ///
     /// # Arguments
@@ -248,20 +349,19 @@ impl Canvas {
     /// let image = Canvas::new(500, 500, 255);
     /// let color = image.get_pixel(250, 250);
     /// ```
-    pub fn get_pixel(&self, x: i32, y: i32) -> Pixel {
+    pub fn get_pixel(&self, x: i32, y: i32) -> &Pixel {
         let (x, y, width, height) = self.deal_with_negs(x, y);
         // println!("i32:{} as {}", x, x as u32);
         if self.upper_left_system {
             let index = self.index(x as u32, y as u32);
-            self.pixels[index]
+            &self.pixels[index]
         } else {
             let new_y = height - 1 - y;
             if x >= 0 && x < width && new_y >= 0 && new_y < height {
                 let index = self.index(x as u32, new_y as u32);
-                self.pixels[index]
+                &self.pixels[index]
             } else {
-                // should never reach this
-                Pixel::default()
+                panic!("Wrong input and reference can not be retrieved")
             }
         }
     }
@@ -282,18 +382,18 @@ impl Canvas {
     /// use crate::curves_rs::graphics::display::Pixel;
     /// let mut image = Canvas::new(500, 500, 255);
     /// let color = Pixel::new(1, 1, 1);
-    /// image.plot(color, 100, 100);
+    /// image.plot(&color, 100, 100);
     /// ```
-    pub fn plot(&mut self, new_color: Pixel, x: i32, y: i32) {
+    pub fn plot(&mut self, new_color: &Pixel, x: i32, y: i32) {
         let (x, y, width, height) = self.deal_with_negs(x, y);
         if self.upper_left_system {
             let index = self.index(x as u32, y as u32);
-            self.pixels[index] = new_color
+            self.pixels[index] = *new_color
         } else {
             let new_y = height - 1 - y;
             if x >= 0 && x < width && new_y >= 0 && new_y < height {
                 let index = self.index(x as u32, new_y as u32);
-                self.pixels[index] = new_color
+                self.pixels[index] = *new_color
             }
         }
     }
@@ -307,7 +407,7 @@ impl Canvas {
     /// use crate::curves_rs::graphics::display::Canvas;
     /// use crate::curves_rs::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
-    /// let mut image = Canvas::new_with_bg(500, 500, 255, background_color);
+    /// let mut image = Canvas::new_with_bg(500, 500, 255, &background_color);
     /// image.clear_canvas()
     /// ```
     pub fn clear_canvas(&mut self) {
@@ -328,16 +428,15 @@ impl Canvas {
     /// use crate::curves_rs::graphics::display::Pixel;
     /// let background_color = Pixel::new(1, 2, 3);
     /// let mut image = Canvas::new(500, 500, 255);
-    /// image.fill_color(background_color)
+    /// image.fill_color(&background_color)
     /// ```
-    pub fn fill_color(&mut self, bg: Pixel) {
-        self.iter_mut().for_each(|i| *i = bg);
+    pub fn fill_color(&mut self, bg: &Pixel) {
+        self.iter_mut().for_each(|i| *i = *bg);
     }
 }
 
 impl IntoIterator for Canvas {
     type Item = Pixel;
-
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -345,13 +444,18 @@ impl IntoIterator for Canvas {
     }
 }
 
-// impl Iterator for Canvas {
-//     type Item = Pixel;
+impl Index<usize> for Canvas {
+    type Output = Pixel;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.pixels[index]
+    }
+}
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         self.pixels.iter()
-//     }
-// }
+impl IndexMut<usize> for Canvas {
+    fn index_mut(&mut self, index: usize) -> &mut Pixel {
+        &mut self.pixels[index]
+    }
+}
 
 // saving
 #[allow(dead_code)]

@@ -3,9 +3,7 @@ use curves_rs::graphics::matrix::*;
 
 #[test]
 pub fn make_pory() {
-    let outline = Pixel::new(235, 219, 178);
-    let purplish = Pixel::new(17, 46, 81);
-    let mut porygon = Canvas::new_with_bg(512, 512, 255, purplish);
+    let mut porygon = Canvas::new_with_bg(512, 512, 255, &Pixel::new(17, 46, 81));
     let mut matrix = Matrix::new(4, 0, Vec::new());
     porygon.upper_left_system = true;
     let corrs = [
@@ -37,7 +35,7 @@ pub fn make_pory() {
         matrix.add_point(corr[0] as f64, corr[1] as f64, 0.0);
     }
 
-    porygon.set_line_pixel(outline);
+    porygon.set_line_pixel(&Pixel::new(235, 219, 178));
     porygon.draw_lines(&matrix.mult_matrix(
         &Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0)),
     ));

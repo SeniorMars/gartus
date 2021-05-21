@@ -5,8 +5,7 @@ use curves_rs::graphics::matrix::*;
 #[test]
 // #[should_panic]
 fn geass() {
-    let bg = Pixel::new(24, 26, 27);
-    let mut img = Canvas::new_with_bg(800, 800, 255, bg);
+    let mut img = Canvas::new_with_bg(800, 800, 255, &Pixel::new(24, 26, 27));
     let mut geass = Matrix::new(4, 0, Vec::new());
     img.upper_left_system = true;
 
@@ -39,14 +38,14 @@ fn geass() {
     base.add_dataset(&last_half);
 
     let white = Pixel::new(255, 255, 255);
-    img.set_line_pixel(white);
+    img.set_line_pixel(&white);
     img.draw_lines(
         &geass
             .mult_matrix(&Matrix::scale(0.1, 0.1, 0.1))
             .mult_matrix(&Matrix::translate(360.0, 370.0, 0.0)),
     );
-    img.fill(406, 413, white, white);
-    img.set_line_pixel(Pixel::new(191, 70, 61));
+    img.fill(406, 413, &white, &white);
+    img.set_line_pixel(&Pixel::new(191, 70, 61));
     for i in 0..180 {
         let mut copy = img.clone();
         copy.draw_lines(&base.mult_matrix(

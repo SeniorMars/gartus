@@ -22,9 +22,9 @@ impl Canvas {
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// let background_color = Pixel::new(0, 0, 0);
-    /// image.fill(10, 10, color, background_color)
+    /// image.fill(10, 10, &color, &background_color)
     /// ```
-    pub fn fill(&mut self, x: i32, y: i32, fill_color: Pixel, boundary_color: Pixel) {
+    pub fn fill(&mut self, x: i32, y: i32, fill_color: &Pixel, boundary_color: &Pixel) {
         let current = self.get_pixel(x, y);
         if current != boundary_color && current != fill_color {
             self.plot(fill_color, x as i32, y as i32);
@@ -63,14 +63,14 @@ impl Canvas {
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// let background_color = Pixel::new(0, 0, 0);
-    /// image.fill_with_animation(10, 10, color, background_color, "image")
+    /// image.fill_with_animation(10, 10, &color, &background_color, "image")
     /// ```
     pub fn fill_with_animation(
         &mut self,
         x: i32,
         y: i32,
-        fill_color: Pixel,
-        boundary_color: Pixel,
+        fill_color: &Pixel,
+        boundary_color: &Pixel,
         filename: &str,
     ) {
         let current = self.get_pixel(x, y);
@@ -102,7 +102,7 @@ impl Canvas {
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
-    /// image.set_line_pixel(color);
+    /// image.set_line_pixel(&color);
     /// let matrix = Matrix::identity_matrix(4);
     /// image.draw_lines(&matrix)
     /// ```
@@ -136,7 +136,7 @@ impl Canvas {
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
-    /// image.set_line_pixel(color);
+    /// image.set_line_pixel(&color);
     /// let matrix = Matrix::identity_matrix(4);
     /// image.draw_lines_for_animation(&matrix, "cool_picture")
     /// ```
@@ -203,7 +203,7 @@ impl Canvas {
                 // octant 1
                 let mut d = delta_y + delta_x / 2;
                 for x in x0..=x1 {
-                    self.plot(color, x, y0);
+                    self.plot(&color, x, y0);
                     if d > 0 {
                         y0 += 1;
                         d += delta_x;
@@ -214,7 +214,7 @@ impl Canvas {
                 // octant 8
                 let mut d = delta_y - delta_x / 2;
                 for x in x0..=x1 {
-                    self.plot(color, x, y0);
+                    self.plot(&color, x, y0);
                     if d < 0 {
                         y0 -= 1;
                         d -= delta_x;
@@ -226,7 +226,7 @@ impl Canvas {
             // octant 2
             let mut d = delta_y / 2 + delta_x;
             for y in y0..=y1 {
-                self.plot(color, x0, y);
+                self.plot(&color, x0, y);
                 if d < 0 {
                     x0 += 1;
                     d += delta_y;
@@ -237,7 +237,7 @@ impl Canvas {
             // octant 7
             let mut d = delta_y / 2 - delta_x;
             for y in (y1..=y0).rev() {
-                self.plot(color, x0, y);
+                self.plot(&color, x0, y);
                 if d > 0 {
                     x0 += 1;
                     d += delta_y;
