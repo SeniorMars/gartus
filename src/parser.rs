@@ -2,7 +2,7 @@ use crate::graphics::{
     display::{Canvas, Pixel},
     matrix::Matrix,
 };
-use std::fs;
+use std::{fs, str::FromStr};
 
 // #[macro_export]
 // macro_rules! parse_nums {
@@ -161,19 +161,19 @@ impl Parser {
                 "quit" => {}
                 "line" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let edge = Parser::parse_as_floats(next_line.to_string());
+                    let edge = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
                     self.edge_matrix.add_edge_vec(edge);
                 }
                 "scale" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let args = Parser::parse_as_floats(next_line.to_string());
+                    let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
                     let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
                     self.trans_matrix = self.trans_matrix.mult_matrix(&dilate_matrix);
                 }
                 "move" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let args = Parser::parse_as_floats(next_line.to_string());
+                    let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
                     let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
                     self.trans_matrix = self.trans_matrix.mult_matrix(&translation_matrix);
@@ -220,7 +220,7 @@ impl Parser {
                 }
                 "color" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let args = Parser::parse_as_u8(next_line.to_string());
+                    let args = Parser::parse_as::<u8>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
                     self.set_color(&Pixel {
                         red: args[0],
@@ -252,14 +252,8 @@ impl Parser {
         }
     }
 
-    /// Accepts a lines and tries to collect floats as a vector
-    fn parse_as_floats(line: String) -> Vec<f64> {
-        line.split(' ').map(|n| n.parse::<f64>().unwrap()).collect()
-    }
-
-    /// Accepts a lines and tries to collect u8 as a vector
-    fn parse_as_u8(line: String) -> Vec<u8> {
-        line.split(' ').map(|n| n.parse::<u8>().unwrap()).collect()
+    fn parse_as<T: FromStr>(line: String) -> Result<Vec<T>, T::Err> {
+        line.split(' ').map(|n| n.parse::<T>()).collect()
     }
 
     /// Set the parser's color.
