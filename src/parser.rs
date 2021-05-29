@@ -4,6 +4,11 @@ use crate::graphics::{
 };
 use std::fs;
 
+// #[macro_export]
+// macro_rules! parse_nums {
+//     ($ )
+// }
+
 #[derive(Debug, Default)]
 /**
 ```text
@@ -12,36 +17,40 @@ The file follows the following format:
      Every command is a single character that takes up a line
      Any command that requires arguments must have those arguments
      in the second line. The commands are as follows:
-         circle: add a circle to the edge matrix -
-               takes 4 arguments (cx, cy, cz, r)
-         hermite: add a hermite curve to the edge matrix -
-               takes 8 arguments (x0, y0, x1, y1, rx0, ry0, rx1, ry1)
-         bezier: add a bezier curve to the edge matrix -
-               takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
-         line: add a line to the edge matrix -
-               takes 6 arguemnts (x0, y0, z0, x1, y1, z1)
-         ident: set the transform matrix to the identity matrix -
-         scale: create a scale matrix,
-                then multiply the transform matrix by the scale matrix -
-                takes 3 arguments (sx, sy, sz)
-         move: create a translation matrix,
-               then multiply the transform matrix by the translation matrix -
-               takes 3 arguments (tx, ty, tz)
-         rotate: create a rotation matrix,
-                 then multiply the transform matrix by the rotation matrix -
-                 takes 2 arguments (axis, theta) axis should be x y or z
-         reflect: create a reflection matrix,
-                 then multiply the transform matrix by the rotation matrix -
-                 takes a argument (axis) - should be x y or z
-         apply: apply the current transformation matrix to the edge matrix
-         display: clear the screen, then
-                  draw the lines of the edge matrix to the screen
-                  display the screen
-         save: clear the screen, then
-               draw the lines of the edge matrix to the screen
-               save the screen to a file -
-               takes 1 argument (file name)
-         quit: end parsing
+        circle: add a circle to the edge matrix -
+            takes 4 arguments (cx, cy, cz, r)
+        hermite: add a hermite curve to the edge matrix -
+            takes 8 arguments (x0, y0, x1, y1, rx0, ry0, rx1, ry1)
+        bezier: add a bezier curve to the edge matrix -
+            takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
+        line: add a line to the edge matrix -
+            takes 6 arguemnts (x0, y0, z0, x1, y1, z1)
+        ident: set the transform matrix to the identity matrix -
+        scale: create a scale matrix,
+            then multiply the transform matrix by the scale matrix -
+            takes 3 arguments (sx, sy, sz)
+        move: create a translation matrix,
+            then multiply the transform matrix by the translation matrix -
+            takes 3 arguments (tx, ty, tz)
+        rotate: create a rotation matrix,
+            then multiply the transform matrix by the rotation matrix -
+            takes 2 arguments (axis, theta) axis should be x y or z
+        reflect: create a reflection matrix,
+            then multiply the transform matrix by the rotation matrix -
+            takes a argument (axis) - should be x y or z
+        shear: create a shearing matrix,
+            then multiply the transform matrix by the shearing matrix -
+            takes 3 arguments (axis, sh_factor, sh_factor)  axis should be x, y, or z
+        color: changes the line's color
+        apply: apply the current transformation matrix to the edge matrix
+        display: clear the screen, then
+            draw the lines of the edge matrix to the screen
+            display the screen
+        save: clear the screen, then
+            draw the lines of the edge matrix to the screen
+            save the screen to a file -
+            takes 1 argument (file name)
+        quit: end parsing
 
 ```
 */
@@ -189,9 +198,35 @@ impl Parser {
                         "x" => Matrix::reflect_xz(),
                         "y" => Matrix::reflect_yz(),
                         "z" => Matrix::reflect_xy(),
-                        _ => panic!("Unknown axis: {}", line),
+                        _ => panic!("Unknown command: {}", line),
                     };
                     self.trans_matrix = self.trans_matrix.mult_matrix(&reflect_matrix);
+                }
+                "shear" => {
+                    let next_line = iter.next().expect("Error reading line");
+                    let args: Vec<&str> = next_line.split(' ').collect();
+                    let (axis, sh_factor_one, sh_factor_two): (&str, f64, f64) = (
+                        args[0],
+                        args[1].parse().expect("Error parsing number"),
+                        args[2].parse().expect("Error parsing number"),
+                    );
+                    let reflect_matrix = match axis {
+                        "x" => Matrix::shearing_x(sh_factor_one, sh_factor_two),
+                        "y" => Matrix::shearing_y(sh_factor_one, sh_factor_two),
+                        "z" => Matrix::shearing_z(sh_factor_one, sh_factor_two),
+                        _ => panic!("Unknown command: {}", line),
+                    };
+                    self.trans_matrix = self.trans_matrix.mult_matrix(&reflect_matrix);
+                }
+                "color" => {
+                    let next_line = iter.next().expect("Error reading line");
+                    let args = Parser::parse_as_u8(next_line.to_string());
+                    assert_eq!(3, args.len());
+                    self.set_color(&Pixel {
+                        red: args[0],
+                        green: args[1],
+                        blue: args[2],
+                    })
                 }
                 "ident" => {
                     self.trans_matrix = Matrix::identity_matrix(4);
@@ -220,6 +255,11 @@ impl Parser {
     /// Accepts a lines and tries to collect floats as a vector
     fn parse_as_floats(line: String) -> Vec<f64> {
         line.split(' ').map(|n| n.parse::<f64>().unwrap()).collect()
+    }
+
+    /// Accepts a lines and tries to collect u8 as a vector
+    fn parse_as_u8(line: String) -> Vec<u8> {
+        line.split(' ').map(|n| n.parse::<u8>().unwrap()).collect()
     }
 
     /// Set the parser's color.

@@ -16,10 +16,6 @@ pub struct Matrix {
     data: Vec<f64>,
 }
 
-// pub struct Matrix<const rows:usize, const cols:usize> {
-//     data: Vec<f64>, not going to do generics
-// }
-
 #[allow(dead_code)]
 impl Matrix {
     /// Returns a new row x column [Matrix] with a vector that contains the data.
@@ -42,6 +38,27 @@ impl Matrix {
     /// ```
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
         assert_eq!(rows * cols, data.len(), "Matrix must be filled completely");
+        Self { rows, cols, data }
+    }
+
+    /// Returns a new row x column [Matrix] with a vector with_capacity of row * column
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - An unsigned usize int that represents
+    /// the number of rows in the [Matrix]
+    /// * `cols` - An unsigned usize int that represents
+    /// the number of columns in the [Matrix]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// let matrix = Matrix::with_capacity(2, 2);
+    /// ```
+    pub fn with_capacity(rows: usize, cols: usize) -> Self {
+        let data = Vec::with_capacity(rows * cols);
         Self { rows, cols, data }
     }
 
@@ -97,19 +114,77 @@ impl Matrix {
         matrix
     }
 
-    // Returns the inverse [Matrix] of self.
-    //
-    // # Examples
-    //
-    // Basic usage:
-    // ```
-    // use crate::curves_rs::graphics::matrix::Matrix;
-    // let ident = Matrix::identity_matrix(4);
-    // let inverse = ident.inverse();
-    // ```
-    fn inverse(&self) -> Self {
-        // may not do this
-        todo!()
+    /// Returns the inverse of a squared [Matrix].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let inverse = ident.inverse();
+    /// ```
+    pub fn inverse(&self) -> Self {
+        let (rows, cols) = (self.rows, self.cols);
+        assert_eq!(rows, cols, "The matrix must be N x N");
+        let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
+        for i in 0..cols {
+            for j in 0..cols {
+                aug.set(i, j, self.get(i, j))
+            }
+            aug.set(i, i + cols, 1.0)
+        }
+        Self::gauss_jordan_general(&mut aug);
+        let mut unaug = Matrix::new(rows, cols, vec![0.0; rows * cols]);
+        for i in 0..rows {
+            for j in 0..rows {
+                unaug.set(i, j, aug.get(i, j + cols));
+            }
+        }
+        unaug
+    }
+
+    fn gauss_jordan_general(matrix: &mut Self) {
+        let mut lead = 0;
+        let (rows, cols) = (matrix.rows, matrix.cols);
+
+        for r in 0..rows {
+            if cols <= lead {
+                break;
+            }
+            let mut i = r;
+            while matrix.get(i, lead) == 0.0 {
+                i += 1;
+                if rows == i {
+                    i = r;
+                    lead += 1;
+                    if cols == lead {
+                        break;
+                    }
+                }
+            }
+
+            let temp = matrix[i].to_owned();
+            matrix[i] = matrix[r].to_owned();
+            matrix[r] = temp.to_owned();
+
+            if matrix.get(r, lead) != 0.0 {
+                let div = matrix.get(r, lead);
+                for j in 0..cols {
+                    matrix.set(r, j, matrix.get(r, j) / div);
+                }
+            }
+
+            for k in 0..rows {
+                if k != r {
+                    let mult = matrix.get(k, lead);
+                    for j in 0..cols {
+                        matrix.set(k, j, matrix.get(k, j) - matrix.get(r, j) * mult);
+                    }
+                }
+            }
+            lead += 1;
+        }
     }
 
     /// Returns the transpose [Matrix] of self.
@@ -187,12 +262,12 @@ impl Matrix {
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.swap_rows(0, 1);
     /// ```
-    pub fn swap_rows(&mut self, row_one: usize, row_two: usize) {
+    pub fn swap_cols(&mut self, col_one: usize, col_two: usize) {
         let mut points = self.iter_by_point_mut();
         points
-            .nth(row_one)
+            .nth(col_one)
             .unwrap()
-            .swap_with_slice(points.nth(row_two - row_one - 1).unwrap());
+            .swap_with_slice(points.nth(col_two - col_one - 1).unwrap());
     }
 
     /// Returns the corresponding self.data element
@@ -714,7 +789,6 @@ impl Div for Matrix {
     type Output = Self;
 
     fn div(self, _other: Self) -> Self {
-        // may not do this
         todo!()
     }
 }
@@ -770,7 +844,7 @@ mod tests {
     #[test]
     fn swap() {
         let mut ident = Matrix::identity_matrix(3);
-        ident.swap_rows(0, 2);
+        ident.swap_cols(0, 2);
         println!("ident:\n{}", ident);
         // println!("test:\n{}", test);
         assert_eq!(
@@ -859,5 +933,14 @@ mod tests {
         for i in Matrix::identity_matrix(4).into_iter() {
             println!("{}", i);
         }
+    }
+
+    #[test]
+    fn inverse_test() {
+        let test = Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 4.0, 1.0, 6.0, 7.0, 8.0, 9.0]);
+        let inverse = test.inverse();
+        println!("{}", inverse);
+        let one = test * inverse;
+        println!("{}", one)
     }
 }

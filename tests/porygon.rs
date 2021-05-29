@@ -4,7 +4,7 @@ use curves_rs::graphics::matrix::*;
 #[test]
 pub fn make_pory() {
     let mut porygon = Canvas::new_with_bg(512, 512, 255, &Pixel::new(17, 46, 81));
-    let mut matrix = Matrix::new(4, 0, Vec::new());
+    let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
     porygon.upper_left_system = true;
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,

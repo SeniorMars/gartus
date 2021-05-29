@@ -6,7 +6,7 @@ use curves_rs::graphics::matrix::*;
 // #[should_panic]
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, 255, &Pixel::new(24, 26, 27));
-    let mut geass = Matrix::new(4, 0, Vec::new());
+    let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
     img.upper_left_system = true;
 
     let geass_corrs = [

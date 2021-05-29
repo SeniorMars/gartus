@@ -5,10 +5,9 @@ use std::{
 
 #[derive(Debug, Clone, Copy)]
 /// A 3D geometric vector
-/// An extra one is added for [Matrix] support
 pub struct Vector {
     /// Data of the vector
-    pub data: [f64; 4],
+    pub data: [f64; 3],
 }
 
 #[allow(dead_code)]
@@ -29,9 +28,7 @@ impl Vector {
     /// let vec3 = Vector::new(0.0, 0.0, 0.0);
     /// ```
     pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Self {
-            data: [x, y, z, 1.0],
-        }
+        Self { data: [x, y, z] }
     }
 
     /// Produces a new vector based on the cross product of two vectors
@@ -55,7 +52,6 @@ impl Vector {
                 self[1] * other[2] - self[2] * other[1],
                 self[2] * other[0] - self[0] * other[2],
                 self[0] * other[1] - self[1] * other[0],
-                1.0,
             ],
         }
     }
@@ -126,12 +122,7 @@ impl Add for Vector {
 
     fn add(self, other: Self) -> Self::Output {
         Self {
-            data: [
-                self[0] + other[0],
-                self[1] + other[1],
-                self[2] + other[2],
-                1.0,
-            ],
+            data: [self[0] + other[0], self[1] + other[1], self[2] + other[2]],
         }
     }
 }
@@ -139,12 +130,7 @@ impl Add for Vector {
 impl AddAssign for Vector {
     fn add_assign(&mut self, other: Self) {
         *self = Self {
-            data: [
-                self[0] + other[0],
-                self[1] + other[1],
-                self[2] + other[2],
-                1.0,
-            ],
+            data: [self[0] + other[0], self[1] + other[1], self[2] + other[2]],
         }
     }
 }
@@ -154,12 +140,7 @@ impl Sub for Vector {
 
     fn sub(self, other: Self) -> Self::Output {
         Self {
-            data: [
-                self[0] - other[0],
-                self[1] - other[1],
-                self[2] - other[2],
-                1.0,
-            ],
+            data: [self[0] - other[0], self[1] - other[1], self[2] - other[2]],
         }
     }
 }
@@ -167,12 +148,7 @@ impl Sub for Vector {
 impl SubAssign for Vector {
     fn sub_assign(&mut self, other: Self) {
         *self = Self {
-            data: [
-                self[0] - other[0],
-                self[1] - other[1],
-                self[2] - other[2],
-                1.0,
-            ],
+            data: [self[0] - other[0], self[1] - other[1], self[2] - other[2]],
         }
     }
 }
@@ -182,7 +158,7 @@ impl Mul<f64> for Vector {
 
     fn mul(self, other: f64) -> Self::Output {
         Self {
-            data: [self[0] * other, self[1] * other, self[2] * other, 1.0],
+            data: [self[0] * other, self[1] * other, self[2] * other],
         }
     }
 }
@@ -190,7 +166,17 @@ impl Mul<f64> for Vector {
 impl MulAssign<f64> for Vector {
     fn mul_assign(&mut self, other: f64) {
         *self = Self {
-            data: [self[0] * other, self[1] * other, self[2] * other, 1.0],
+            data: [self[0] * other, self[1] * other, self[2] * other],
+        }
+    }
+}
+
+impl Mul<Vector> for f64 {
+    type Output = Vector;
+
+    fn mul(self, other: Vector) -> Self::Output {
+        Vector {
+            data: [self * other[0], self * other[1], self * other[2]],
         }
     }
 }
@@ -200,7 +186,7 @@ impl Div<f64> for Vector {
 
     fn div(self, other: f64) -> Self {
         Self {
-            data: [self[0] / other, self[1] / other, self[2] / other, 1.0],
+            data: [self[0] / other, self[1] / other, self[2] / other],
         }
     }
 }
@@ -208,18 +194,14 @@ impl Div<f64> for Vector {
 impl DivAssign<f64> for Vector {
     fn div_assign(&mut self, other: f64) {
         *self = Self {
-            data: [self[0] / other, self[1] / other, self[2] / other, 1.0],
+            data: [self[0] / other, self[1] / other, self[2] / other],
         };
     }
 }
 
 impl Display for Vector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({:.6}, {:.6}, {:.6}, {:.6})",
-            self[0], self[1], self[2], self[3]
-        )
+        write!(f, "({:.6}, {:.6}, {:.6})", self[0], self[1], self[2])
     }
 }
 

@@ -80,9 +80,13 @@ impl HSL {
 #[allow(dead_code)]
 #[allow(clippy::upper_case_acronyms)]
 enum Color {
-    HSL,
-    Pixel,
+    HSL(HSL),
+    Pixel(Pixel),
 }
+
+// pub struct Matrix<const rows:usize, const cols:usize> {
+//     data: Vec<f64>, not going to do generics
+// }
 
 #[derive(Default, Debug, Clone)]
 /// An art [Canvas] / computer screen is represented here.
@@ -283,7 +287,7 @@ impl Canvas {
     pub fn fill_canvas(&mut self, mut new_pixels: Vec<Pixel>) {
         assert!(
             new_pixels.len() == (self.width * self.height) as usize,
-            "New data pust fill canvas"
+            "New data must fill canvas"
         );
         self.pixels.append(&mut new_pixels)
     }

@@ -24,7 +24,7 @@ pub fn animation(file_name_prefix: &str, output: &str) {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let _result = child.wait().expect("Could not make animation");
+    child.wait().expect("Could not make animation");
 }
 
 /// Open's a given animation using imagemagick's `animate`.

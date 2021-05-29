@@ -24,10 +24,10 @@ fn matrix_test() {
     println!("{}", edge_matrix);
     let mut ident = Matrix::identity_matrix(4);
     println!("Testing ident. m1 =");
-    println!("{}", ident);
+    println!("{:?}", ident);
     println!("Testing Matrix mult. m1 * m2 =");
     ident *= edge_matrix.clone();
-    println!("{}", ident);
+    println!("{:#?}", ident);
     println!("Testing Matrix mult. m1 =");
     let mut m1 = Matrix::new(
         4,
