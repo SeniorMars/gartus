@@ -1,3 +1,4 @@
+use curves_rs::graphics::colors::*;
 use curves_rs::graphics::display::*;
 use curves_rs::graphics::matrix::*;
 use curves_rs::parser::Parser;

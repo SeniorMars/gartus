@@ -1,12 +1,12 @@
 // extern crate rand;
+use curves_rs::graphics::colors::Pixel;
 use curves_rs::graphics::display::Canvas;
-use curves_rs::graphics::display::Pixel;
 // use curves_rs::utils;
 // use rand::Rng;
 
 #[test]
 fn rgb() {
-    let mut img = Canvas::empty(256, 256, 255);
+    let mut img = Canvas::with_capacity(256, 256, 255);
     let (width, height) = (img.width(), img.height());
     let mut data: Vec<Pixel> = Vec::with_capacity((width * height) as usize);
     (0..height).rev().for_each(|j| {
@@ -28,7 +28,7 @@ fn rgb() {
 fn julia() {
     let width = 800;
     let height = 600;
-    let mut julia = Canvas::empty(height, width, 255);
+    let mut julia = Canvas::with_capacity(height, width, 255);
     let mut data: Vec<Pixel> = Vec::with_capacity((width * height) as usize);
     let cx = -0.9;
     let cy = 0.27015;

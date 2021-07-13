@@ -1,5 +1,5 @@
+use crate::graphics::colors::Pixel;
 use crate::graphics::display::Canvas;
-use crate::graphics::display::Pixel;
 use crate::graphics::matrix::Matrix;
 
 #[allow(dead_code)]
@@ -17,7 +17,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::graphics::display::Canvas;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
@@ -58,7 +58,7 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::graphics::display::Canvas;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
@@ -98,7 +98,7 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
@@ -132,7 +132,7 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
@@ -178,7 +178,7 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)

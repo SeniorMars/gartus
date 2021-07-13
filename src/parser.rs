@@ -1,7 +1,4 @@
-use crate::graphics::{
-    display::{Canvas, Pixel},
-    matrix::Matrix,
-};
+use crate::graphics::{colors::Pixel, display::Canvas, matrix::Matrix};
 use std::{fs, str::FromStr};
 
 // #[macro_export]
@@ -83,7 +80,7 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
@@ -114,7 +111,7 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);
@@ -143,7 +140,7 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Pixel;
+    /// use crate::curves_rs::graphics::colors::Pixel;
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Pixel::new(17, 46, 81);
     /// let outline = Pixel::new(235, 219, 178);

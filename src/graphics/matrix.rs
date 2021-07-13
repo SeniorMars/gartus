@@ -260,7 +260,7 @@ impl Matrix {
     /// ```
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
-    /// ident.swap_rows(0, 1);
+    /// ident.swap_cols(0, 1);
     /// ```
     pub fn swap_cols(&mut self, col_one: usize, col_two: usize) {
         let mut points = self.iter_by_point_mut();
@@ -558,13 +558,13 @@ impl Matrix {
     /// ```
     /// use crate::curves_rs::graphics::matrix::Matrix;
     /// use crate::curves_rs::graphics::vector::Vector;
-    /// let mut matrix = Matrix::new(0, 4, Vec::new());
+    /// let mut matrix = Matrix::new(4, 0, Vec::new());
     /// let vector = Vector::new(1.0, 2.0, 3.0);
     /// matrix.append_point(&vector);
     /// ```
     pub fn append_point(&mut self, vector: &Vector) {
         assert_eq!(
-            self.cols(),
+            self.rows() - 1,
             vector.data.len(),
             "self.cols and new row's len are not equal"
         );
@@ -648,11 +648,9 @@ impl Matrix {
             "Multiply only with identity matrix transformation"
         );
         let copy = vector;
-        for (i, element) in vector.data.iter_mut().enumerate().take(4) {
-            *element = self.get(0, i) * copy[0]
-                + self.get(1, i) * copy[1]
-                + self.get(2, i) * copy[2]
-                + self.get(3, i) * copy[3]
+        for (i, element) in vector.data.iter_mut().enumerate().take(3) {
+            *element =
+                self.get(0, i) * copy[0] + self.get(1, i) * copy[1] + self.get(2, i) * copy[2]
         }
     }
 }
@@ -774,7 +772,7 @@ impl MulAssign for Matrix {
 
 impl MulAssign<&Self> for Matrix {
     fn mul_assign(&mut self, other: &Matrix) {
-        *self = other * &self
+        *self = other * self
     }
 }
 

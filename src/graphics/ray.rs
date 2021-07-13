@@ -1,6 +1,6 @@
 use crate::graphics::vector::Vector;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 /// A ray that composes of an origin vector and direction vector
 pub struct Ray {
     origin: Vector,
