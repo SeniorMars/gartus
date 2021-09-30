@@ -14,5 +14,7 @@ pub mod matrix;
 pub mod ray;
 /// Hosts all the functions needed to start with 3D transformations with matrices.
 pub mod transformations;
+/// An agent that can move throughout the [Canvas]
+pub mod turtle;
 /// Hosts the vector struct for ray tracing
 pub mod vector;

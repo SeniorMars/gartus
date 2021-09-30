@@ -102,7 +102,7 @@ fn owl() {
 
     owl.set_line_color(255, 255, 255);
     let chunks = 2;
-    for i in (0..corrs.len()).step_by(chunks) {
+    (0..corrs.len()).step_by(chunks).for_each(|i| {
         if i != corrs.len() - chunks {
             // owl.set_line_color(
             //     rng.gen_range(0..=255),
@@ -119,7 +119,7 @@ fn owl() {
                 corrs[i + 3] as f64,
             )
         }
-    }
+    });
     owl.display().expect("Could not display image")
     // owl.save_binary(&format!("anim/owl{:04}.ppm", 319))
     //     .expect("could not save image");

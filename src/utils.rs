@@ -51,3 +51,16 @@ pub fn view_animation(file_name: &str) {
         .spawn()
         .expect("Could not view animation");
 }
+
+#[allow(dead_code)]
+/// Returns and calcuates the new x,y corrdinates from the polar corrdinate system
+///
+/// # Arguments
+///
+/// * `magnitude` - A f64 number that represents the magnitude of R in the polar corrdinate system
+/// * `angle_degrees` - A f64 number that represents theta in the polar corrdinate system
+///
+pub(crate) fn polar_to_xy(magnitude: f64, theta: f64) -> (f64, f64) {
+    let (dy, dx) = theta.to_radians().sin_cos();
+    (dx * magnitude, dy * magnitude)
+}

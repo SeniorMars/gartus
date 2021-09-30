@@ -3,13 +3,13 @@ use curves_rs::graphics::display::Canvas;
 use curves_rs::graphics::ray::Ray;
 use curves_rs::graphics::vector::{Color, Vector};
 
-fn ray_color(r: &Ray) -> Color {
+pub fn ray_color(r: &Ray) -> Color {
     let unit_direction = r.direction().normalized();
     let t = 0.5 * (unit_direction[1] + 1.0);
     (1.0 - t) * Color::new(1.0, 1.0, 1.0) + t * Color::new(0.5, 0.7, 1.0)
 }
 
-fn main() {
+pub fn main() {
     const ASPECT_RATIO: f64 = 16.0 / 9.0;
     const IMAGE_WIDTH: u64 = 256;
     const IMAGE_HEIGHT: u64 = (256_f64 / ASPECT_RATIO) as u64;

@@ -148,15 +148,15 @@ impl Matrix {
         let mut lead = 0;
         let (rows, cols) = (matrix.rows, matrix.cols);
 
-        for r in 0..rows {
+        for row in 0..rows {
             if cols <= lead {
                 break;
             }
-            let mut i = r;
+            let mut i = row;
             while matrix.get(i, lead) == 0.0 {
                 i += 1;
                 if rows == i {
-                    i = r;
+                    i = row;
                     lead += 1;
                     if cols == lead {
                         break;
@@ -164,22 +164,23 @@ impl Matrix {
                 }
             }
 
-            let temp = matrix[i].to_owned();
-            matrix[i] = matrix[r].to_owned();
-            matrix[r] = temp.to_owned();
+            matrix.data.swap(i, row);
+            // let temp = matrix[i].to_owned();
+            // matrix[i] = matrix[r].to_owned();
+            // matrix[r] = temp.to_owned();
 
-            if matrix.get(r, lead) != 0.0 {
-                let div = matrix.get(r, lead);
+            if matrix.get(row, lead) != 0.0 {
+                let div = matrix.get(row, lead);
                 for j in 0..cols {
-                    matrix.set(r, j, matrix.get(r, j) / div);
+                    matrix.set(row, j, matrix.get(row, j) / div);
                 }
             }
 
             for k in 0..rows {
-                if k != r {
+                if k != row {
                     let mult = matrix.get(k, lead);
                     for j in 0..cols {
-                        matrix.set(k, j, matrix.get(k, j) - matrix.get(r, j) * mult);
+                        matrix.set(k, j, matrix.get(k, j) - matrix.get(row, j) * mult);
                     }
                 }
             }

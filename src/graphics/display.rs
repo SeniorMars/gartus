@@ -98,7 +98,6 @@ impl Canvas {
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth
     /// of colors in the [Canvas]
-    /// background color that will fill the [Canvas]
     ///
     /// # Examples
     ///
@@ -407,7 +406,7 @@ impl Canvas {
         writeln!(writer, "P3 {} {} {}", self.height, self.width, self.range)?;
         self.iter().for_each(|pixel| {
             write!(writer, "{} {} {} ", pixel.red, pixel.green, pixel.blue)
-                .expect("Could not write into file")
+                .expect("File should always be written to")
         });
         writer.flush()
     }
@@ -471,7 +470,13 @@ impl Canvas {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
-        child.stdin.as_mut().unwrap().write_all(content.as_bytes())
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(content.as_bytes())?;
+        let _ = child.wait_with_output()?;
+        Ok(())
     }
 
     /// Display the current state of the [Canvas].
