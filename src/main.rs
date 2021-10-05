@@ -1,7 +1,7 @@
+use curves_rs::gmath::ray::Ray;
+use curves_rs::gmath::vector::{Color, Vector};
 use curves_rs::graphics::colors::Pixel;
 use curves_rs::graphics::display::Canvas;
-use curves_rs::graphics::ray::Ray;
-use curves_rs::graphics::vector::{Color, Vector};
 
 pub fn ray_color(r: &Ray) -> Color {
     let unit_direction = r.direction().normalized();

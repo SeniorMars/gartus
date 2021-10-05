@@ -1,4 +1,5 @@
-use crate::graphics::{colors::Pixel, display::Canvas, matrix::Matrix};
+use crate::gmath::matrix::Matrix;
+use crate::graphics::{colors::Pixel, display::Canvas};
 use std::{fs, str::FromStr};
 
 // #[macro_export]

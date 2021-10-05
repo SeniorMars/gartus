@@ -1,4 +1,4 @@
-use crate::graphics::vector::Vector;
+use crate::gmath::vector::Vector;
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A computer pixel struct is represented by its red, green, blue values
 pub struct Pixel {

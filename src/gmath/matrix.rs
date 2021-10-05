@@ -1,4 +1,4 @@
-use crate::graphics::vector::Vector;
+use crate::gmath::vector::Vector;
 use std::{
     fmt,
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
@@ -32,7 +32,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// ```
@@ -54,7 +54,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let matrix = Matrix::with_capacity(2, 2);
     /// ```
     pub fn with_capacity(rows: usize, cols: usize) -> Self {
@@ -68,7 +68,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.cols();
@@ -83,7 +83,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.rows();
@@ -103,7 +103,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// ```
     pub fn identity_matrix(size: usize) -> Self {
@@ -120,7 +120,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let inverse = ident.inverse();
     /// ```
@@ -194,7 +194,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let transpose = ident.transpose();
     /// ```
@@ -208,7 +208,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let mut matrix = Matrix::new(2, 2, vector);
     /// matrix.identifize();
@@ -239,7 +239,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let mut matrix = Matrix::new(2, 2, vector);
     /// matrix.fill(0.0);
@@ -259,7 +259,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.swap_cols(0, 1);
     /// ```
@@ -283,7 +283,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let num = ident.get(0, 0);
     /// ```
@@ -305,7 +305,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.set(0, 0, 100.0);
     /// ```
@@ -371,7 +371,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_row(0);
     /// ```
@@ -389,7 +389,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_row_mut(0);
     /// ```
@@ -408,7 +408,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_col(0);
     /// ```
@@ -427,7 +427,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_col_mut(0);
     /// ```
@@ -442,7 +442,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_by_point();
     /// ```
@@ -456,7 +456,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let mut iter = ident.iter_by_point_mut();
     /// ```
@@ -489,7 +489,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// matrix.add_point(0.0, 0.1, 0.2);
     /// ```
@@ -516,7 +516,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// matrix.add_edge(0.0, 0.1, 0.2, 0.3, 0.4, 0.5);
     /// ```
@@ -536,7 +536,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// let vector = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
     /// matrix.add_edge_vec(vector);
@@ -557,8 +557,8 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let mut matrix = Matrix::new(4, 0, Vec::new());
     /// let vector = Vector::new(1.0, 2.0, 3.0);
     /// matrix.append_point(&vector);
@@ -582,7 +582,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.add_dataset(&Matrix::identity_matrix(4));
     /// ```
@@ -606,7 +606,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
     /// ```
@@ -636,8 +636,8 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::matrix::Matrix;
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let ident1 = Matrix::identity_matrix(4);
     /// let mut vector = Vector::new(0.0, 0.1, 0.2);
     /// ident1.mult_vector(vector);

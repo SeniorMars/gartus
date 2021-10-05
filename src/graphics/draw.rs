@@ -1,6 +1,6 @@
+use crate::gmath::matrix::Matrix;
 use crate::graphics::colors::Pixel;
 use crate::graphics::display::Canvas;
-use crate::graphics::matrix::Matrix;
 
 #[allow(dead_code)]
 impl Canvas {
@@ -99,7 +99,7 @@ impl Canvas {
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
     /// use crate::curves_rs::graphics::colors::Pixel;
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.set_line_pixel(&color);
@@ -133,7 +133,7 @@ impl Canvas {
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
     /// use crate::curves_rs::graphics::colors::Pixel;
-    /// use crate::curves_rs::graphics::matrix::Matrix;
+    /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255);
     /// let color = Pixel::new(0, 64, 255);
     /// image.set_line_pixel(&color);

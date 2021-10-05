@@ -1,4 +1,4 @@
-use crate::graphics::vector::Vector;
+use crate::gmath::vector::Vector;
 
 #[derive(Clone, Debug, Copy)]
 /// A ray that composes of an origin vector and direction vector
@@ -19,8 +19,8 @@ impl Ray {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
-    /// use crate::curves_rs::graphics::ray::Ray;
+    /// use crate::curves_rs::gmath::vector::Vector;
+    /// use crate::curves_rs::gmath::ray::Ray;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
@@ -49,8 +49,8 @@ impl Ray {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
-    /// use crate::curves_rs::graphics::ray::Ray;
+    /// use crate::curves_rs::gmath::vector::Vector;
+    /// use crate::curves_rs::gmath::ray::Ray;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);

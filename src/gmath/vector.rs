@@ -27,7 +27,7 @@ impl Vector {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let vec3 = Vector::new(0.0, 0.0, 0.0);
     /// ```
     pub fn new(x: f64, y: f64, z: f64) -> Self {
@@ -44,7 +44,7 @@ impl Vector {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 2.0, 3.0);
     /// let cross = one.cross(two);
@@ -69,7 +69,7 @@ impl Vector {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 2.0, 3.0);
     /// let dot = one.dot(two);
@@ -84,7 +84,7 @@ impl Vector {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let length = one.length();
     /// ```
@@ -98,7 +98,7 @@ impl Vector {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::vector::Vector;
+    /// use crate::curves_rs::gmath::vector::Vector;
     /// let one = Vector::new(2.0, 2.0, 2.0);
     /// let normal = one.normalized();
     /// ```
