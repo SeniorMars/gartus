@@ -80,10 +80,13 @@ impl HSL {
     }
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-#[allow(clippy::upper_case_acronyms)]
-enum Color {
-    HSL(HSL),
-    Pixel(Pixel),
-}
+// TODO: figure out how to add a choice for canvas
+
+// #[derive(Debug, Clone)]
+// #[allow(dead_code)]
+// #[allow(clippy::upper_case_acronyms)]
+// enum Color {
+//     HSL(HSL),
+//     Pixel(Pixel),
+// }
+// trait Color {}

@@ -137,9 +137,6 @@ impl Turtle {
         }
         self.x = new_x.round() as u32;
         self.y = new_y.round() as u32;
-        assert!(self.x < self.canvas.width());
-        assert!(self.y < self.canvas.height());
-        assert!(self.x * self.y < self.canvas.height() * self.canvas.width());
     }
 
     /// Set new corrdinate for turtle

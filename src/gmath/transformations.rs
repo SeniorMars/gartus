@@ -317,7 +317,7 @@ impl Matrix {
 }
 
 // #[test]
-// #[should_panic]
+// // #[should_panic]
 // fn print_matrices() {
-//     println!("{}", Matrix::rotate_z(90.0));
+//     println!("{}", Matrix::identity_matrix(4));
 // }
