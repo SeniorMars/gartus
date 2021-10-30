@@ -11,7 +11,7 @@ fn script_test() {
         500,
         500,
         255,
-        &Pixel::new(0, 255, 0),
+        &Pixel::RGB(RGB::new(0, 255, 0)),
     );
     dw.parse_file()
 }
@@ -51,9 +51,9 @@ fn matrix_test() {
 fn dw_line_test() -> io::Result<()> {
     let xres: f64 = 750.0;
     let yres: f64 = 750.0;
-    let mut screen = Canvas::new(xres as u32, yres as u32, 255);
+    let mut screen = Canvas::new(xres as u32, yres as u32, 255, Pixel::RGB(RGB::default()));
     // screen.upper_left_system = true;
-    screen.set_line_color(0, 255, 0);
+    screen.set_line_color_rgb(0, 255, 0);
 
     // octants 1 and 5
     screen.draw_line(screen.line, 0.0, 0.0, xres - 1.0, yres - 1.0);
@@ -61,29 +61,29 @@ fn dw_line_test() -> io::Result<()> {
     screen.draw_line(screen.line, xres - 1.0, yres - 1.0, 0.0, yres / 2.0);
 
     // octants 8 and 4
-    screen.line.blue = 255;
+    screen.set_line_color_rgb(0, 255, 255);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres - 1.0, 0.0);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres - 1.0, yres / 2.0);
     screen.draw_line(screen.line, xres - 1.0, 0.0, 0.0, yres / 2.0);
 
     // octants 2 and 6
-    screen.set_line_color(255, 0, 0);
+    screen.set_line_color_rgb(255, 0, 0);
     screen.draw_line(screen.line, 0.0, 0.0, xres / 2.0, yres - 1.0);
     screen.draw_line(screen.line, xres - 1.0, yres - 1.0, xres / 2.0, 0.0);
 
     // octants 7 and 3
-    screen.line.blue = 255;
+    screen.set_line_color_rgb(255, 0, 255);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres / 2.0, 0.0);
     screen.draw_line(screen.line, xres - 1.0, 0.0, xres / 2.0, yres - 1.0);
 
     // horizontal and vertical
-    screen.set_line_color(255, 255, 0);
+    screen.set_line_color_rgb(255, 255, 0);
     screen.draw_line(screen.line, 0.0, yres / 2.0, xres - 1.0, yres / 2.0);
     screen.draw_line(screen.line, xres / 2.0, 0.0, xres / 2.0, yres - 1.0);
 
     // saving
     // screen.animation("test")
-    // screen.display()?;
+    screen.display()?;
     screen.save_binary("./pics/binary2.ppm")?;
     screen.save_ascii("./pics/ascii2.ppm")?;
     screen.save_extension("./pics/img.png")

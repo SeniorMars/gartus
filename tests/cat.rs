@@ -1,14 +1,17 @@
-use curves_rs::graphics::display::*;
+use curves_rs::graphics::{
+    colors::{Pixel, RGB},
+    display::*,
+};
 use std::io;
 
 #[test]
 #[allow(clippy::vec_init_then_push)]
 fn cat() -> io::Result<()> {
-    let mut cat = Canvas::new(610, 610, 255);
+    let mut cat = Canvas::new(610, 610, 255, Pixel::RGB(RGB::default()));
 
     let mut head: Vec<(i32, i32)> = Vec::new();
     cat.upper_left_system = true;
-    cat.set_line_color(255, 255, 255);
+    cat.set_line_color_rgb(255, 255, 255);
 
     head.push((350 - 150, 222));
     head.push((358 - 150, 294));
@@ -63,7 +66,7 @@ fn cat() -> io::Result<()> {
     eye_right.push((487 - 150, 345));
     eye_right.push((465 - 150, 322));
 
-    cat.set_line_color(255, 255, 255);
+    cat.set_line_color_rgb(255, 255, 255);
     for i in 0..eye_right.len() {
         if i + 1 != eye_right.len() {
             cat.draw_line(

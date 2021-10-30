@@ -1,22 +1,23 @@
 // extern crate rand;
 use curves_rs::graphics::colors::Pixel;
+use curves_rs::graphics::colors::RGB;
 use curves_rs::graphics::display::Canvas;
 // use curves_rs::utils;
 // use rand::Rng;
 
 #[test]
 fn rgb() {
-    let mut img = Canvas::with_capacity(256, 256, 255);
+    let mut img = Canvas::with_capacity(256, 256, 255, Pixel::RGB(RGB::default()));
     let (width, height) = (img.width(), img.height());
     let mut data: Vec<Pixel> = Vec::with_capacity((width * height) as usize);
     (0..height).rev().for_each(|j| {
         eprintln!("Scanlines reminaing: {}", height - j - 1);
         (0..width).for_each(|i| {
-            data.push(Pixel {
+            data.push(Pixel::RGB(RGB {
                 red: (255.99 * (i as f64 / (width - 1) as f64)) as u8,
                 green: (255.99 * (j as f64 / (height - 1) as f64)) as u8,
                 blue: (255.99 * 0.25) as u8,
-            })
+            }))
         });
     });
     eprintln!("Done.");
@@ -28,7 +29,7 @@ fn rgb() {
 fn julia() {
     let width = 800;
     let height = 600;
-    let mut julia = Canvas::with_capacity(height, width, 255);
+    let mut julia = Canvas::with_capacity(height, width, 255, Pixel::RGB(RGB::default()));
     let mut data: Vec<Pixel> = Vec::with_capacity((width * height) as usize);
     let cx = -0.9;
     let cy = 0.27015;
@@ -44,11 +45,11 @@ fn julia() {
                 zx = temp;
                 i -= 1;
             }
-            data.push(Pixel {
+            data.push(Pixel::RGB(RGB {
                 red: (i << 3) as u8,
                 green: (i << 5) as u8,
                 blue: (i << 4) as u8,
-            })
+            }))
             // write!(writer, "{} {} {} ", i as u8, i as u8, i as u8)?;
         }
     }
@@ -59,7 +60,7 @@ fn julia() {
 #[test]
 fn owl() {
     // let mut rng = rand::thread_rng();
-    let mut owl = Canvas::new(500, 500, 255);
+    let mut owl = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     owl.upper_left_system = true;
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,
@@ -100,11 +101,11 @@ fn owl() {
         135, 158,
     ];
 
-    owl.set_line_color(255, 255, 255);
+    owl.set_line_color_rgb(255, 255, 255);
     let chunks = 2;
     (0..corrs.len()).step_by(chunks).for_each(|i| {
         if i != corrs.len() - chunks {
-            // owl.set_line_color(
+            // owl.set_line_color_rgb(
             //     rng.gen_range(0..=255),
             //     rng.gen_range(0..=255),
             //     rng.gen_range(0..=255),

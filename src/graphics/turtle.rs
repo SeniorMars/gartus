@@ -1,6 +1,7 @@
-use crate::graphics::colors::Pixel;
 use crate::graphics::display::Canvas;
 use crate::utils::polar_to_xy;
+
+use super::colors::Pixel;
 
 #[derive(Debug, Clone, Default)]
 /// A turle is an agent that can be controlled to draw on the [Canvas]
@@ -43,9 +44,9 @@ impl Turtle {
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let drawing = Box::new(Canvas::new(50, 50, 255));
-    /// let red = Pixel::new(255, 0, 0);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
+    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
     /// let turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// ```
     pub fn new(canvas: Box<Canvas>, color: Pixel, direction_angle: f64, x: u32, y: u32) -> Self {
@@ -71,10 +72,10 @@ impl Turtle {
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let drawing = Box::new(Canvas::new(50, 50, 255));
-    /// let red = Pixel::new(255, 0, 0);
-    /// let green = Pixel::new(0, 255, 0);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
+    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
+    /// let green = Pixel::RGB(RGB::new(0, 255, 0));
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.set_color(green)
     /// ```
@@ -94,9 +95,9 @@ impl Turtle {
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let drawing = Box::new(Canvas::new(50, 50, 255));
-    /// let red = Pixel::new(255, 0, 0);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
+    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.set_heading(90.0);
     /// ```
@@ -122,9 +123,9 @@ impl Turtle {
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let drawing = Box::new(Canvas::new(50, 50, 255));
-    /// let red = Pixel::new(255, 0, 0);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
+    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.move_turtle(-3);
     /// ```
@@ -157,9 +158,9 @@ impl Turtle {
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let drawing = Box::new(Canvas::new(50, 50, 255));
-    /// let red = Pixel::new(255, 0, 0);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
+    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.goto(49, 49);
     /// ```
@@ -194,6 +195,8 @@ impl Turtle {
 
 #[cfg(test)]
 mod test {
+    use crate::graphics::colors::RGB;
+
     use super::*;
 
     #[test]
@@ -201,8 +204,8 @@ mod test {
         let start_x = 50;
         let start_y = 50;
         let mut turtle = Turtle::new(
-            Box::new(Canvas::new(100, 100, 255)),
-            Pixel::new(150, 50, 65),
+            Box::new(Canvas::new(100, 100, 255, Pixel::RGB(RGB::default()))),
+            Pixel::RGB(RGB::new(150, 50, 65)),
             90.0,
             start_x,
             start_y,
@@ -224,9 +227,9 @@ mod test {
                 start_x * 2 + 1,
                 start_y * 2 + 1,
                 255,
-                &Pixel::new(235, 235, 235),
+                Pixel::RGB(RGB::new(235, 235, 235)),
             )),
-            Pixel::new(150, 50, 65),
+            Pixel::RGB(RGB::new(150, 50, 65)),
             90.0,
             start_x,
             start_y,

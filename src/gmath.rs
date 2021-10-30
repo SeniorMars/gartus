@@ -1,11 +1,13 @@
-//! The graphics module hosts all the math needed for computer graphics
+//! The gmath graphics module hosts all the math needed for computer graphics
 
 /// Includes the [Matrix] struct with a surrounding mini matrix library
 /// to make it easier for a user to draw onto the Canvas.
 pub mod matrix;
-/// Hosts the ray struct for ray tracing
+/// Hosts the [Parametric] struct
+pub mod parametric;
+/// Hosts the [Ray] struct for path/ray tracing
 pub mod ray;
-/// Hosts all the functions needed to start with 3D transformations with matrices.
+/// Hosts all the functions needed to start applying 3D transformations to matrices.
 pub mod transformations;
-/// Hosts the vector struct for ray tracing
+/// Hosts the [Vector] struct for ray tracing
 pub mod vector;

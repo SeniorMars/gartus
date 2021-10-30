@@ -4,7 +4,7 @@ use curves_rs::graphics::display::*;
 
 #[test]
 fn main() {
-    let mut heart = Canvas::new(610, 610, 255);
+    let mut heart = Canvas::new(610, 610, 255, Pixel::RGB(RGB::default()));
     heart.upper_left_system = true;
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(120));
     let corrs = [
@@ -22,7 +22,7 @@ fn main() {
     println!("{}", rotatey);
     translate1 *= matrix;
     rotatey *= translate1.clone();
-    heart.set_line_pixel(&Pixel::new(188, 0, 45));
+    heart.set_line_pixel(&Pixel::RGB(RGB::new(188, 0, 45)));
     heart.draw_lines(&rotatey);
     heart.draw_lines(&translate1);
     heart

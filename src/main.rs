@@ -1,6 +1,6 @@
 use curves_rs::gmath::ray::Ray;
 use curves_rs::gmath::vector::{Color, Vector};
-use curves_rs::graphics::colors::Pixel;
+use curves_rs::graphics::colors::{Pixel, RGB};
 use curves_rs::graphics::display::Canvas;
 
 pub fn ray_color(r: &Ray) -> Color {
@@ -24,7 +24,12 @@ pub fn main() {
     let lower_left_corner =
         origin - horizontal / 2.0 - vertical / 2.0 - Vector::new(0.0, 0.0, focal_length);
 
-    let mut img = Canvas::with_capacity(IMAGE_HEIGHT as u32, IMAGE_WIDTH as u32, 255);
+    let mut img = Canvas::with_capacity(
+        IMAGE_HEIGHT as u32,
+        IMAGE_WIDTH as u32,
+        255,
+        Pixel::RGB(RGB::default()),
+    );
     let mut data: Vec<Pixel> = Vec::with_capacity((img.width() * img.height()) as usize);
 
     (0..IMAGE_HEIGHT).for_each(|j| {
@@ -36,7 +41,7 @@ pub fn main() {
                 origin,
                 lower_left_corner + u * horizontal + v * vertical - origin,
             ));
-            data.push(Pixel::from(pixel_color))
+            data.push(Pixel::RGB(RGB::from(pixel_color)))
         });
     });
 

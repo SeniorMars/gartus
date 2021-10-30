@@ -6,7 +6,7 @@ use std::{
 };
 
 #[derive(Default, Clone, Debug)]
-/// A m x n Matrix is represented here
+/// A type that represents a m x n Matrix
 pub struct Matrix {
     /// The rows (m) componet of the Matrix
     rows: usize,

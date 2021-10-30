@@ -1,11 +1,7 @@
 use crate::gmath::matrix::Matrix;
-use crate::graphics::{colors::Pixel, display::Canvas};
+use crate::graphics::colors::{Pixel, HSL};
+use crate::graphics::{colors::RGB, display::Canvas};
 use std::{fs, str::FromStr};
-
-// #[macro_export]
-// macro_rules! parse_nums {
-//     ($ )
-// }
 
 #[derive(Debug, Default)]
 /**
@@ -81,17 +77,21 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::new(17, 46, 81);
+    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
     pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &Pixel) -> Self {
+        let line = match color {
+            Pixel::HSL(_) => Pixel::HSL(HSL::default()),
+            Pixel::RGB(_) => Pixel::RGB(RGB::default()),
+        };
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
-            canvas: Canvas::new(width, height, range),
+            canvas: Canvas::new(width, height, range, line),
             color: *color,
         }
     }
@@ -112,10 +112,10 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::new(17, 46, 81);
-    /// let outline = Pixel::new(235, 219, 178);
+    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
+    /// let outline = Pixel::RGB(RGB::new(235, 219, 178));
     /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// ```
     pub fn new_with_bg(
@@ -130,7 +130,7 @@ impl Parser {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
-            canvas: Canvas::new_with_bg(width, height, range, bg),
+            canvas: Canvas::new_with_bg(width, height, range, *bg),
             color: *color,
         }
     }
@@ -141,10 +141,10 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::new(17, 46, 81);
-    /// let outline = Pixel::new(235, 219, 178);
+    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
+    /// let outline = Pixel::RGB(RGB::new(235, 219, 178));
     /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// porygon.parse_file();
     /// ```
@@ -218,13 +218,26 @@ impl Parser {
                 }
                 "color" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let args = Parser::parse_as::<u8>(next_line.to_string()).unwrap();
-                    assert_eq!(3, args.len());
-                    self.set_color(&Pixel {
-                        red: args[0],
-                        green: args[1],
-                        blue: args[2],
-                    })
+                    match self.color {
+                        Pixel::HSL(_) => {
+                            let args = Parser::parse_as::<u16>(next_line.to_string()).unwrap();
+                            assert_eq!(3, args.len());
+                            self.set_color(&Pixel::HSL(HSL {
+                                hue: args[0],
+                                saturation: args[1],
+                                light: args[2],
+                            }))
+                        }
+                        Pixel::RGB(_) => {
+                            let args = Parser::parse_as::<u8>(next_line.to_string()).unwrap();
+                            assert_eq!(3, args.len());
+                            self.set_color(&Pixel::RGB(RGB {
+                                red: args[0],
+                                green: args[1],
+                                blue: args[2],
+                            }))
+                        }
+                    }
                 }
                 "ident" => {
                     self.trans_matrix = Matrix::identity_matrix(4);

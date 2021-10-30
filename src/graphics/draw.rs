@@ -1,5 +1,6 @@
+use super::colors::Pixel;
 use crate::gmath::matrix::Matrix;
-use crate::graphics::colors::Pixel;
+use crate::gmath::parametric::Parametric;
 use crate::graphics::display::Canvas;
 
 #[allow(dead_code)]
@@ -17,11 +18,11 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let mut image = Canvas::new(25, 25, 255);
-    /// let color = Pixel::new(0, 64, 255);
-    /// let background_color = Pixel::new(0, 0, 0);
+    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
+    /// let background_color = Pixel::RGB(RGB::new(0, 0, 0));
     /// image.fill(10, 10, &color, &background_color)
     /// ```
     pub fn fill(&mut self, x: i32, y: i32, fill_color: &Pixel, boundary_color: &Pixel) {
@@ -58,11 +59,11 @@ impl Canvas {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let mut image = Canvas::new(25, 25, 255);
-    /// let color = Pixel::new(0, 64, 255);
-    /// let background_color = Pixel::new(0, 0, 0);
+    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
+    /// let background_color = Pixel::RGB(RGB::new(0, 0, 0));
     /// image.fill_with_animation(10, 10, &color, &background_color, "image")
     /// ```
     pub fn fill_with_animation(
@@ -98,10 +99,10 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// let mut image = Canvas::new(25, 25, 255);
-    /// let color = Pixel::new(0, 64, 255);
+    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
     /// image.set_line_pixel(&color);
     /// let matrix = Matrix::identity_matrix(4);
     /// image.draw_lines(&matrix)
@@ -132,10 +133,10 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// let mut image = Canvas::new(25, 25, 255);
-    /// let color = Pixel::new(0, 64, 255);
+    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
     /// image.set_line_pixel(&color);
     /// let matrix = Matrix::identity_matrix(4);
     /// image.draw_lines_for_animation(&matrix, "cool_picture")
@@ -178,9 +179,9 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let mut image = Canvas::new(25, 25, 255);
-    /// let color = Pixel::new(0, 64, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)
     /// ```
     pub fn draw_line(&mut self, color: Pixel, x0: f64, y0: f64, x1: f64, y1: f64) {

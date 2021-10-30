@@ -1,14 +1,10 @@
-use crate::graphics::colors::Pixel;
+use crate::graphics::colors::{Pixel, HSL, RGB};
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
     ops::{Index, IndexMut},
     process::{Command, Stdio},
 };
-
-// pub struct Matrix<const rows:usize, const cols:usize> {
-//     data: Vec<f64>, not going to do generics
-// }
 
 #[derive(Default, Debug, Clone)]
 /// An art [Canvas] / computer screen is represented here.
@@ -25,7 +21,7 @@ pub struct Canvas {
     pub(in crate::graphics) anim_index: u32,
     /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
     pub upper_left_system: bool,
-    /// A [Pixel] that represents the color that will be used to draw lines.
+    /// A [PixelColor] that represents the color that will be used to draw lines.
     pub line: Pixel,
 }
 
@@ -38,23 +34,30 @@ impl Canvas {
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
+    /// * `line_color` - An RGB or HSL value that will also represent the default color for the
+    /// drawing line
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// ```
-    pub fn new(height: u32, width: u32, range: u8) -> Self {
+    pub fn new(height: u32, width: u32, range: u8, line_color: Pixel) -> Self {
+        let pixels: Vec<Pixel> = match line_color {
+            Pixel::HSL(_) => vec![Pixel::HSL(HSL::default()); (height * width) as usize],
+            Pixel::RGB(_) => vec![Pixel::RGB(RGB::default()); (height * width) as usize],
+        };
         Self {
             height,
             width,
             range,
-            pixels: vec![Pixel::default(); (height * width) as usize],
+            pixels,
             anim_index: 0,
             upper_left_system: false,
-            line: Pixel::default(),
+            line: line_color,
         }
     }
 
@@ -66,7 +69,7 @@ impl Canvas {
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth
     /// of colors in the [Canvas]
-    /// * `background_color` - A [Pixel] that will represent the color of the
+    /// * `background_color` - A RGB or HSL value that will represent the color of the
     /// background color that will fill the [Canvas]
     ///
     /// # Examples
@@ -74,23 +77,29 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let background_color = Pixel::new(1, 2, 3);
-    /// let image = Canvas::new_with_bg(500, 500, 255, &background_color);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let background_color = Pixel::RGB(RGB::new(1, 2, 3));
+    /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// ```
-    pub fn new_with_bg(height: u32, width: u32, range: u8, background_color: &Pixel) -> Self {
+    pub fn new_with_bg(height: u32, width: u32, range: u8, background_color: Pixel) -> Self {
+        let line = match background_color {
+            Pixel::HSL(_) => Pixel::HSL(HSL::default()),
+            Pixel::RGB(_) => Pixel::RGB(RGB::default()),
+        };
+
         Self {
             height,
             width,
             range,
-            pixels: vec![*background_color; (height * width) as usize],
+            pixels: vec![background_color; (height * width) as usize],
             anim_index: 0,
             upper_left_system: false,
-            line: Pixel::default(),
+            line,
         }
     }
 
     /// Returns a blank [Canvas] that can be filled
+    ///
     ///
     /// # Arguments
     ///
@@ -104,9 +113,11 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::with_capacity(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::with_capacity(500, 500, 255, Pixel::RGB(RGB::default()));
     /// ```
-    pub fn with_capacity(height: u32, width: u32, range: u8) -> Self {
+    pub fn with_capacity(height: u32, width: u32, range: u8, line_color: Pixel) -> Self {
+        let line = line_color;
         Self {
             height,
             width,
@@ -114,7 +125,7 @@ impl Canvas {
             pixels: Vec::with_capacity((height * width) as usize),
             anim_index: 0,
             upper_left_system: false,
-            line: Pixel::default(),
+            line,
         }
     }
 
@@ -125,7 +136,8 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// let width = image.width();
     /// ```
     pub fn width(&self) -> u32 {
@@ -139,7 +151,8 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// let height = image.height();
     /// ```
     pub fn height(&self) -> u32 {
@@ -157,9 +170,9 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let mut image = Canvas::new(500, 500, 255);
-    /// let new_color = Pixel::new(12, 20, 30);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// let new_color = Pixel::RGB(RGB::new(12, 20, 30));
     /// image.set_line_pixel(&new_color);
     /// ```
     pub fn set_line_pixel(&mut self, new_color: &Pixel) {
@@ -179,13 +192,38 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let mut image = Canvas::new(500, 500, 255);
-    /// image.set_line_color(55, 95, 100);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// image.set_line_color_rgb(55, 95, 100);
     /// ```
-    pub fn set_line_color(&mut self, red: u8, green: u8, blue: u8) {
-        self.line.red = red;
-        self.line.green = green;
-        self.line.blue = blue
+    pub fn set_line_color_rgb(&mut self, red: u8, green: u8, blue: u8) {
+        match self.line {
+            Pixel::RGB(_) => self.line = Pixel::RGB(RGB::new(red, green, blue)),
+            Pixel::HSL(_) => panic!("Expected values for RGB"),
+        }
+    }
+
+    /// Sets the color of the drawing line to a different color given three ints.
+    ///
+    /// # Arguments
+    ///
+    /// * `hue` - A u16 that represents hue -- should be a number from [0, 360)
+    /// * `saturation` - A u8 that represents saturation percentage -- should be a number from [0, 100]
+    /// * `light` - A u8 that represent light percentage -- should be a number from [0, 100]
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::colors::{Pixel, HSL};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::HSL(HSL::default()));
+    /// image.set_line_color_hsl(55, 95, 100);
+    /// ```
+    pub fn set_line_color_hsl(&mut self, hue: u16, saturation: u16, light: u16) {
+        match self.line {
+            Pixel::HSL(_) => self.line = Pixel::HSL(HSL::new(hue, saturation, light)),
+            Pixel::RGB(_) => panic!("Expected values for HSL"),
+        }
     }
 
     /// Fills in an empty canvas
@@ -200,9 +238,9 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let mut image = Canvas::with_capacity(1, 1, 255);
-    /// let mut data = vec![Pixel::default()];
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::with_capacity(1, 1, 255, Pixel::RGB(RGB::default()));
+    /// let mut data = vec![Pixel::RGB(RGB::default())];
     /// image.fill_canvas(data)
     /// ```
     pub fn fill_canvas(&mut self, mut new_pixels: Vec<Pixel>) {
@@ -270,8 +308,8 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// let color = image.get_pixel(250, 250);
     /// ```
     pub fn get_pixel(&self, x: i32, y: i32) -> &Pixel {
@@ -304,9 +342,9 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let mut image = Canvas::new(500, 500, 255);
-    /// let color = Pixel::new(1, 1, 1);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// let color = Pixel::RGB(RGB::new(1, 1, 1));
     /// image.plot(&color, 100, 100);
     /// ```
     pub fn plot(&mut self, new_color: &Pixel, x: i32, y: i32) {
@@ -330,13 +368,20 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let background_color = Pixel::new(1, 2, 3);
-    /// let mut image = Canvas::new_with_bg(500, 500, 255, &background_color);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let background_color = Pixel::RGB(RGB::new(1, 2, 3));
+    /// let mut image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// image.clear_canvas()
     /// ```
     pub fn clear_canvas(&mut self) {
-        self.iter_mut().for_each(|i| *i = Pixel::default());
+        match self.line {
+            Pixel::HSL(_) => self
+                .iter_mut()
+                .for_each(|i| *i = Pixel::HSL(HSL::default())),
+            Pixel::RGB(_) => self
+                .iter_mut()
+                .for_each(|i| *i = Pixel::RGB(RGB::default())),
+        }
     }
 
     /// Fills the entire [Canvas] with one [Pixel]
@@ -350,9 +395,9 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Pixel;
-    /// let background_color = Pixel::new(1, 2, 3);
-    /// let mut image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let background_color = Pixel::RGB(RGB::new(1, 2, 3));
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.fill_color(&background_color)
     /// ```
     pub fn fill_color(&mut self, bg: &Pixel) {
@@ -397,7 +442,8 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
@@ -405,8 +451,12 @@ impl Canvas {
         let mut writer = BufWriter::new(&mut file);
         writeln!(writer, "P3 {} {} {}", self.height, self.width, self.range)?;
         self.iter().for_each(|pixel| {
-            write!(writer, "{} {} {} ", pixel.red, pixel.green, pixel.blue)
-                .expect("File should always be written to")
+            let rgb = match pixel {
+                Pixel::HSL(hsl) => RGB::from(*hsl),
+                Pixel::RGB(rgb) => *rgb,
+            };
+            write!(writer, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
+                .expect("File should always be written to");
         });
         writer.flush()
     }
@@ -423,7 +473,8 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
@@ -432,14 +483,18 @@ impl Canvas {
         writer
             .write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
         self.iter().for_each(|pixel| {
+            let rgb = match pixel {
+                Pixel::HSL(hsl) => RGB::from(*hsl),
+                Pixel::RGB(rgb) => *rgb,
+            };
             writer
-                .write_all(&pixel.red.to_be_bytes())
+                .write_all(&rgb.red.to_be_bytes())
                 .expect("Could not write as binary");
             writer
-                .write_all(&pixel.green.to_be_bytes())
+                .write_all(&rgb.green.to_be_bytes())
                 .expect("Could not write as binary");
             writer
-                .write_all(&pixel.blue.to_be_bytes())
+                .write_all(&rgb.blue.to_be_bytes())
                 .expect("Could not write as binary");
         });
         writer.flush()
@@ -456,13 +511,18 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.save_extension("pics/test.png").expect("Could not save file")
     /// ```
     pub fn save_extension(&self, file_name: &str) -> io::Result<()> {
         let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
         self.iter().for_each(|pixel| {
-            content.push_str(&format!("{} {} {} ", &pixel.red, &pixel.green, &pixel.blue))
+            let rgb = match pixel {
+                Pixel::HSL(hsl) => RGB::from(*hsl),
+                Pixel::RGB(rgb) => *rgb,
+            };
+            content.push_str(&format!("{} {} {} ", &rgb.red, &rgb.green, &rgb.blue))
         });
         let mut child = Command::new("convert")
             .arg("-")
@@ -486,13 +546,18 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let image = Canvas::new(500, 500, 255);
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.display().expect("Could not display image")
     /// ```
     pub fn display(&self) -> io::Result<()> {
         let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
         self.iter().for_each(|pixel| {
-            content.push_str(&format!("{} {} {} ", &pixel.red, &pixel.green, &pixel.blue))
+            let rgb = match pixel {
+                Pixel::HSL(hsl) => RGB::from(*hsl),
+                Pixel::RGB(rgb) => *rgb,
+            };
+            content.push_str(&format!("{} {} {} ", rgb.red, rgb.green, rgb.blue))
         });
         let mut child = Command::new("display")
             .stdin(Stdio::piped())
