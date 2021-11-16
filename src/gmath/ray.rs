@@ -1,4 +1,4 @@
-use crate::gmath::vector::Vector;
+use super::vector::Vector;
 
 #[derive(Clone, Debug, Copy)]
 /// A ray that composes of an origin vector and direction vector

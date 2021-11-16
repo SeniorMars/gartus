@@ -1,6 +1,7 @@
 use crate::gmath::vector::Vector;
 use std::cmp::{max, min};
 
+// pub trait Pixel: Default {}
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A computer pixel struct is represented by its red, green, blue values
 pub struct RGB {
@@ -11,6 +12,57 @@ pub struct RGB {
     /// The final byte that represents blue light
     pub blue: u8,
 }
+
+/// A red Pixel
+pub const RED: Pixel = Pixel::RGB(RGB {
+    red: 255,
+    green: 0,
+    blue: 0,
+});
+
+/// A green Pixel
+pub const GREEN: Pixel = Pixel::RGB(RGB {
+    red: 0,
+    green: 255,
+    blue: 0,
+});
+
+/// A blue Pixel
+pub const BLUE: Pixel = Pixel::RGB(RGB {
+    red: 0,
+    green: 0,
+    blue: 255,
+});
+
+/// A magenta Pixel
+pub const MAGENTA: Pixel = Pixel::RGB(RGB {
+    red: 255,
+    green: 0,
+    blue: 255,
+});
+
+/// A white Pixel
+pub const WHITE: Pixel = Pixel::RGB(RGB {
+    red: 255,
+    green: 255,
+    blue: 255,
+});
+
+/// A yellow Pixel
+pub const YELLOW: Pixel = Pixel::RGB(RGB {
+    red: 255,
+    green: 255,
+    blue: 0,
+});
+
+/// A cyan Pixel
+pub const CYAN: Pixel = Pixel::RGB(RGB {
+    red: 0,
+    green: 255,
+    blue: 255,
+});
+
+// impl Pixel for RGB {}
 
 #[allow(dead_code)]
 impl RGB {
@@ -104,6 +156,8 @@ pub struct HSL {
     pub light: u16,
 }
 
+// impl Pixel for HSL {}
+
 #[allow(dead_code)]
 impl HSL {
     /// Returns a HSL that can be used in [Canvas]
@@ -123,9 +177,9 @@ impl HSL {
     /// ```
     pub fn new(hue: u16, saturation: u16, light: u16) -> Self {
         Self {
-            hue: hue % 360,
-            saturation: saturation % 101,
-            light: light % 101,
+            hue: hue.clamp(0, 359),
+            saturation: saturation.clamp(0, 100),
+            light: light.clamp(0, 100),
         }
     }
 }
@@ -133,7 +187,7 @@ impl HSL {
 #[allow(clippy::many_single_char_names)]
 impl From<RGB> for HSL {
     fn from(rgb: RGB) -> Self {
-        let (mut h, s, l): (f32, f32, f32);
+        let (mut h, s, l);
         let r = rgb.red as f32 / 255.0;
         let g = rgb.green as f32 / 255.0;
         let b = rgb.blue as f32 / 255.0;
@@ -201,6 +255,14 @@ impl Pixel {
 impl Default for Pixel {
     fn default() -> Self {
         Self::RGB(RGB::default())
+    }
+}
+impl From<Pixel> for RGB {
+    fn from(pixel: Pixel) -> Self {
+        match pixel {
+            Pixel::HSL(hsl) => RGB::from(hsl),
+            Pixel::RGB(rgb) => rgb,
+        }
     }
 }
 

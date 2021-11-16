@@ -1,4 +1,4 @@
-use crate::gmath::vector::Vector;
+use super::{helpers::hermite_curve_coeffs, parametric::Parametric, vector::Vector};
 use std::{
     fmt,
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
@@ -125,6 +125,7 @@ impl Matrix {
     /// let inverse = ident.inverse();
     /// ```
     pub fn inverse(&self) -> Self {
+        eprintln!("This doens't really work lol -- pls don't use");
         let (rows, cols) = (self.rows, self.cols);
         assert_eq!(rows, cols, "The matrix must be N x N");
         let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
@@ -199,7 +200,14 @@ impl Matrix {
     /// let transpose = ident.transpose();
     /// ```
     pub fn transpose(&self) -> Self {
-        Matrix::new(self.cols, self.rows, self.data.clone())
+        let mut new_data = vec![0.0; self.rows * self.cols];
+        (0..self.rows).for_each(|i| {
+            (0..self.cols).for_each(|j| {
+                new_data[self.index(i, j)] = self.get(j, i);
+            });
+        });
+
+        Matrix::new(self.rows, self.cols, new_data)
     }
 
     /// Makes self an identity [Matrix] if the matrix is N by N.
@@ -225,7 +233,7 @@ impl Matrix {
         }
     }
 
-    fn index(&self, row: usize, col: usize) -> usize {
+    pub(crate) fn index(&self, row: usize, col: usize) -> usize {
         col * self.rows + row
     }
 
@@ -595,6 +603,73 @@ impl Matrix {
         self.cols += other.cols;
     }
 
+    /// Adds a parametric curve to Matrix
+    ///
+    /// # Arguments
+    ///
+    /// * `x_func` - A function that returns a f64 x value given t
+    /// * `y_func` - A function that returns a f64 y value given t
+    /// * `z` - The z value to be added to the matrix. TODO: perhaps, make h(z)?
+    /// * `step` - A value representing precision of the curve.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::curves_rs::gmath::parametric::Parametric;
+    /// let mut matrix = Matrix::new(4, 0, Vec::new());
+    /// ```
+    pub fn add_parametric_curve<F: Fn(f64) -> f64, G: Fn(f64) -> f64>(
+        &mut self,
+        x_func: F,
+        y_func: G,
+        z: f64,
+        step: f64,
+    ) {
+        let parametric = Parametric::new(x_func, y_func);
+        parametric
+            .values_iter(step)
+            .collect::<Vec<(f64, f64)>>()
+            .windows(2)
+            .for_each(|points| {
+                let (x0, y0) = points[0];
+                let (x1, y1) = points[1];
+                self.add_edge(x0, y0, z, x1, y1, z);
+            });
+    }
+
+    /// Adds a hermite curve to Matrix
+    ///
+    /// # Arguments
+    ///
+    ///
+    /// * `p0` - a point (x, y) that represents the start of the curve
+    /// * `p1` - a point (x, y) that represents the start of the curve
+    /// * `r0` - the slope of p0
+    /// * `r1` - the slope of p1
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::curves_rs::gmath::parametric::Parametric;
+    /// let mut matrix = Matrix::new(4, 0, Vec::new());
+    /// ```
+    pub fn add_hermite(&mut self, p0: (f64, f64), p1: (f64, f64), r0: (f64, f64), r1: (f64, f64)) {
+        let (ax, bx, cx, dx) = hermite_curve_coeffs(p0.0, p1.0, r0.0, r1.0);
+        let (ay, by, cy, dy) = hermite_curve_coeffs(p0.1, p1.1, r0.1, r1.1);
+        self.add_parametric_curve(
+            |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
+            |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
+            0.0,
+            0.0001,
+        );
+    }
+}
+
+impl Matrix {
     /// Returns the result of multiplying self by another [Matrix].
     /// Self's columns must be the same size as the other's Matrix's rwos.
     ///
@@ -611,16 +686,94 @@ impl Matrix {
     /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
     /// ```
     pub fn mult_matrix(&self, other: &Self) -> Self {
+        //     assert_eq!(self.nrows, other.ncols, "nrows of m1 must == ncols of m2");
+        //     let (frows, fcols) = (other.nrows, self.nrows);
+        //     let mut fdata = vec![0.0; frows * fcols];
+        //     for (i, d) in fdata.iter_mut().enumerate() {
+        //         let (r, c) = Self::index_to_rc(i, fcols);
+        //         *d = self
+        //             .col_iter(c)
+        //             .zip(other.row_iter(r))
+        //             .fold(0.0, |sum, (a, b)| sum + a * b);
+        //     }
+        //     Matrix::new(frows, fcols, fdata)
+        //
+        // assert_eq!(self.ncols, other.nrows, "ncols of m1 must == nrows of m2");
+        // let (frows, fcols) = (self.nrows, other.ncols);
+        // let mut fdata = vec![0.0; frows * fcols];
+        // for (i, d) in fdata.iter_mut().enumerate() {
+        //     let (r, c) = Self::index_to_rc(i, fcols);
+        //     *d = self
+        //         .row_iter(r)
+        //         .zip(other.col_iter(c))
+        //         .fold(0.0, |sum, (a, b)| sum + a * b);
+        // }
+        // Matrix::new(frows, fcols, fdata)
+        // println!("sr{}", self.rows);
+        // println!("sc{}", self.cols);
+        // println!("or{}", other.rows);
+        // println!("oc{}", other.cols);
         assert_eq!(
             self.rows, other.cols,
             "rows of self must equal cols of other"
         );
         let (rows, cols) = (other.rows, self.cols);
+        // println!("{} x {}", rows, cols);
+        // println!("{}", self);
+        // println!("{}", other);
         let mut data = vec![0.0; rows * cols];
         for (index, element) in data.iter_mut().enumerate() {
+            // println!(
+            //     "1: {:?}",
+            //     self.iter_col(index / rows).collect::<Vec<&f64>>()
+            // );
+            // println!(
+            //     "2: {:?}",
+            //     self.iter_col(index % rows).collect::<Vec<&f64>>()
+            // );
+            // println!(
+            //     "self: {:?}",
+            //     self.iter_col(index / rows).collect::<Vec<&f64>>()
+            // );
+            // println!(
+            //     "other: {:?}",
+            //     other.iter_row(index % rows).collect::<Vec<&f64>>()
+            // );
             *element = self
                 .iter_col(index / rows)
                 .zip(other.iter_row(index % rows))
+                .fold(0.0, |acc, (s, o)| acc + s * o);
+            // println!("{}", element);
+        }
+        Matrix { rows, cols, data }
+    }
+
+    /// Returns the result of multiplying the tranpose of self by another [Matrix].
+    /// Self's columns must be the same size as the other's Matrix's rwos.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - A reference to a Matrix to be multipled with self
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let mut ident1 = Matrix::identity_matrix(4);
+    /// let result = ident1.mult_trans(&Matrix::identity_matrix(4));
+    /// ```
+    pub fn mult_trans(&self, other: &Self) -> Self {
+        assert_eq!(
+            self.cols, other.rows,
+            "cols of self must equal rows of other"
+        );
+        let (rows, cols) = (self.rows, other.cols);
+        let mut data = vec![0.0; rows * cols];
+        for (index, element) in data.iter_mut().enumerate() {
+            *element = self
+                .iter_row(index % rows)
+                .zip(other.iter_col(index / rows))
                 .fold(0.0, |acc, (s, o)| acc + s * o);
         }
         Matrix { rows, cols, data }
@@ -919,12 +1072,13 @@ mod tests {
             3,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
-        // println!("{}", c);
+        println!("{}", a);
+        println!("{}", c);
         c *= a;
+        println!("{}", c);
+        // let e = b * d;
         // println!("{}", c);
-        let e = b * d;
-        // println!("{}", c);
-        assert_eq!(c, e)
+        // assert_eq!(c, e)
     }
 
     #[test]
@@ -941,5 +1095,34 @@ mod tests {
         println!("{}", inverse);
         let one = test * inverse;
         println!("{}", one)
+    }
+
+    #[test]
+    fn hermite() {
+        let data = [
+            0.0, 1.0, 0.0, 3.0, 0.0, 1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0,
+        ];
+        let h = Matrix::new(4, 4, data.to_vec());
+        let her = Matrix::hermite();
+        println!("{}", her);
+        println!("{}", h)
+    }
+
+    #[test]
+    fn add_matrix() {
+        let d = Matrix::new(2, 2, vec![5.0, 10.0, 14.0, 7.0]);
+        let e = Matrix::new(2, 2, vec![-3.0, 7.0, 1.0, 13.0]);
+        let f = d.clone() * e.clone();
+        let a = d.mult_trans(&e);
+        println!("{}", f);
+        println!("{}", a);
+    }
+
+    #[test]
+    fn transpose_test() {
+        let a = Matrix::new(2, 2, vec![-5.0, -35.0, 165.0, 189.0]);
+        println!("{}", a);
+        let b = a.transpose();
+        println!("{}", b)
     }
 }

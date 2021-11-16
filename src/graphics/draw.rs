@@ -1,6 +1,5 @@
 use super::colors::Pixel;
 use crate::gmath::matrix::Matrix;
-use crate::gmath::parametric::Parametric;
 use crate::graphics::display::Canvas;
 
 #[allow(dead_code)]
@@ -26,21 +25,21 @@ impl Canvas {
     /// image.fill(10, 10, &color, &background_color)
     /// ```
     pub fn fill(&mut self, x: i32, y: i32, fill_color: &Pixel, boundary_color: &Pixel) {
-        let current = self.get_pixel(x, y);
-        if current != boundary_color && current != fill_color {
-            self.plot(fill_color, x as i32, y as i32);
-            self.fill(x + 1, y, fill_color, boundary_color);
-            self.fill(x, y + 1, fill_color, boundary_color);
-            self.fill(x - 1, y, fill_color, boundary_color);
-            self.fill(x, y - 1, fill_color, boundary_color);
-            // self.fill(x + 1, y, fill_color, boundary_color);
-            // self.fill(x, y + 1, fill_color, boundary_color);
-            // self.fill(x - 1, y, fill_color, boundary_color);
-            // self.fill(x, y - 1, fill_color, boundary_color);
-            // self.fill(x - 1, y - 1, fill_color, boundary_color);
-            // self.fill(x - 1, y + 1, fill_color, boundary_color);
-            // self.fill(x + 1, y - 1, fill_color, boundary_color);
-            // self.fill(x + 1, y + 1, fill_color, boundary_color);
+        let mut points = vec![(x, y)];
+        while let Some((x, y)) = points.pop() {
+            let pixel = self.get_pixel(x, y);
+            if pixel == boundary_color || pixel == fill_color {
+                continue;
+            }
+            self.plot(fill_color, x, y);
+            points.push((x + 1, y));
+            points.push((x, y + 1));
+            points.push((x - 1, y));
+            points.push((x, y - 1));
+            // points.push((x - 1, y - 1));
+            // points.push((x - 1, y + 1));
+            // points.push((x + 1, y - 1));
+            // points.push((x + 1, y + 1));
         }
     }
 
@@ -74,16 +73,24 @@ impl Canvas {
         boundary_color: &Pixel,
         filename: &str,
     ) {
-        let current = self.get_pixel(x, y);
-        if current != boundary_color && current != fill_color {
-            self.plot(fill_color, x as i32, y as i32);
+        let mut points = vec![(x, y)];
+        while let Some((x, y)) = points.pop() {
+            let pixel = self.get_pixel(x, y);
+            if pixel == boundary_color || pixel == fill_color {
+                continue;
+            }
+            self.plot(fill_color, x, y);
             self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))
                 .expect("Could not save to file");
             self.anim_index += 1;
-            self.fill_with_animation(x + 1, y, fill_color, boundary_color, filename);
-            self.fill_with_animation(x, y + 1, fill_color, boundary_color, filename);
-            self.fill_with_animation(x - 1, y, fill_color, boundary_color, filename);
-            self.fill_with_animation(x, y - 1, fill_color, boundary_color, filename);
+            points.push((x + 1, y));
+            points.push((x, y + 1));
+            points.push((x - 1, y));
+            points.push((x, y - 1));
+            // points.push((x - 1, y - 1));
+            // points.push((x - 1, y + 1));
+            // points.push((x + 1, y - 1));
+            // points.push((x + 1, y + 1));
         }
     }
 

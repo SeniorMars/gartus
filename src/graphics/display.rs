@@ -203,6 +203,32 @@ impl Canvas {
         }
     }
 
+    /// Sets the color of the drawing line to a different color given an RGB Pixel
+    ///
+    /// # Arguments
+    ///
+    /// * `Pixel` - A rgb pixel
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// image.set_line_rgb(RGB::default());
+    /// ```
+    pub fn set_line_rgb(&mut self, color: Pixel) {
+        let rgb = match color {
+            Pixel::HSL(_) => panic!("Expected values for RGB"),
+            Pixel::RGB(rgb) => rgb,
+        };
+        match self.line {
+            Pixel::RGB(_) => self.line = Pixel::RGB(rgb),
+            Pixel::HSL(_) => panic!("Expected values for RGB"),
+        }
+    }
+
     /// Sets the color of the drawing line to a different color given three ints.
     ///
     /// # Arguments
@@ -222,6 +248,32 @@ impl Canvas {
     pub fn set_line_color_hsl(&mut self, hue: u16, saturation: u16, light: u16) {
         match self.line {
             Pixel::HSL(_) => self.line = Pixel::HSL(HSL::new(hue, saturation, light)),
+            Pixel::RGB(_) => panic!("Expected values for HSL"),
+        }
+    }
+
+    /// Sets the color of the drawing line to a different color given an RGB Pixel
+    ///
+    /// # Arguments
+    ///
+    /// * `Pixel` - A rgb pixel
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// image.set_line_rgb(RGB::default());
+    /// ```
+    pub fn set_line_hsl(&mut self, color: Pixel) {
+        let hsl = match color {
+            Pixel::HSL(hsl) => hsl,
+            Pixel::RGB(_) => panic!("Expected values for HSL"),
+        };
+        match self.line {
+            Pixel::HSL(_) => self.line = Pixel::HSL(hsl),
             Pixel::RGB(_) => panic!("Expected values for HSL"),
         }
     }
@@ -447,18 +499,22 @@ impl Canvas {
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
-        let mut file = File::create(file_name)?;
-        let mut writer = BufWriter::new(&mut file);
-        writeln!(writer, "P3 {} {} {}", self.height, self.width, self.range)?;
+        let mut file = BufWriter::new(File::create(file_name)?);
+        writeln!(
+            &mut file,
+            "P3 {} {} {}",
+            self.height, self.width, self.range
+        )?;
+
         self.iter().for_each(|pixel| {
             let rgb = match pixel {
                 Pixel::HSL(hsl) => RGB::from(*hsl),
                 Pixel::RGB(rgb) => *rgb,
             };
-            write!(writer, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
+            write!(file, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
                 .expect("File should always be written to");
         });
-        writer.flush()
+        Ok(())
     }
 
     /// Saves the current state of an image as a binary ppm file.
@@ -478,26 +534,29 @@ impl Canvas {
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
-        let mut file = File::create(file_name)?;
-        let mut writer = BufWriter::new(&mut file);
-        writer
-            .write_all(format!("P6 {} {} {}\n", self.height, self.width, self.range).as_bytes())?;
+        let mut file = BufWriter::new(File::create(file_name)?);
+
+        writeln!(
+            &mut file,
+            "P6 {} {} {}",
+            self.height, self.width, self.range
+        )?;
+
         self.iter().for_each(|pixel| {
-            let rgb = match pixel {
-                Pixel::HSL(hsl) => RGB::from(*hsl),
-                Pixel::RGB(rgb) => *rgb,
+            let rgb = match *pixel {
+                Pixel::HSL(hsl) => RGB::from(hsl),
+                Pixel::RGB(rgb) => rgb,
             };
-            writer
-                .write_all(&rgb.red.to_be_bytes())
+
+            file.write_all(&rgb.red.to_be_bytes())
                 .expect("Could not write as binary");
-            writer
-                .write_all(&rgb.green.to_be_bytes())
+            file.write_all(&rgb.green.to_be_bytes())
                 .expect("Could not write as binary");
-            writer
-                .write_all(&rgb.blue.to_be_bytes())
+            file.write_all(&rgb.blue.to_be_bytes())
                 .expect("Could not write as binary");
         });
-        writer.flush()
+
+        Ok(())
     }
 
     /// Saves the current state of an image to any extension.
@@ -516,27 +575,24 @@ impl Canvas {
     /// image.save_extension("pics/test.png").expect("Could not save file")
     /// ```
     pub fn save_extension(&self, file_name: &str) -> io::Result<()> {
-        let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
-        self.iter().for_each(|pixel| {
-            let rgb = match pixel {
-                Pixel::HSL(hsl) => RGB::from(*hsl),
-                Pixel::RGB(rgb) => *rgb,
-            };
-            content.push_str(&format!("{} {} {} ", &rgb.red, &rgb.green, &rgb.blue))
-        });
         let mut child = Command::new("convert")
             .arg("-")
             .arg(file_name)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(content.as_bytes())?;
-        let _ = child.wait_with_output()?;
-        Ok(())
+        let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
+        writeln!(stdin, "P3 {} {} {}", self.height, self.width, self.range)?;
+
+        self.iter().for_each(|pixel| {
+            let rgb = match pixel {
+                Pixel::HSL(hsl) => RGB::from(*hsl),
+                Pixel::RGB(rgb) => *rgb,
+            };
+            write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
+                .expect("Cannot write to stdin");
+        });
+        stdin.flush()
     }
 
     /// Display the current state of the [Canvas].
@@ -551,18 +607,20 @@ impl Canvas {
     /// image.display().expect("Could not display image")
     /// ```
     pub fn display(&self) -> io::Result<()> {
-        let mut content: String = format!("P3 {} {} {}\n", self.height, self.width, self.range);
+        let mut child = Command::new("display")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
+        writeln!(stdin, "P3 {} {} {}", self.height, self.width, self.range)?;
         self.iter().for_each(|pixel| {
             let rgb = match pixel {
                 Pixel::HSL(hsl) => RGB::from(*hsl),
                 Pixel::RGB(rgb) => *rgb,
             };
-            content.push_str(&format!("{} {} {} ", rgb.red, rgb.green, rgb.blue))
+            write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
+                .expect("Cannot write to stdin");
         });
-        let mut child = Command::new("display")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()?;
-        child.stdin.as_mut().unwrap().write_all(content.as_bytes())
+        stdin.flush()
     }
 }

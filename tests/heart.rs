@@ -16,16 +16,18 @@ fn main() {
     for i in corrs.chunks_exact(2) {
         matrix.add_point(i[0] as f64, i[1] as f64, 0.0)
     }
+    let color = Pixel::RGB(RGB::new(188, 0, 45));
     let mut translate1 = Matrix::translate(-60.0, 99.0, 0.0);
-    println!("{}", translate1);
     let mut rotatey = Matrix::reflect_yz();
-    println!("{}", rotatey);
     translate1 *= matrix;
     rotatey *= translate1.clone();
-    heart.set_line_pixel(&Pixel::RGB(RGB::new(188, 0, 45)));
+    heart.set_line_pixel(&color);
     heart.draw_lines(&rotatey);
     heart.draw_lines(&translate1);
+    heart.fill(359, 237, &color, &color);
+    heart.fill(267, 224, &color, &color);
     heart
         .save_extension("./pics/amit_i_love_you.png")
-        .expect("could not save image")
+        .expect("could not save image");
+    heart.display().expect("Could not display image")
 }

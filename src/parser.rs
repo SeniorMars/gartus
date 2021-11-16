@@ -36,6 +36,7 @@ The file follows the following format:
             then multiply the transform matrix by the shearing matrix -
             takes 3 arguments (axis, sh_factor, sh_factor)  axis should be x, y, or z
         color: changes the line's color
+            takes 3 argument representing the new color parameters
         apply: apply the current transformation matrix to the edge matrix
         display: clear the screen, then
             draw the lines of the edge matrix to the screen

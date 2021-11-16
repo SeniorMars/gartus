@@ -1,5 +1,6 @@
-use crate::graphics::display::Canvas;
-use crate::utils::polar_to_xy;
+use num::traits::real::Real;
+
+use crate::{gmath::helpers::polar_to_xy, graphics::display::Canvas};
 
 use super::colors::Pixel;
 
@@ -19,6 +20,7 @@ pub struct Turtle {
     x: u32,
     /// Y corrdinate of where the Turtle is located
     y: u32,
+    corrdinates: Vec<(u32, u32)>,
 }
 
 #[allow(dead_code)]
@@ -50,6 +52,7 @@ impl Turtle {
     /// let turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// ```
     pub fn new(canvas: Box<Canvas>, color: Pixel, direction_angle: f64, x: u32, y: u32) -> Self {
+        let corrdinates = vec![(x, y)];
         Self {
             canvas,
             color,
@@ -57,6 +60,7 @@ impl Turtle {
             x,
             y,
             pen_mode: false,
+            corrdinates,
         }
     }
 
@@ -136,8 +140,10 @@ impl Turtle {
             self.canvas
                 .draw_line(self.color, self.x as f64, self.y as f64, new_x, new_y)
         }
+
         self.x = new_x.round() as u32;
         self.y = new_y.round() as u32;
+        self.corrdinates.push((self.x, self.y))
     }
 
     /// Set new corrdinate for turtle
@@ -177,6 +183,8 @@ impl Turtle {
                 new_y as f64,
             )
         }
+
+        self.corrdinates.push((new_x, new_y));
         self.x = new_x;
         self.y = new_y;
     }
@@ -190,6 +198,16 @@ impl Turtle {
     /// False is off, True is On
     pub fn set_draw_mode(&mut self, bool: bool) {
         self.pen_mode = bool;
+    }
+
+    /// Get a reference to the turtle's corrdinates.
+    pub fn corrdinates(&self) -> &[(u32, u32)] {
+        self.corrdinates.as_ref()
+    }
+
+    /// Get a mutable reference to the turtle's corrdinates.
+    pub fn corrdinates_mut(&mut self) -> &mut Vec<(u32, u32)> {
+        &mut self.corrdinates
     }
 }
 

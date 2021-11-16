@@ -1,7 +1,55 @@
-use crate::gmath::matrix::Matrix;
+use super::matrix::Matrix;
 #[allow(dead_code)]
 #[rustfmt::skip]
 impl Matrix {
+    /// Returns a hermite [Matrix].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let h = Matrix::hermite();
+    /// ```
+    pub fn hermite() -> Self {
+        Matrix::new(4, 4, vec![0.0, 1.0, 0.0, 3.0,
+                               0.0, 1.0, 0.0, 2.0,
+                               0.0, 1.0, 1.0, 1.0,
+                               1.0, 1.0, 0.0, 0.0])
+    }
+
+    /// Returns an inverse of the hermite [Matrix].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let h_inverse = Matrix::inverse_hermite();
+    /// ```
+    pub fn inverse_hermite() -> Self {
+        Matrix::new(4, 4, vec![2.0, -3.0, 0.0, 1.0,
+                               -2.0, 3.0, 0.0, 0.0,
+                               1.0, -2.0, 1.0, 0.0,
+                               1.0, -1.0, 0.0, 0.0])
+    }
+
+    /// Returns an inverse of the bezier [Matrix].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let h_inverse = Matrix::inverse_bezier();
+    /// ```
+    pub fn inverse_bezier() -> Self {
+        Matrix::new(4, 4, vec![-1.0, 3.0, -3.0, 1.0,
+                               3.0, -6.0, 3.0, 0.0,
+                               -3.0, 3.0, 0.0, 0.0,
+                               1.0, 0.0, 0.0, 0.0])
+    }
+
     /// Returns a reflection over the yz (y) axis transformation [Matrix].
     ///
     /// # Examples
