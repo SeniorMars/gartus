@@ -1,9 +1,8 @@
-use curves_rs::gmath::matrix::*;
-use curves_rs::graphics::colors::*;
-use curves_rs::graphics::display::*;
-use curves_rs::utils;
+use curves_rs::gmath::matrix::Matrix;
+use curves_rs::graphics::colors::Pixel;
+use curves_rs::graphics::colors::RGB;
+use curves_rs::graphics::display::Canvas;
 
-#[test]
 pub fn make_pory() {
     let mut porygon = Canvas::new_with_bg(512, 512, 255, Pixel::RGB(RGB::new(17, 46, 81)));
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
@@ -42,6 +41,10 @@ pub fn make_pory() {
         &Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0)),
     ));
     porygon.display().expect("could not display")
+}
+
+fn main() {
+    make_pory()
 }
 
 // BAD IDEA TO DO THIS IN A GARBAGE COMPUTER

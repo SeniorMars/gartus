@@ -44,7 +44,6 @@ pub fn main() {
             data.push(Pixel::RGB(RGB::from(pixel_color)))
         });
     });
-
     eprintln!("Done.");
     img.fill_canvas(data);
     img.display().expect("Could not render image")

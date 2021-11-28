@@ -2,11 +2,9 @@ use curves_rs::graphics::{
     colors::{Pixel, RGB},
     display::*,
 };
-use std::io;
 
-#[test]
 #[allow(clippy::vec_init_then_push)]
-fn cat() -> io::Result<()> {
+fn cat() {
     let mut cat = Canvas::new(610, 610, 255, Pixel::RGB(RGB::default()));
 
     let mut head: Vec<(i32, i32)> = Vec::new();
@@ -145,4 +143,9 @@ fn cat() -> io::Result<()> {
     // cat.save_binary("binary.ppm")?;
     // cat.save_ascii("ascii.ppm")?;
     cat.save_extension("./pics/cat.png")
+        .expect("File should be saved");
+}
+
+fn main() {
+    cat()
 }

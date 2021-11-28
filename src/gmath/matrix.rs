@@ -8,9 +8,9 @@ use std::{
 #[derive(Default, Clone, Debug)]
 /// A type that represents a m x n Matrix
 pub struct Matrix {
-    /// The rows (m) componet of the Matrix
+    /// The rows (m) component of the Matrix
     rows: usize,
-    /// The column (n) componet of the Matrix
+    /// The column (n) component of the Matrix
     cols: usize,
     /// The actual data the Matrix includes
     data: Vec<f64>,
@@ -27,7 +27,6 @@ impl Matrix {
     /// * `cols` - An unsigned usize int that represents
     /// the number of columns in the [Matrix]
     /// * `data` - A vector comprised of floats that is the body of the [Matrix]
-    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -125,7 +124,7 @@ impl Matrix {
     /// let inverse = ident.inverse();
     /// ```
     pub fn inverse(&self) -> Self {
-        eprintln!("This doens't really work lol -- pls don't use");
+        eprintln!("This doesn't really work lol -- pls don't use");
         let (rows, cols) = (self.rows, self.cols);
         assert_eq!(rows, cols, "The matrix must be N x N");
         let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
@@ -686,64 +685,17 @@ impl Matrix {
     /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
     /// ```
     pub fn mult_matrix(&self, other: &Self) -> Self {
-        //     assert_eq!(self.nrows, other.ncols, "nrows of m1 must == ncols of m2");
-        //     let (frows, fcols) = (other.nrows, self.nrows);
-        //     let mut fdata = vec![0.0; frows * fcols];
-        //     for (i, d) in fdata.iter_mut().enumerate() {
-        //         let (r, c) = Self::index_to_rc(i, fcols);
-        //         *d = self
-        //             .col_iter(c)
-        //             .zip(other.row_iter(r))
-        //             .fold(0.0, |sum, (a, b)| sum + a * b);
-        //     }
-        //     Matrix::new(frows, fcols, fdata)
-        //
-        // assert_eq!(self.ncols, other.nrows, "ncols of m1 must == nrows of m2");
-        // let (frows, fcols) = (self.nrows, other.ncols);
-        // let mut fdata = vec![0.0; frows * fcols];
-        // for (i, d) in fdata.iter_mut().enumerate() {
-        //     let (r, c) = Self::index_to_rc(i, fcols);
-        //     *d = self
-        //         .row_iter(r)
-        //         .zip(other.col_iter(c))
-        //         .fold(0.0, |sum, (a, b)| sum + a * b);
-        // }
-        // Matrix::new(frows, fcols, fdata)
-        // println!("sr{}", self.rows);
-        // println!("sc{}", self.cols);
-        // println!("or{}", other.rows);
-        // println!("oc{}", other.cols);
         assert_eq!(
             self.rows, other.cols,
             "rows of self must equal cols of other"
         );
         let (rows, cols) = (other.rows, self.cols);
-        // println!("{} x {}", rows, cols);
-        // println!("{}", self);
-        // println!("{}", other);
         let mut data = vec![0.0; rows * cols];
         for (index, element) in data.iter_mut().enumerate() {
-            // println!(
-            //     "1: {:?}",
-            //     self.iter_col(index / rows).collect::<Vec<&f64>>()
-            // );
-            // println!(
-            //     "2: {:?}",
-            //     self.iter_col(index % rows).collect::<Vec<&f64>>()
-            // );
-            // println!(
-            //     "self: {:?}",
-            //     self.iter_col(index / rows).collect::<Vec<&f64>>()
-            // );
-            // println!(
-            //     "other: {:?}",
-            //     other.iter_row(index % rows).collect::<Vec<&f64>>()
-            // );
             *element = self
                 .iter_col(index / rows)
                 .zip(other.iter_row(index % rows))
                 .fold(0.0, |acc, (s, o)| acc + s * o);
-            // println!("{}", element);
         }
         Matrix { rows, cols, data }
     }
@@ -949,6 +901,19 @@ impl DivAssign<f64> for Matrix {
     fn div_assign(&mut self, other: f64) {
         self.iter_by_point_mut()
             .for_each(|row| row.iter_mut().for_each(|e| *e /= other))
+    }
+}
+
+// other operators
+impl Matrix {
+    /// Returns the sum of a matrix data
+    pub fn sum(&self) -> f64 {
+        self.iter().sum()
+    }
+
+    /// applies the absolute value to each point in matrix's data
+    pub fn abs(&mut self) {
+        self.data = self.iter_mut().map(|x| x.abs()).collect()
     }
 }
 

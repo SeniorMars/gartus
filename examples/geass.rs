@@ -3,7 +3,6 @@ use curves_rs::graphics::colors::*;
 use curves_rs::graphics::display::*;
 // use curves_rs::utils;
 
-#[test]
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, 255, Pixel::RGB(RGB::new(24, 26, 27)));
     let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
@@ -58,4 +57,8 @@ fn geass() {
     // let file_name = "./geass.gif";
     // utils::animation("geass", file_name);
     // utils::view_animation(file_name)
+}
+
+pub fn main() {
+    geass()
 }

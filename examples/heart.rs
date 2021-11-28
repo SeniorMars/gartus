@@ -2,7 +2,6 @@ use curves_rs::gmath::matrix::*;
 use curves_rs::graphics::colors::*;
 use curves_rs::graphics::display::*;
 
-#[test]
 fn main() {
     let mut heart = Canvas::new(610, 610, 255, Pixel::RGB(RGB::default()));
     heart.upper_left_system = true;
