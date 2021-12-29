@@ -1,3 +1,5 @@
+use std::fs;
+
 use curves_rs::gmath::ray::Ray;
 use curves_rs::gmath::vector::{Color, Vector};
 use curves_rs::graphics::colors::{Pixel, RGB};

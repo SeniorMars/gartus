@@ -7,5 +7,7 @@ pub mod colors;
 pub mod display;
 /// Hosts all the functions needed to start drawing onto the [Canvas]
 pub mod draw;
+/// Some preset filters that can be applied to a Canvas
+pub mod filters;
 /// An agent that can move throughout the [Canvas]
 pub mod turtle;

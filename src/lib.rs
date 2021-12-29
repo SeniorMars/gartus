@@ -9,6 +9,8 @@
 pub mod gmath;
 // This module hosts all the needed struts to playing
 // around with computer graphics.
+/// A module that includes method to read external PPM and allows them to be used with this system.
+pub mod external;
 pub mod graphics;
 /// This module hosts a [Parser] that allows an image to be created through
 /// a detailed specification. More information found in the module.

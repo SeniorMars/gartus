@@ -1,5 +1,3 @@
-use num::traits::real::Real;
-
 use crate::{gmath::helpers::polar_to_xy, graphics::display::Canvas};
 
 use super::colors::Pixel;

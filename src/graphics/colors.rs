@@ -13,6 +13,13 @@ pub struct RGB {
     pub blue: u8,
 }
 
+/// A black Pixel
+pub const BLACK: Pixel = Pixel::RGB(RGB {
+    red: 0,
+    green: 0,
+    blue: 0,
+});
+
 /// A red Pixel
 pub const RED: Pixel = Pixel::RGB(RGB {
     red: 255,
