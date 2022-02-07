@@ -1,78 +1,85 @@
 use crate::gmath::vector::Vector;
 use std::cmp::{max, min};
 
-// pub trait Pixel: Default {}
+/// A trait that is meant to bound [Display]
+pub trait ColorSpace: Default + Copy + PartialEq
+where
+    Rgb: From<Self>,
+{
+    fn new(_: u16, _: u16, _: u16) -> Self;
+}
+
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A computer pixel struct is represented by its red, green, blue values
-pub struct RGB {
+pub struct Rgb {
     /// The first byte that represents red light
-    pub red: u8,
+    pub red: u16,
     /// The second byte that represents green light
-    pub green: u8,
+    pub green: u16,
     /// The final byte that represents blue light
-    pub blue: u8,
+    pub blue: u16,
 }
 
 /// A black Pixel
-pub const BLACK: Pixel = Pixel::RGB(RGB {
+pub const BLACK: Rgb = Rgb {
     red: 0,
     green: 0,
     blue: 0,
-});
+};
 
 /// A red Pixel
-pub const RED: Pixel = Pixel::RGB(RGB {
+pub const RED: Rgb = Rgb {
     red: 255,
     green: 0,
     blue: 0,
-});
+};
 
 /// A green Pixel
-pub const GREEN: Pixel = Pixel::RGB(RGB {
+pub const GREEN: Rgb = Rgb {
     red: 0,
     green: 255,
     blue: 0,
-});
+};
 
 /// A blue Pixel
-pub const BLUE: Pixel = Pixel::RGB(RGB {
+pub const BLUE: Rgb = Rgb {
     red: 0,
     green: 0,
     blue: 255,
-});
+};
 
 /// A magenta Pixel
-pub const MAGENTA: Pixel = Pixel::RGB(RGB {
+pub const MAGENTA: Rgb = Rgb {
     red: 255,
     green: 0,
     blue: 255,
-});
+};
 
 /// A white Pixel
-pub const WHITE: Pixel = Pixel::RGB(RGB {
+pub const WHITE: Rgb = Rgb {
     red: 255,
     green: 255,
     blue: 255,
-});
+};
 
 /// A yellow Pixel
-pub const YELLOW: Pixel = Pixel::RGB(RGB {
+pub const YELLOW: Rgb = Rgb {
     red: 255,
     green: 255,
     blue: 0,
-});
+};
 
 /// A cyan Pixel
-pub const CYAN: Pixel = Pixel::RGB(RGB {
+pub const CYAN: Rgb = Rgb {
     red: 0,
     green: 255,
     blue: 255,
-});
+};
 
 // impl Pixel for RGB {}
 
 #[allow(dead_code)]
-impl RGB {
+impl ColorSpace for Rgb {
     /// Returns a pixel that will be used in [Canvas]
     ///
     /// # Arguments
@@ -88,24 +95,24 @@ impl RGB {
     /// use crate::curves_rs::graphics::colors::RGB;
     /// let color = RGB::new(0, 64, 255);
     /// ```
-    pub fn new(red: u8, green: u8, blue: u8) -> Self {
+    fn new(red: u16, green: u16, blue: u16) -> Self {
         Self { red, green, blue }
     }
 }
 
-impl From<Vector> for RGB {
+impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
         Self {
-            red: (255.00 * color[0] as f64) as u8,
-            green: (255.00 * color[1] as f64) as u8,
-            blue: (255.00 * color[2] as f64) as u8,
+            red: (255.00 * color[0] as f64) as u16,
+            green: (255.00 * color[1] as f64) as u16,
+            blue: (255.00 * color[2] as f64) as u16,
         }
     }
 }
 
 #[allow(clippy::many_single_char_names)]
-impl From<HSL> for RGB {
-    fn from(hsl: HSL) -> Self {
+impl From<Hsl> for Rgb {
+    fn from(hsl: Hsl) -> Self {
         let (r, g, b);
         let hue = hsl.hue as f32 / 360.0;
         let saturation = hsl.saturation as f32 / 100.0;
@@ -144,17 +151,17 @@ impl From<HSL> for RGB {
             g = hue_conversion(p, q, hue);
             b = hue_conversion(p, q, hue - (1.0 / 3.0));
         }
-        RGB {
-            red: (r * 255.00) as u8,
-            green: (g * 255.00) as u8,
-            blue: (b * 255.00) as u8,
+        Rgb {
+            red: (r * 255.00) as u16,
+            green: (g * 255.00) as u16,
+            blue: (b * 255.00) as u16,
         }
     }
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A convention that represents a Pixel based on hue, saturation, and light
-pub struct HSL {
+pub struct Hsl {
     /// Hue
     pub hue: u16,
     /// saturation
@@ -163,10 +170,8 @@ pub struct HSL {
     pub light: u16,
 }
 
-// impl Pixel for HSL {}
-
 #[allow(dead_code)]
-impl HSL {
+impl ColorSpace for Hsl {
     /// Returns a HSL that can be used in [Canvas]
     ///
     /// # Arguments
@@ -182,7 +187,7 @@ impl HSL {
     /// use crate::curves_rs::graphics::colors::HSL;
     /// let color = HSL::new(10, 50, 0);
     /// ```
-    pub fn new(hue: u16, saturation: u16, light: u16) -> Self {
+    fn new(hue: u16, saturation: u16, light: u16) -> Self {
         Self {
             hue: hue.clamp(0, 359),
             saturation: saturation.clamp(0, 100),
@@ -192,8 +197,8 @@ impl HSL {
 }
 
 #[allow(clippy::many_single_char_names)]
-impl From<RGB> for HSL {
-    fn from(rgb: RGB) -> Self {
+impl From<Rgb> for Hsl {
+    fn from(rgb: Rgb) -> Self {
         let (mut h, s, l);
         let r = rgb.red as f32 / 255.0;
         let g = rgb.green as f32 / 255.0;
@@ -225,7 +230,7 @@ impl From<RGB> for HSL {
             h /= 6.0;
         }
 
-        HSL {
+        Hsl {
             hue: (h * 360.0).round() as u16,
             saturation: (s * 100.0).round() as u16,
             light: (l * 100.0).round() as u16,
@@ -233,56 +238,57 @@ impl From<RGB> for HSL {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-/// A type that represents a Pixel on a [Canvas] that can either be a RGB or HSL value
-pub enum Pixel {
-    /// A pixel defined in terms of HSL
-    HSL(HSL),
-    /// A pixel defined in terms of RGB
-    RGB(RGB),
-}
-
-impl Pixel {
-    /// Returns `true` if the pixel color is [`HSL`].
-    ///
-    ///
-    /// [`HSL`]: PixelColor::HSL
-    pub fn is_hsl(&self) -> bool {
-        matches!(self, Self::HSL(..))
-    }
-
-    /// Returns `true` if the pixel color is [`RGB`].
-    ///
-    /// [`RGB`]: PixelColor::RGB
-    pub fn is_rgb(&self) -> bool {
-        matches!(self, Self::RGB(..))
-    }
-}
-
-impl Default for Pixel {
-    fn default() -> Self {
-        Self::RGB(RGB::default())
-    }
-}
-impl From<Pixel> for RGB {
-    fn from(pixel: Pixel) -> Self {
-        match pixel {
-            Pixel::HSL(hsl) => RGB::from(hsl),
-            Pixel::RGB(rgb) => rgb,
-        }
-    }
-}
-
+// #[derive(Debug, Clone, Copy, PartialEq)]
+// /// A type that represents a Pixel on a [Canvas] that can either be a RGB or HSL value
+// pub enum Pixel {
+//     /// A pixel defined in terms of HSL
+//     Hsl(Hsl),
+//     /// A pixel defined in terms of RGB
+//     Rgb(Rgb),
+// }
+//
+// impl Pixel {
+//     /// Returns `true` if the pixel color is [`HSL`].
+//     ///
+//     ///
+//     /// [`HSL`]: PixelColor::HSL
+//     pub fn is_hsl(&self) -> bool {
+//         matches!(self, Self::Hsl(..))
+//     }
+//
+//     /// Returns `true` if the pixel color is [`RGB`].
+//     ///
+//     /// [`RGB`]: PixelColor::RGB
+//     pub fn is_rgb(&self) -> bool {
+//         matches!(self, Self::Rgb(..))
+//     }
+// }
+//
+// impl Default for Pixel {
+//     fn default() -> Self {
+//         Self::Rgb(Rgb::default())
+//     }
+// }
+//
+// impl From<Pixel> for Rgb {
+//     fn from(pixel: Pixel) -> Self {
+//         match pixel {
+//             Pixel::Hsl(hsl) => Rgb::from(hsl),
+//             Pixel::Rgb(rgb) => rgb,
+//         }
+//     }
+// }
+//
 #[cfg(test)]
 mod test {
     use super::*;
     #[test]
     fn hsl_rgb() {
-        let hsl = HSL::new(1, 100, 50);
-        let rgb = RGB::from(hsl);
+        let hsl = Hsl::new(1, 100, 50);
+        let rgb = Rgb::from(hsl);
         assert_eq!(
             rgb,
-            RGB {
+            Rgb {
                 red: 255,
                 green: 4,
                 blue: 0
@@ -292,11 +298,11 @@ mod test {
 
     #[test]
     fn rgb_hsl() {
-        let rgb = RGB::new(255, 4, 0);
-        let hsl = HSL::from(rgb);
+        let rgb = Rgb::new(255, 4, 0);
+        let hsl = Hsl::from(rgb);
         assert_eq!(
             hsl,
-            HSL {
+            Hsl {
                 hue: 1,
                 saturation: 100,
                 light: 50
@@ -306,12 +312,12 @@ mod test {
 
     #[test]
     fn conversion() {
-        let rgb = RGB::new(255, 4, 0);
-        let hsl = HSL::from(rgb);
-        let new_rgb = RGB::from(hsl);
+        let rgb = Rgb::new(255, 4, 0);
+        let hsl = Hsl::from(rgb);
+        let new_rgb = Rgb::from(hsl);
         assert_eq!(
             new_rgb,
-            RGB {
+            Rgb {
                 red: 255,
                 green: 4,
                 blue: 0

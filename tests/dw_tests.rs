@@ -11,7 +11,7 @@ fn script_test() {
         500,
         500,
         255,
-        &Pixel::RGB(RGB::new(0, 255, 0)),
+        &Rgb::new(0, 255, 0),
     );
     dw.parse_file()
 }
@@ -51,7 +51,7 @@ fn matrix_test() {
 fn dw_line_test() -> io::Result<()> {
     let xres: f64 = 750.0;
     let yres: f64 = 750.0;
-    let mut screen = Canvas::new(xres as u32, yres as u32, 255, Pixel::RGB(RGB::default()));
+    let mut screen = Canvas::new(xres as u32, yres as u32, 255, Rgb::default());
     // screen.upper_left_system = true;
     screen.set_line_color_rgb(0, 255, 0);
 

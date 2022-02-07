@@ -1,10 +1,10 @@
 use curves_rs::gmath::matrix::Matrix;
-use curves_rs::graphics::colors::Pixel;
-use curves_rs::graphics::colors::RGB;
+use curves_rs::graphics::colors::ColorSpace;
+use curves_rs::graphics::colors::Rgb;
 use curves_rs::graphics::display::Canvas;
 
 pub fn make_pory() {
-    let mut porygon = Canvas::new_with_bg(512, 512, 255, Pixel::RGB(RGB::new(17, 46, 81)));
+    let mut porygon = Canvas::new_with_bg(512, 512, 255, Rgb::new(17, 46, 81));
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
     porygon.upper_left_system = true;
     let corrs = [
@@ -36,7 +36,7 @@ pub fn make_pory() {
         matrix.add_point(corr[0] as f64, corr[1] as f64, 0.0);
     }
 
-    porygon.set_line_pixel(&Pixel::RGB(RGB::new(235, 219, 178)));
+    porygon.set_line_pixel(&Rgb::new(235, 219, 178));
     porygon.draw_lines(&matrix.mult_matrix(
         &Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0)),
     ));

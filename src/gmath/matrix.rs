@@ -1026,13 +1026,13 @@ mod tests {
     #[allow(clippy::many_single_char_names)]
     fn mul_for_now() {
         let a = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
-        let b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
+        let _b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
         let mut c = Matrix::new(
             4,
             3,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
-        let d: Matrix = Matrix::new(
+        let _d: Matrix = Matrix::new(
             4,
             3,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],

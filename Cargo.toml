@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.dev]
-opt-level = 0
+opt-level = 3
 debug = true
 
 [profile.release]
@@ -20,6 +20,6 @@ debug = true
 criterion = "0.3.5"
 num = "0.3.1"
 
-[[bench]]
-name = "derp"
-harness = false
+# [[bench]]
+# name = "derp"
+# harness = false

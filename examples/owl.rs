@@ -1,14 +1,12 @@
 // extern crate rand;
 // use curves_rs::utils;
-use curves_rs::graphics::{
-    colors::{Pixel, RGB},
-    display::Canvas,
-};
+use curves_rs::graphics::colors::{ColorSpace, Rgb};
+use curves_rs::graphics::display::Canvas;
 // use rand::Rng;
 
 fn owl() {
     // let mut rng = rand::thread_rng();
-    let mut owl = Canvas::new(500, 500, 255, Pixel::RGB(RGB::new(255, 255, 255)));
+    let mut owl = Canvas::new(500, 500, 255, Rgb::new(255, 255, 255));
     owl.upper_left_system = true;
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,

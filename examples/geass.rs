@@ -4,7 +4,7 @@ use curves_rs::graphics::display::*;
 // use curves_rs::utils;
 
 fn geass() {
-    let mut img = Canvas::new_with_bg(800, 800, 255, Pixel::RGB(RGB::new(24, 26, 27)));
+    let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));
     let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
     img.upper_left_system = true;
 
@@ -36,7 +36,7 @@ fn geass() {
     base.add_dataset(&half);
     base.add_dataset(&last_half);
 
-    let white = Pixel::RGB(RGB::new(255, 255, 255));
+    let white = Rgb::new(255, 255, 255);
     img.set_line_pixel(&white);
     img.draw_lines(
         &geass
@@ -44,7 +44,7 @@ fn geass() {
             .mult_matrix(&Matrix::translate(360.0, 370.0, 0.0)),
     );
     img.fill(406, 413, &white, &white);
-    img.set_line_pixel(&Pixel::RGB(RGB::new(191, 70, 61)));
+    img.set_line_pixel(&Rgb::new(191, 70, 61));
     for i in 0..180 {
         let mut copy = img.clone();
         copy.draw_lines(&base.mult_matrix(

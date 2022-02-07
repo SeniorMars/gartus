@@ -1,6 +1,6 @@
 use crate::gmath::matrix::Matrix;
-use crate::graphics::colors::{Pixel, HSL};
-use crate::graphics::{colors::RGB, display::Canvas};
+use crate::graphics::colors::ColorSpace;
+use crate::graphics::{colors::Rgb, display::Canvas};
 use std::{fs, str::FromStr};
 
 #[derive(Debug, Default)]
@@ -49,7 +49,10 @@ The file follows the following format:
 
 ```
 */
-pub struct Parser {
+pub struct Parser<C: ColorSpace>
+where
+    Rgb: From<C>,
+{
     /// The name of the file being parsed
     file_name: String,
     /// The [Matrix] where points will be appended to draw onto the [Canvas]
@@ -57,13 +60,16 @@ pub struct Parser {
     /// The [Matrix] that transformations will be applied to
     trans_matrix: Matrix,
     /// The [Canvas] where the image willl be drawn in
-    canvas: Canvas,
+    canvas: Canvas<C>,
     /// The default color of the drawing line
-    color: Pixel,
+    color: C,
 }
 
 #[allow(dead_code)]
-impl Parser {
+impl<C: ColorSpace> Parser<C>
+where
+    Rgb: From<C>,
+{
     /// Returns a parser that can parse through `file_name`
     ///
     /// # Arguments
@@ -83,11 +89,8 @@ impl Parser {
     /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
-    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &Pixel) -> Self {
-        let line = match color {
-            Pixel::HSL(_) => Pixel::HSL(HSL::default()),
-            Pixel::RGB(_) => Pixel::RGB(RGB::default()),
-        };
+    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &C) -> Self {
+        let line = C::default();
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
@@ -124,8 +127,8 @@ impl Parser {
         width: u32,
         height: u32,
         range: u8,
-        color: &Pixel,
-        bg: &Pixel,
+        color: &C,
+        bg: &C,
     ) -> Self {
         Self {
             file_name: file_name.to_string(),
@@ -219,26 +222,10 @@ impl Parser {
                 }
                 "color" => {
                     let next_line = iter.next().expect("Error reading line");
-                    match self.color {
-                        Pixel::HSL(_) => {
-                            let args = Parser::parse_as::<u16>(next_line.to_string()).unwrap();
-                            assert_eq!(3, args.len());
-                            self.set_color(&Pixel::HSL(HSL {
-                                hue: args[0],
-                                saturation: args[1],
-                                light: args[2],
-                            }))
-                        }
-                        Pixel::RGB(_) => {
-                            let args = Parser::parse_as::<u8>(next_line.to_string()).unwrap();
-                            assert_eq!(3, args.len());
-                            self.set_color(&Pixel::RGB(RGB {
-                                red: args[0],
-                                green: args[1],
-                                blue: args[2],
-                            }))
-                        }
-                    }
+                    let args = Parser::parse_as::<u16>(next_line.to_string()).unwrap();
+                    assert_eq!(3, args.len());
+                    let color = C::new(args[0], args[1], args[0]);
+                    self.set_color(&color);
                 }
                 "ident" => {
                     self.trans_matrix = Matrix::identity_matrix(4);
@@ -269,7 +256,7 @@ impl Parser {
     }
 
     /// Set the parser's color.
-    pub fn set_color(&mut self, color: &Pixel) {
+    pub fn set_color(&mut self, color: &C) {
         self.color = *color;
     }
 

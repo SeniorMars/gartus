@@ -3,7 +3,7 @@ use curves_rs::graphics::colors::*;
 use curves_rs::graphics::display::*;
 
 fn main() {
-    let mut heart = Canvas::new(610, 610, 255, Pixel::RGB(RGB::default()));
+    let mut heart = Canvas::new(610, 610, 255, Rgb::default());
     heart.upper_left_system = true;
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(120));
     let corrs = [
@@ -15,7 +15,7 @@ fn main() {
     for i in corrs.chunks_exact(2) {
         matrix.add_point(i[0] as f64, i[1] as f64, 0.0)
     }
-    let color = Pixel::RGB(RGB::new(188, 0, 45));
+    let color = Rgb::new(188, 0, 45);
     let mut translate1 = Matrix::translate(-60.0, 99.0, 0.0);
     let mut rotatey = Matrix::reflect_yz();
     translate1 *= matrix;

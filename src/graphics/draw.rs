@@ -1,9 +1,12 @@
-use super::colors::Pixel;
+use super::colors::{ColorSpace, Rgb};
 use crate::gmath::matrix::Matrix;
 use crate::graphics::display::Canvas;
 
 #[allow(dead_code)]
-impl Canvas {
+impl<C: ColorSpace> Canvas<C>
+where
+    Rgb: From<C>,
+{
     /// Fills in the area of a 2D figure given a random point inside the figure.
     ///
     /// # Arguments
@@ -24,7 +27,7 @@ impl Canvas {
     /// let background_color = Pixel::RGB(RGB::new(0, 0, 0));
     /// image.fill(10, 10, &color, &background_color)
     /// ```
-    pub fn fill(&mut self, x: i32, y: i32, fill_color: &Pixel, boundary_color: &Pixel) {
+    pub fn fill(&mut self, x: i32, y: i32, fill_color: &C, boundary_color: &C) {
         let mut points = vec![(x, y)];
         while let Some((x, y)) = points.pop() {
             let pixel = self.get_pixel(x, y);
@@ -69,8 +72,8 @@ impl Canvas {
         &mut self,
         x: i32,
         y: i32,
-        fill_color: &Pixel,
-        boundary_color: &Pixel,
+        fill_color: &C,
+        boundary_color: &C,
         filename: &str,
     ) {
         let mut points = vec![(x, y)];
@@ -191,7 +194,7 @@ impl Canvas {
     /// let color = Pixel::RGB(RGB::new(0, 64, 255));
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)
     /// ```
-    pub fn draw_line(&mut self, color: Pixel, x0: f64, y0: f64, x1: f64, y1: f64) {
+    pub fn draw_line(&mut self, color: C, x0: f64, y0: f64, x1: f64, y1: f64) {
         self.anim_index += 1;
         let (x0, y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)

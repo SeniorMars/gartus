@@ -1,6 +1,12 @@
-use super::display::Canvas;
+use super::{
+    colors::{ColorSpace, Rgb},
+    display::Canvas,
+};
 
-impl Canvas {
+impl<C: ColorSpace> Canvas<C>
+where
+    Rgb: From<C>,
+{
     /// .
     ///
     /// # Examples
