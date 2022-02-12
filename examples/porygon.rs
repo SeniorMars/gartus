@@ -1,5 +1,4 @@
 use curves_rs::gmath::matrix::Matrix;
-use curves_rs::graphics::colors::ColorSpace;
 use curves_rs::graphics::colors::Rgb;
 use curves_rs::graphics::display::Canvas;
 

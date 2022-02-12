@@ -1,6 +1,6 @@
 // extern crate rand;
 // use curves_rs::utils;
-use curves_rs::graphics::colors::{ColorSpace, Rgb};
+use curves_rs::graphics::colors::Rgb;
 use curves_rs::graphics::display::Canvas;
 // use rand::Rng;
 
