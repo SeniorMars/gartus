@@ -8,20 +8,17 @@ pub struct Turtle<C: ColorSpace>
 where
     Rgb: From<C>,
 {
-    /// Your drawing space
-    /// TODO: refactor this so Turtles are owned by Canvas.
-    canvas: Box<Canvas<C>>,
     /// The color your agent will draw on
     color: C,
-    /// A boolean that dictacts weather the turtle will draw on the Canvas
-    pub pen_mode: bool,
+    corrdinates: Vec<(u32, u32)>,
     /// The direction your agent will move forward or backwards. This is an angle in degrees
     direction_angle: f64,
+    /// A boolean that dictacts weather the turtle will draw on the Canvas
+    pub pen_mode: bool,
     /// X corrdinate of where the Turtle is located
     x: u32,
     /// Y corrdinate of where the Turtle is located
     y: u32,
-    corrdinates: Vec<(u32, u32)>,
 }
 
 #[allow(dead_code)]
@@ -55,10 +52,9 @@ where
     /// let red = Pixel::RGB(RGB::new(255, 0, 0));
     /// let turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// ```
-    pub fn new(canvas: Box<Canvas<C>>, color: C, direction_angle: f64, x: u32, y: u32) -> Self {
+    pub fn new(color: C, direction_angle: f64, x: u32, y: u32) -> Self {
         let corrdinates = vec![(x, y)];
         Self {
-            canvas,
             color,
             direction_angle,
             x,
@@ -137,12 +133,11 @@ where
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.move_turtle(-3);
     /// ```
-    pub fn move_turtle(&mut self, step: i32) {
+    pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: i32) {
         let (dx, dy) = polar_to_xy(step.into(), self.direction_angle);
         let (new_x, new_y) = (self.x as f64 + dx, self.y as f64 + dy);
         if self.pen_mode {
-            self.canvas
-                .draw_line(self.color, self.x as f64, self.y as f64, new_x, new_y)
+            canvas.draw_line(self.color, self.x as f64, self.y as f64, new_x, new_y)
         }
 
         self.x = new_x.round() as u32;
@@ -174,12 +169,12 @@ where
     /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
     /// turle.goto(49, 49);
     /// ```
-    pub fn goto(&mut self, new_x: u32, new_y: u32) {
-        assert!(new_x < self.canvas.width());
-        assert!(new_y < self.canvas.height());
-        assert!(new_x * new_y < self.canvas.height() * self.canvas.width());
+    pub fn goto(&mut self, canvas: &mut Canvas<C>, new_x: u32, new_y: u32) {
+        assert!(new_x < canvas.width());
+        assert!(new_y < canvas.height());
+        assert!(new_x * new_y < canvas.height() * canvas.width());
         if self.pen_mode {
-            self.canvas.draw_line(
+            canvas.draw_line(
                 self.color,
                 self.x as f64,
                 self.y as f64,
@@ -193,10 +188,10 @@ where
         self.y = new_y;
     }
 
-    /// Get a reference to the turtle's canvas.
-    pub fn canvas(&self) -> &Canvas<C> {
-        self.canvas.as_ref()
-    }
+    // /// Get a reference to the turtle's canvas.
+    // pub fn canvas(&self) -> &Canvas<C> {
+    //     self.canvas.as_ref()
+    // }
 
     /// Set the turtle's is drawing.
     /// False is off, True is On
@@ -225,51 +220,41 @@ mod test {
     fn test_turtle() {
         let start_x = 50;
         let start_y = 50;
-        let mut turtle = Turtle::new(
-            Box::new(Canvas::new(100, 100, 255, Rgb::default())),
-            Rgb::new(150, 50, 65),
-            90.0,
-            start_x,
-            start_y,
-        );
+        let mut canvas = Canvas::new(100, 100, 255, Rgb::default());
+        let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
         turtle.set_draw_mode(true);
         for _ in 0..4 {
             turtle.set_heading(90.0);
-            turtle.move_turtle(10);
+            turtle.move_turtle(&mut canvas, 10);
         }
-        turtle.canvas.display().expect("Could not render image")
+        println!("{:?}", turtle.corrdinates());
+        canvas.display().expect("Could not render image")
     }
 
     #[test]
     fn spiral() {
         let start_x = 149;
         let start_y = 149;
-        let mut turtle = Turtle::new(
-            Box::new(Canvas::new_with_bg(
-                start_x * 2 + 1,
-                start_y * 2 + 1,
-                255,
-                Rgb::new(235, 235, 235),
-            )),
-            Rgb::new(150, 50, 65),
-            90.0,
-            start_x,
-            start_y,
+        let mut canvas = Canvas::new_with_bg(
+            start_x * 2 + 1,
+            start_y * 2 + 1,
+            255,
+            Rgb::new(235, 235, 235),
         );
+        let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
         turtle.set_draw_mode(true);
         let mut distance = 1;
         let mut flag = 175;
         while flag > 0 {
-            turtle.move_turtle(distance);
+            turtle.move_turtle(&mut canvas, distance);
             turtle.set_heading(120.0);
             turtle.set_heading(1.0);
             distance += 1;
             flag -= 1;
         }
-        turtle
-            .canvas
+        canvas
             .save_binary("pics/spiral.png")
             .expect("Image is writeable");
-        turtle.canvas.display().expect("Could not render image")
+        canvas.display().expect("Could not render image")
     }
 }
