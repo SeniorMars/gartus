@@ -1,85 +1,79 @@
 use crate::gmath::vector::Vector;
 use std::cmp::{max, min};
-
 /// A trait that is meant to bound [Display]
-pub trait ColorSpace: Default + Copy + PartialEq
+pub trait ColorSpace: Copy + Default + PartialEq
 where
     Rgb: From<Self>,
 {
-    fn new(_: u16, _: u16, _: u16) -> Self;
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A computer pixel struct is represented by its red, green, blue values
 pub struct Rgb {
     /// The first byte that represents red light
-    pub red: u16,
+    pub red: u8,
     /// The second byte that represents green light
-    pub green: u16,
+    pub green: u8,
     /// The final byte that represents blue light
-    pub blue: u16,
+    pub blue: u8,
 }
 
-/// A black Pixel
-pub const BLACK: Rgb = Rgb {
-    red: 0,
-    green: 0,
-    blue: 0,
-};
+impl Rgb {
+    /// A black Pixel
+    pub const BLACK: Rgb = Rgb {
+        red: 0,
+        green: 0,
+        blue: 0,
+    };
 
-/// A red Pixel
-pub const RED: Rgb = Rgb {
-    red: 255,
-    green: 0,
-    blue: 0,
-};
+    /// A red Pixel
+    pub const RED: Rgb = Rgb {
+        red: 255,
+        green: 0,
+        blue: 0,
+    };
 
-/// A green Pixel
-pub const GREEN: Rgb = Rgb {
-    red: 0,
-    green: 255,
-    blue: 0,
-};
+    /// A green Pixel
+    pub const GREEN: Rgb = Rgb {
+        red: 0,
+        green: 255,
+        blue: 0,
+    };
 
-/// A blue Pixel
-pub const BLUE: Rgb = Rgb {
-    red: 0,
-    green: 0,
-    blue: 255,
-};
+    /// A blue Pixel
+    pub const BLUE: Rgb = Rgb {
+        red: 0,
+        green: 0,
+        blue: 255,
+    };
 
-/// A magenta Pixel
-pub const MAGENTA: Rgb = Rgb {
-    red: 255,
-    green: 0,
-    blue: 255,
-};
+    /// A magenta Pixel
+    pub const MAGENTA: Rgb = Rgb {
+        red: 255,
+        green: 0,
+        blue: 255,
+    };
 
-/// A white Pixel
-pub const WHITE: Rgb = Rgb {
-    red: 255,
-    green: 255,
-    blue: 255,
-};
+    /// A white Pixel
+    pub const WHITE: Rgb = Rgb {
+        red: 255,
+        green: 255,
+        blue: 255,
+    };
 
-/// A yellow Pixel
-pub const YELLOW: Rgb = Rgb {
-    red: 255,
-    green: 255,
-    blue: 0,
-};
+    /// A yellow Pixel
+    pub const YELLOW: Rgb = Rgb {
+        red: 255,
+        green: 255,
+        blue: 0,
+    };
 
-/// A cyan Pixel
-pub const CYAN: Rgb = Rgb {
-    red: 0,
-    green: 255,
-    blue: 255,
-};
-
-// impl Pixel for RGB {}
-
-#[allow(dead_code)]
-impl ColorSpace for Rgb {
+    /// A cyan Pixel
+    pub const CYAN: Rgb = Rgb {
+        red: 0,
+        green: 255,
+        blue: 255,
+    };
     /// Returns a pixel that will be used in [Canvas]
     ///
     /// # Arguments
@@ -95,17 +89,24 @@ impl ColorSpace for Rgb {
     /// use crate::curves_rs::graphics::colors::RGB;
     /// let color = RGB::new(0, 64, 255);
     /// ```
-    fn new(red: u16, green: u16, blue: u16) -> Self {
+    pub fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
+
+    /// Returns the values of a pixel
+    pub fn values(&self) -> (u8, u8, u8) {
+        (self.red, self.blue, self.green)
+    }
 }
+
+impl ColorSpace for Rgb {}
 
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
         Self {
-            red: (255.00 * color[0] as f64) as u16,
-            green: (255.00 * color[1] as f64) as u16,
-            blue: (255.00 * color[2] as f64) as u16,
+            red: (255.00 * color[0] as f64) as u8,
+            green: (255.00 * color[1] as f64) as u8,
+            blue: (255.00 * color[2] as f64) as u8,
         }
     }
 }
@@ -152,9 +153,9 @@ impl From<Hsl> for Rgb {
             b = hue_conversion(p, q, hue - (1.0 / 3.0));
         }
         Rgb {
-            red: (r * 255.00) as u16,
-            green: (g * 255.00) as u16,
-            blue: (b * 255.00) as u16,
+            red: (r * 255.00) as u8,
+            green: (g * 255.00) as u8,
+            blue: (b * 255.00) as u8,
         }
     }
 }
@@ -170,8 +171,10 @@ pub struct Hsl {
     pub light: u16,
 }
 
+impl ColorSpace for Hsl {}
+
 #[allow(dead_code)]
-impl ColorSpace for Hsl {
+impl Hsl {
     /// Returns a HSL that can be used in [Canvas]
     ///
     /// # Arguments
@@ -187,7 +190,7 @@ impl ColorSpace for Hsl {
     /// use crate::curves_rs::graphics::colors::HSL;
     /// let color = HSL::new(10, 50, 0);
     /// ```
-    fn new(hue: u16, saturation: u16, light: u16) -> Self {
+    pub fn new(hue: u16, saturation: u16, light: u16) -> Self {
         Self {
             hue: hue.clamp(0, 359),
             saturation: saturation.clamp(0, 100),
@@ -238,47 +241,6 @@ impl From<Rgb> for Hsl {
     }
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq)]
-// /// A type that represents a Pixel on a [Canvas] that can either be a RGB or HSL value
-// pub enum Pixel {
-//     /// A pixel defined in terms of HSL
-//     Hsl(Hsl),
-//     /// A pixel defined in terms of RGB
-//     Rgb(Rgb),
-// }
-//
-// impl Pixel {
-//     /// Returns `true` if the pixel color is [`HSL`].
-//     ///
-//     ///
-//     /// [`HSL`]: PixelColor::HSL
-//     pub fn is_hsl(&self) -> bool {
-//         matches!(self, Self::Hsl(..))
-//     }
-//
-//     /// Returns `true` if the pixel color is [`RGB`].
-//     ///
-//     /// [`RGB`]: PixelColor::RGB
-//     pub fn is_rgb(&self) -> bool {
-//         matches!(self, Self::Rgb(..))
-//     }
-// }
-//
-// impl Default for Pixel {
-//     fn default() -> Self {
-//         Self::Rgb(Rgb::default())
-//     }
-// }
-//
-// impl From<Pixel> for Rgb {
-//     fn from(pixel: Pixel) -> Self {
-//         match pixel {
-//             Pixel::Hsl(hsl) => Rgb::from(hsl),
-//             Pixel::Rgb(rgb) => rgb,
-//         }
-//     }
-// }
-//
 #[cfg(test)]
 mod test {
     use super::*;

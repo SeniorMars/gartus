@@ -2,7 +2,7 @@ use curves_rs::{
     gmath::helpers::polar_to_xy,
     gmath::matrix::Matrix,
     graphics::{
-        colors::{ColorSpace, Hsl, Rgb, BLUE, CYAN, GREEN, MAGENTA, RED, WHITE, YELLOW},
+        colors::{Hsl, Rgb},
         display::Canvas,
     },
 };
@@ -23,7 +23,15 @@ fn circle() {
 fn donut() {
     let mut t = 0.0;
     let mut donut = Canvas::new(500, 500, 255, Rgb::default());
-    let colors = vec![RED, MAGENTA, BLUE, CYAN, GREEN, WHITE, YELLOW];
+    let colors = vec![
+        Rgb::RED,
+        Rgb::MAGENTA,
+        Rgb::BLUE,
+        Rgb::CYAN,
+        Rgb::GREEN,
+        Rgb::WHITE,
+        Rgb::YELLOW,
+    ];
     for _ in 0..6 {
         for color in &colors {
             // very inefficient
@@ -48,7 +56,15 @@ fn donut() {
 #[test]
 fn spirograph() {
     let mut circle = Canvas::new(500, 500, 255, Rgb::default());
-    let colors = vec![RED, MAGENTA, BLUE, CYAN, GREEN, WHITE, YELLOW];
+    let colors = vec![
+        Rgb::RED,
+        Rgb::MAGENTA,
+        Rgb::BLUE,
+        Rgb::CYAN,
+        Rgb::GREEN,
+        Rgb::WHITE,
+        Rgb::YELLOW,
+    ];
     let mut t = 0.0;
     let mut x = 249.0;
     let mut y = 300.0;

@@ -101,46 +101,38 @@ impl Matrix {
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// ```
     pub fn identity_matrix(size: usize) -> Self {
         let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
-        for i in 0..size {
+        (0..size).for_each(|i| {
             matrix.set(i, i, 1.0);
-        }
+        });
         matrix
     }
 
+    #[deprecated = "Doesn't work"]
     /// Returns the inverse of a squared [Matrix].
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let inverse = ident.inverse();
-    /// ```
     pub fn inverse(&self) -> Self {
         eprintln!("This doesn't really work lol -- pls don't use");
         let (rows, cols) = (self.rows, self.cols);
         assert_eq!(rows, cols, "The matrix must be N x N");
         let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
-        for i in 0..cols {
+        (0..cols).for_each(|i| {
             for j in 0..cols {
                 aug.set(i, j, self.get(i, j))
             }
             aug.set(i, i + cols, 1.0)
-        }
+        });
         Self::gauss_jordan_general(&mut aug);
         let mut unaug = Matrix::new(rows, cols, vec![0.0; rows * cols]);
-        for i in 0..rows {
+        (0..rows).for_each(|i| {
             for j in 0..rows {
                 unaug.set(i, j, aug.get(i, j + cols));
             }
-        }
+        });
         unaug
     }
 
@@ -193,7 +185,7 @@ impl Matrix {
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let transpose = ident.transpose();
@@ -214,7 +206,7 @@ impl Matrix {
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let mut matrix = Matrix::new(2, 2, vector);
@@ -265,7 +257,7 @@ impl Matrix {
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.swap_cols(0, 1);
@@ -289,7 +281,7 @@ impl Matrix {
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::curves_rs::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let num = ident.get(0, 0);
@@ -1048,19 +1040,19 @@ mod tests {
 
     #[test]
     fn iter_test() {
-        for i in Matrix::identity_matrix(4).into_iter() {
+        Matrix::identity_matrix(4).into_iter().for_each(|i| {
             println!("{}", i);
-        }
+        });
     }
 
-    #[test]
-    fn inverse_test() {
-        let test = Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 4.0, 1.0, 6.0, 7.0, 8.0, 9.0]);
-        let inverse = test.inverse();
-        println!("{}", inverse);
-        let one = test * inverse;
-        println!("{}", one)
-    }
+    // #[test]
+    // fn inverse_test() {
+    //     let test = Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 4.0, 1.0, 6.0, 7.0, 8.0, 9.0]);
+    //     let inverse = test.inverse();
+    //     println!("{}", inverse);
+    //     let one = test * inverse;
+    //     println!("{}", one)
+    // }
 
     #[test]
     fn hermite() {

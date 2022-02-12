@@ -1,4 +1,5 @@
 use crate::graphics::colors::{ColorSpace, Hsl, Rgb};
+use core::slice;
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -106,6 +107,8 @@ where
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth
     /// of colors in the [Canvas]
+    /// * `line_color` - An RGB or HSL value that will also represent the default color for the
+    /// drawing line
     ///
     /// # Examples
     ///
@@ -158,6 +161,36 @@ where
         self.height
     }
 
+    /// Returns the total size of of a [Canvas].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// let size = image.len();
+    /// ```
+    pub fn len(&self) -> u32 {
+        self.height * self.width
+    }
+
+    /// Returns if [Canvas] is empty
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
+    /// let size = image.len();
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.pixels.is_empty()
+    }
+
     /// Sets the color of the drawing line to a different color given a [Pixel].
     ///
     /// # Arguments
@@ -204,7 +237,7 @@ where
     }
 
     /// Sets an (X, Y) pair to the proper spot in Pixels
-    fn index(&self, x: u32, y: u32) -> usize {
+    pub(in crate::graphics) fn index(&self, x: u32, y: u32) -> usize {
         (y * self.width + x) as usize
     }
 
@@ -212,8 +245,36 @@ where
         self.pixels.iter()
     }
 
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut C> + '_ {
+    /// Returns a mutable iterator on pixels
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut C> + '_ {
         self.pixels.iter_mut()
+    }
+
+    /// Returns a iterator that iterates over a specific row.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_row(0);
+    /// ```
+    pub fn iter_row(&self) -> slice::ChunksExact<'_, C> {
+        self.pixels.chunks_exact(self.width as usize)
+    }
+    /// Returns a mutable iterator that iterates over a specific row.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_row_mut(0);
+    /// ```
+    pub fn iter_row_mut(&mut self) -> slice::ChunksExactMut<'_, C> {
+        self.pixels.chunks_exact_mut(self.width as usize)
     }
 
     /// Deals with negative numbers by wrapping the [Canvas]
@@ -348,6 +409,11 @@ where
     pub fn fill_color(&mut self, bg: &C) {
         self.iter_mut().for_each(|i| *i = *bg);
     }
+
+    /// Get a reference to the canvas's pixels.
+    pub fn pixels(&self) -> &[C] {
+        self.pixels.as_ref()
+    }
 }
 
 impl Canvas<Hsl> {
@@ -409,7 +475,7 @@ impl Canvas<Rgb> {
     /// let mut image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// image.set_line_color_rgb(55, 95, 100);
     /// ```
-    pub fn set_line_color_rgb(&mut self, red: u16, green: u16, blue: u16) {
+    pub fn set_line_color_rgb(&mut self, red: u8, green: u8, blue: u8) {
         self.line = Rgb::new(red, green, blue)
     }
 
