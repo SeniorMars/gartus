@@ -1,5 +1,4 @@
 use crate::gmath::matrix::Matrix;
-use crate::graphics::colors::ColorSpace;
 use crate::graphics::{colors::Rgb, display::Canvas};
 use std::{fs, str::FromStr};
 
@@ -35,7 +34,7 @@ The file follows the following format:
         shear: create a shearing matrix,
             then multiply the transform matrix by the shearing matrix -
             takes 3 arguments (axis, sh_factor, sh_factor)  axis should be x, y, or z
-        color: changes the line's color
+        color: changes the line's color -- should be ONLY RGB
             takes 3 argument representing the new color parameters
         apply: apply the current transformation matrix to the edge matrix
         display: clear the screen, then
@@ -49,10 +48,7 @@ The file follows the following format:
 
 ```
 */
-pub struct Parser<C: ColorSpace>
-where
-    Rgb: From<C>,
-{
+pub struct Parser {
     /// The name of the file being parsed
     file_name: String,
     /// The [Matrix] where points will be appended to draw onto the [Canvas]
@@ -60,16 +56,13 @@ where
     /// The [Matrix] that transformations will be applied to
     trans_matrix: Matrix,
     /// The [Canvas] where the image willl be drawn in
-    canvas: Canvas<C>,
+    canvas: Canvas<Rgb>,
     /// The default color of the drawing line
-    color: C,
+    color: Rgb,
 }
 
 #[allow(dead_code)]
-impl<C: ColorSpace> Parser<C>
-where
-    Rgb: From<C>,
-{
+impl Parser {
     /// Returns a parser that can parse through `file_name`
     ///
     /// # Arguments
@@ -78,19 +71,19 @@ where
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
-    /// * `color` - A [Pixel] that represents the color of the drawing line
+    /// * `color` - A [ColorSpace] that represents the color of the drawing line
     ///
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// ```no_run
+    /// use crate::curves_rs::graphics::colors::{ColorSpace, Rgb};
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
+    /// let purplish = Rgb::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
-    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &C) -> Self {
-        let line = C::default();
+    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &Rgb) -> Self {
+        let line = Rgb::default();
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
@@ -109,17 +102,17 @@ where
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
-    /// * `color` - A [Pixel] that represents the color of the drawing line
-    /// * `bg` - A [Pixel] the default background color of self.canvas
+    /// * `color` - A [Rgb] that represents the color of the drawing line
+    /// * `bg` - A [Rgb] the default background color of self.canvas
     ///
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// ```no_run
+    /// use crate::curves_rs::graphics::colors::Rgb;
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
-    /// let outline = Pixel::RGB(RGB::new(235, 219, 178));
+    /// let purplish = Rgb::new(17, 46, 81);
+    /// let outline = Rgb::new(235, 219, 178);
     /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// ```
     pub fn new_with_bg(
@@ -127,8 +120,8 @@ where
         width: u32,
         height: u32,
         range: u8,
-        color: &C,
-        bg: &C,
+        color: &Rgb,
+        bg: &Rgb,
     ) -> Self {
         Self {
             file_name: file_name.to_string(),
@@ -144,11 +137,11 @@ where
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// ```no_run
+    /// use crate::curves_rs::graphics::colors::Rgb;
     /// use crate::curves_rs::parser::Parser;
-    /// let purplish = Pixel::RGB(RGB::new(17, 46, 81));
-    /// let outline = Pixel::RGB(RGB::new(235, 219, 178));
+    /// let purplish = Rgb::new(17, 46, 81);
+    /// let outline = Rgb::new(235, 219, 178);
     /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
     /// porygon.parse_file();
     /// ```
@@ -222,9 +215,9 @@ where
                 }
                 "color" => {
                     let next_line = iter.next().expect("Error reading line");
-                    let args = Parser::parse_as::<u16>(next_line.to_string()).unwrap();
+                    let args = Parser::parse_as::<u8>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
-                    let color = C::new(args[0], args[1], args[0]);
+                    let color = Rgb::new(args[0], args[1], args[0]);
                     self.set_color(&color);
                 }
                 "ident" => {
@@ -256,7 +249,7 @@ where
     }
 
     /// Set the parser's color.
-    pub fn set_color(&mut self, color: &C) {
+    pub fn set_color(&mut self, color: &Rgb) {
         self.color = *color;
     }
 
