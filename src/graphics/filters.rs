@@ -186,6 +186,6 @@ fn blur_test() {
     ];
     let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
     canvas.fill_canvas(colors);
-    canvas.sobel();
-    canvas.save_ascii("test.ppm").expect("could not save")
+    canvas.blur();
+    println!("{}", canvas)
 }
