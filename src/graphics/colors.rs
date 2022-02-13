@@ -1,7 +1,10 @@
 use crate::gmath::vector::Vector;
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    fmt::Debug,
+};
 /// A trait that is meant to bound [Display]
-pub trait ColorSpace: Copy + Default + PartialEq
+pub trait ColorSpace: Copy + Default + PartialEq + Debug
 where
     Rgb: From<Self>,
 {

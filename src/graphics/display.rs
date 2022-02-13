@@ -1,5 +1,5 @@
 use crate::graphics::colors::{ColorSpace, Hsl, Rgb};
-use core::slice;
+use core::{fmt, slice};
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[derive(Default, Debug, Clone)]
+#[derive(Clone, Debug, Default)]
 /// An art [Canvas] / computer screen is represented here.
 pub struct Canvas<C: ColorSpace>
 where
@@ -18,7 +18,7 @@ where
     /// The width of the canvas
     width: u32,
     /// The maximum depth of the canvas
-    range: u8,
+    color_depth: u8,
     /// The "body" of the canvas that holds all the [Pixel]s that will be displayed
     pixels: Vec<C>,
     /// A counter that will be used when saving images for animations
@@ -57,7 +57,7 @@ where
         Self {
             height,
             width,
-            range,
+            color_depth: range,
             pixels,
             anim_index: 0,
             upper_left_system: false,
@@ -90,7 +90,7 @@ where
         Self {
             height,
             width,
-            range,
+            color_depth: range,
             pixels: vec![background_color; (height * width) as usize],
             anim_index: 0,
             upper_left_system: false,
@@ -123,7 +123,7 @@ where
         Self {
             height,
             width,
-            range,
+            color_depth: range,
             pixels: Vec::with_capacity((height * width) as usize),
             anim_index: 0,
             upper_left_system: false,
@@ -530,6 +530,23 @@ where
     }
 }
 
+impl<C: ColorSpace> fmt::Display for Canvas<C>
+where
+    Rgb: From<C>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "P3\n{} {}\n{}",
+            self.height, self.width, self.color_depth
+        )?;
+        self.iter().enumerate().for_each(|(i, pixel)| {
+            writeln!(f, "(index: {}, value: {:?})", i, pixel).expect("Could not print pixel values")
+        });
+        Ok(())
+    }
+}
+
 // saving
 #[allow(dead_code)]
 impl<C: ColorSpace> Canvas<C>
@@ -556,8 +573,8 @@ where
         let mut file = BufWriter::new(File::create(file_name)?);
         writeln!(
             &mut file,
-            "P3 {} {} {}",
-            self.height, self.width, self.range
+            "P3\n{} {}\n{}",
+            self.height, self.width, self.color_depth
         )?;
 
         self.iter().for_each(|pixel| {
@@ -589,8 +606,8 @@ where
 
         writeln!(
             &mut file,
-            "P6 {} {} {}",
-            self.height, self.width, self.range
+            "P6\n{} {}\n{}",
+            self.height, self.width, self.color_depth
         )?;
 
         self.iter().for_each(|pixel| {
@@ -629,7 +646,11 @@ where
             .stdout(Stdio::piped())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
-        writeln!(stdin, "P3 {} {} {}", self.height, self.width, self.range)?;
+        writeln!(
+            stdin,
+            "P3\n{} {}\n{}",
+            self.height, self.width, self.color_depth
+        )?;
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
@@ -663,7 +684,11 @@ where
             .stdout(Stdio::piped())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
-        writeln!(stdin, "P3 {} {} {}", self.height, self.width, self.range)?;
+        writeln!(
+            stdin,
+            "P3\n{} {}\n{}",
+            self.height, self.width, self.color_depth
+        )?;
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
             write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
