@@ -119,8 +119,9 @@ impl Canvas<Rgb> {
         });
     }
 
-    /// Applies a sobel filter to the current canvas
-    pub fn sobel(&mut self) {
+    /// Applies an inccorectly implmented sobel filter to the current canvas
+    /// Looks cool
+    pub fn sobel_incorrect(&mut self) {
         let width = self.width() as isize;
         let size = self.len() as isize;
         let mut copy = Vec::with_capacity(size as usize);
