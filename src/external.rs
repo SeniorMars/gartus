@@ -41,7 +41,7 @@ fn vec_to_int(vec: Vec<u8>) -> u32 {
     sum
 }
 
-fn byte_vec_fill(vec: &mut Vec<u8>, bytes: &mut VecDeque<u8>) {
+fn byte_vec_fill(bytes: &mut VecDeque<u8>, vec: &mut Vec<u8>) {
     loop {
         let pot_num = bytes.pop_front();
         if pot_num != Some(32) && pot_num != Some(10) {
@@ -89,19 +89,17 @@ fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
 
     let mut height_vec = Vec::new();
 
-    // We have to loop as a Canvas can be very large
-    byte_vec_fill(&mut height_vec, &mut bytes);
-
-    // pop off space or new line
+    // We have to loop as a Canvas's width/height can be very large
+    byte_vec_fill(&mut bytes, &mut height_vec);
 
     let mut width_vec = Vec::new();
-    byte_vec_fill(&mut width_vec, &mut bytes);
+    byte_vec_fill(&mut bytes, &mut width_vec);
 
     let height = vec_to_int(height_vec);
     let width = vec_to_int(width_vec);
 
     let mut color_depth_vec = Vec::new();
-    byte_vec_fill(&mut color_depth_vec, &mut bytes);
+    byte_vec_fill(&mut bytes, &mut color_depth_vec);
 
     // Note due to the spec, this will never overflow or other unspecified behavior
     let color_depth: u8 = vec_to_int(color_depth_vec)
@@ -110,17 +108,16 @@ fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
 
     let mut canvas = Canvas::with_capacity(height, width, color_depth, Rgb::default());
 
-    // let pixels = Vec::new();
-    let pixels = match canvas_type {
+    let mut pixels = Vec::with_capacity(height as usize * width as usize);
+    match canvas_type {
         "P3" => {
-            let mut pixels = Vec::with_capacity(height as usize * width as usize);
             while !bytes.is_empty() {
                 let mut red = Vec::with_capacity(3);
-                byte_vec_fill(&mut red, &mut bytes);
+                byte_vec_fill(&mut bytes, &mut red);
                 let mut green = Vec::with_capacity(3);
-                byte_vec_fill(&mut green, &mut bytes);
+                byte_vec_fill(&mut bytes, &mut green);
                 let mut blue = Vec::with_capacity(3);
-                byte_vec_fill(&mut blue, &mut bytes);
+                byte_vec_fill(&mut bytes, &mut blue);
                 let (red, green, blue) = (
                     vec_to_int(red)
                         .try_into()
@@ -134,17 +131,14 @@ fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
                 );
                 pixels.push(Rgb::new(red, green, blue));
             }
-            pixels
         }
         "P6" => {
-            let mut pixels = Vec::with_capacity(height as usize * width as usize);
             while !bytes.is_empty() {
                 let red = bytes.pop_front().expect("File does not follow ppm spec");
                 let green = bytes.pop_front().expect("File does not follow ppm spec");
                 let blue = bytes.pop_front().expect("File does not follow ppm spec");
                 pixels.push(Rgb::new(red, green, blue));
             }
-            pixels
         }
         _ => unreachable!(),
     };
@@ -174,11 +168,11 @@ fn file_parse_test() {
 
 #[test]
 fn external_fun() {
-    let mut canvas = ppmify("./pics/owl.png").expect("Implmentation is wrong");
+    let mut canvas = ppmify("./pics/index.png").expect("Implmentation is wrong");
     canvas.display().expect("Could not display image");
     canvas.sobel_incorrect();
     canvas.display().expect("Could not display image");
-    // canvas
-    //     .save_extension("corro.png")
-    //     .expect("Could not save image");
+    canvas
+        .save_extension("corro.png")
+        .expect("Could not save image");
 }

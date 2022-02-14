@@ -34,6 +34,7 @@ impl Vector {
         Self { data: [x, y, z] }
     }
 
+    #[must_use]
     /// Produces a new vector based on the cross product of two vectors
     ///
     /// # Arguments
@@ -92,6 +93,7 @@ impl Vector {
         self.dot(self).sqrt()
     }
 
+    #[must_use]
     /// Returns a normalized vector
     ///
     /// # Examples

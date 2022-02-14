@@ -113,29 +113,29 @@ impl Matrix {
         matrix
     }
 
-    #[deprecated = "Doesn't work"]
+    // #[deprecated = "Doesn't work"]
     /// Returns the inverse of a squared [Matrix].
-    pub fn inverse(&self) -> Self {
-        eprintln!("This doesn't really work lol -- pls don't use");
-        let (rows, cols) = (self.rows, self.cols);
-        assert_eq!(rows, cols, "The matrix must be N x N");
-        let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
-        (0..cols).for_each(|i| {
-            for j in 0..cols {
-                aug.set(i, j, self.get(i, j))
-            }
-            aug.set(i, i + cols, 1.0)
-        });
-        Self::gauss_jordan_general(&mut aug);
-        let mut unaug = Matrix::new(rows, cols, vec![0.0; rows * cols]);
-        (0..rows).for_each(|i| {
-            for j in 0..rows {
-                unaug.set(i, j, aug.get(i, j + cols));
-            }
-        });
-        unaug
-    }
-
+    // pub fn inverse(&self) -> Self {
+    //     eprintln!("This doesn't really work lol -- pls don't use");
+    //     let (rows, cols) = (self.rows, self.cols);
+    //     assert_eq!(rows, cols, "The matrix must be N x N");
+    //     let mut aug = Matrix::new(rows, cols * 2, vec![0.0; rows * (cols * 2)]);
+    //     (0..cols).for_each(|i| {
+    //         for j in 0..cols {
+    //             aug.set(i, j, self.get(i, j))
+    //         }
+    //         aug.set(i, i + cols, 1.0)
+    //     });
+    //     Self::gauss_jordan_general(&mut aug);
+    //     let mut unaug = Matrix::new(rows, cols, vec![0.0; rows * cols]);
+    //     (0..rows).for_each(|i| {
+    //         for j in 0..rows {
+    //             unaug.set(i, j, aug.get(i, j + cols));
+    //         }
+    //     });
+    //     unaug
+    // }
+    //
     fn gauss_jordan_general(matrix: &mut Self) {
         let mut lead = 0;
         let (rows, cols) = (matrix.rows, matrix.cols);
@@ -180,6 +180,7 @@ impl Matrix {
         }
     }
 
+    #[must_use]
     /// Returns the transpose [Matrix] of self.
     ///
     /// # Examples
@@ -661,6 +662,7 @@ impl Matrix {
 }
 
 impl Matrix {
+    #[must_use]
     /// Returns the result of multiplying self by another [Matrix].
     /// Self's columns must be the same size as the other's Matrix's rwos.
     ///
@@ -692,6 +694,7 @@ impl Matrix {
         Matrix { rows, cols, data }
     }
 
+    #[must_use]
     /// Returns the result of multiplying the tranpose of self by another [Matrix].
     /// Self's columns must be the same size as the other's Matrix's rwos.
     ///
