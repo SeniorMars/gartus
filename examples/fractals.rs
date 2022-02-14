@@ -63,7 +63,7 @@ mod test {
             });
         });
         mandelcos.fill_canvas(data);
-        mandelcos.sobel();
+        mandelcos.sobel_incorrect();
         mandelcos.display().expect("Could not render image");
         mandelcos
             .save_extension("pics/sobel_cos.png")
@@ -147,7 +147,7 @@ mod test {
             });
         });
         mandel.fill_canvas(data);
-        mandel.sobel();
+        mandel.sobel_incorrect();
         mandel
             .save_extension("mandel.png")
             .expect("Could not save image")
@@ -194,7 +194,7 @@ mod test {
             });
         });
         ship.fill_canvas(data);
-        ship.sobel();
+        ship.sobel_incorrect();
         ship.display().expect("Could not render image");
         ship.save_extension("red_ship.png")
             .expect("Could not render image")
@@ -319,7 +319,7 @@ mod test {
             }
         }
         julia.fill_canvas(data);
-        julia.sobel();
+        julia.sobel_incorrect();
         julia.display().expect("Could not render image");
         julia
             .save_extension("juila.png")
