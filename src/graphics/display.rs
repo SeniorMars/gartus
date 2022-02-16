@@ -7,24 +7,45 @@ use std::{
     process::{Command, Stdio},
 };
 
+/// Provides a way to configure [Canvas]
+#[derive(Debug, Default, Clone)]
+pub struct CanvasConfig {
+    /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
+    pub upper_left_system: bool,
+    /// A boolean that will determine whether to possibly create glitch art
+    /// It will write ppm files inccorectly
+    pub pos_glitch: bool,
+}
+
+impl CanvasConfig {
+    /// constructor for a new config
+    pub fn new(upper_left_system: bool, pos_glitch: bool) -> Self {
+        Self {
+            upper_left_system,
+            pos_glitch,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 /// An art [Canvas] / computer screen is represented here.
 pub struct Canvas<C: ColorSpace>
 where
     Rgb: From<C>,
 {
-    /// The height of the canvas
-    height: u32,
     /// The width of the canvas
     width: u32,
+    /// The height of the canvas
+    height: u32,
     /// The maximum depth of the canvas
     color_depth: u8,
     /// The "body" of the canvas that holds all the [Pixel]s that will be displayed
     pixels: Vec<C>,
     /// A counter that will be used when saving images for animations
+    // TODO: perhaps rewrite to be included in CanvasConfig
     pub(in crate::graphics) anim_index: u32,
-    /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
-    pub upper_left_system: bool,
+    /// Provides a way to configure [Canvas]
+    pub config: CanvasConfig,
     /// A [PixelColor] that represents the color that will be used to draw lines.
     pub line: C,
 }
@@ -52,7 +73,7 @@ where
     /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// let image = Canvas::new(500, 500, 255, Pixel::RGB(RGB::default()));
     /// ```
-    pub fn new(height: u32, width: u32, range: u8, line_color: C) -> Self {
+    pub fn new(width: u32, height: u32, range: u8, line_color: C) -> Self {
         let pixels: Vec<C> = vec![C::default(); (height * width) as usize];
         Self {
             height,
@@ -60,7 +81,7 @@ where
             color_depth: range,
             pixels,
             anim_index: 0,
-            upper_left_system: false,
+            config: CanvasConfig::default(),
             line: line_color,
         }
     }
@@ -85,7 +106,7 @@ where
     /// let background_color = Pixel::RGB(RGB::new(1, 2, 3));
     /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// ```
-    pub fn new_with_bg(height: u32, width: u32, range: u8, background_color: C) -> Self {
+    pub fn new_with_bg(width: u32, height: u32, range: u8, background_color: C) -> Self {
         let line = C::default();
         Self {
             height,
@@ -93,7 +114,7 @@ where
             color_depth: range,
             pixels: vec![background_color; (height * width) as usize],
             anim_index: 0,
-            upper_left_system: false,
+            config: CanvasConfig::default(),
             line,
         }
     }
@@ -118,7 +139,7 @@ where
     /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
     /// let image = Canvas::with_capacity(500, 500, 255, Pixel::RGB(RGB::default()));
     /// ```
-    pub fn with_capacity(height: u32, width: u32, range: u8, line_color: C) -> Self {
+    pub fn with_capacity(width: u32, height: u32, range: u8, line_color: C) -> Self {
         let line = line_color;
         Self {
             height,
@@ -126,7 +147,7 @@ where
             color_depth: range,
             pixels: Vec::with_capacity((height * width) as usize),
             anim_index: 0,
-            upper_left_system: false,
+            config: CanvasConfig::default(),
             line,
         }
     }
@@ -189,6 +210,11 @@ where
     /// ```
     pub fn is_empty(&self) -> bool {
         self.pixels.is_empty()
+    }
+
+    /// Set a new configuration for canvas
+    pub fn set_config(&mut self, config: CanvasConfig) {
+        self.config = config
     }
 
     /// Sets the color of the drawing line to a different color given a [Pixel].
@@ -328,7 +354,7 @@ where
     pub fn get_pixel(&self, x: i32, y: i32) -> &C {
         let (x, y, width, height) = self.deal_with_negs(x, y);
         // println!("i32:{} as {}", x, x as u32);
-        if self.upper_left_system {
+        if self.config.upper_left_system {
             let index = self.index(x as u32, y as u32);
             &self.pixels[index]
         } else {
@@ -362,7 +388,7 @@ where
     /// ```
     pub fn plot(&mut self, new_color: &C, x: i32, y: i32) {
         let (x, y, width, height) = self.deal_with_negs(x, y);
-        if self.upper_left_system {
+        if self.config.upper_left_system {
             let index = self.index(x as u32, y as u32);
             self.pixels[index] = *new_color
         } else {
@@ -574,7 +600,7 @@ where
         writeln!(
             &mut file,
             "P3\n{} {}\n{}",
-            self.height, self.width, self.color_depth
+            self.width, self.height, self.color_depth
         )?;
 
         self.iter().for_each(|pixel| {
@@ -607,7 +633,7 @@ where
         writeln!(
             &mut file,
             "P6\n{} {}\n{}",
-            self.height, self.width, self.color_depth
+            self.width, self.height, self.color_depth
         )?;
 
         self.iter().for_each(|pixel| {
@@ -646,11 +672,20 @@ where
             .stdout(Stdio::piped())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
-        writeln!(
-            stdin,
-            "P3\n{} {}\n{}",
-            self.height, self.width, self.color_depth
-        )?;
+        // TODO: rewrite to be P6 implmentation
+        if self.config.pos_glitch {
+            writeln!(
+                stdin,
+                "P3\n{} {}\n{}",
+                self.height, self.width, self.color_depth
+            )?;
+        } else {
+            writeln!(
+                stdin,
+                "P3\n{} {}\n{}",
+                self.width, self.height, self.color_depth
+            )?;
+        }
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
@@ -659,7 +694,6 @@ where
         });
         stdin.flush()
     }
-
     /// Display the current state of the [Canvas].
     ///
     /// # Examples
@@ -684,11 +718,19 @@ where
             .stdout(Stdio::piped())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
-        writeln!(
-            stdin,
-            "P3\n{} {}\n{}",
-            self.height, self.width, self.color_depth
-        )?;
+        if self.config.pos_glitch {
+            writeln!(
+                stdin,
+                "P3\n{} {}\n{}",
+                self.height, self.width, self.color_depth
+            )?;
+        } else {
+            writeln!(
+                stdin,
+                "P3\n{} {}\n{}",
+                self.width, self.height, self.color_depth
+            )?;
+        }
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
             write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)

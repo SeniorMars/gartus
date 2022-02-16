@@ -1,5 +1,5 @@
-use std::collections::VecDeque;
-use std::fs::File;
+use crate::graphics::display::CanvasConfig;
+use std::{collections::VecDeque, fs::File};
 use std::{
     ffi::OsStr,
     io::{BufReader, Read},
@@ -9,7 +9,10 @@ use std::{
 
 use crate::graphics::{colors::Rgb, display::Canvas};
 /// ppmifizes an image so that it works with with this systems
-pub fn ppmify(file_name: &str) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
+pub fn ppmify(
+    file_name: &str,
+    pos_glitch: bool,
+) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
     let path = Path::new(file_name);
     if !path.exists() {
         panic!("File Does not exit");
@@ -27,7 +30,7 @@ pub fn ppmify(file_name: &str) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>
             .spawn()?;
         child.wait()?;
     };
-    parse_ppm(&path.with_extension("ppm"))
+    parse_ppm(&path.with_extension("ppm"), pos_glitch)
 }
 
 fn vec_to_int(vec: Vec<u8>) -> u32 {
@@ -68,7 +71,7 @@ fn ascii_to_num(byte: u8) -> u8 {
     }
 }
 
-fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
+fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
     // this will take so long and is naive
     let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
@@ -88,15 +91,20 @@ fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
     bytes.pop_front();
 
     let mut height_vec = Vec::new();
-
-    // We have to loop as a Canvas's width/height can be very large
-    byte_vec_fill(&mut bytes, &mut height_vec);
-
     let mut width_vec = Vec::new();
-    byte_vec_fill(&mut bytes, &mut width_vec);
+    // We have to loop as a Canvas's width/height can be very large
+    // inccorectly gathers width and height wrong. May look cool.
+    // if pos_glitch is on, then use display_alt to see image.
+    if pos_glitch {
+        byte_vec_fill(&mut bytes, &mut height_vec);
+        byte_vec_fill(&mut bytes, &mut width_vec);
+    } else {
+        byte_vec_fill(&mut bytes, &mut width_vec);
+        byte_vec_fill(&mut bytes, &mut height_vec);
+    }
 
-    let height = vec_to_int(height_vec);
     let width = vec_to_int(width_vec);
+    let height = vec_to_int(height_vec);
 
     let mut color_depth_vec = Vec::new();
     byte_vec_fill(&mut bytes, &mut color_depth_vec);
@@ -106,7 +114,7 @@ fn parse_ppm(path: &Path) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
         .try_into()
         .expect("File does not follow ppm spec");
 
-    let mut canvas = Canvas::with_capacity(height, width, color_depth, Rgb::default());
+    let mut canvas = Canvas::with_capacity(width, height, color_depth, Rgb::default());
 
     let mut pixels = Vec::with_capacity(height as usize * width as usize);
     match canvas_type {
@@ -161,16 +169,18 @@ fn file_parse_test() {
     ];
     let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
     canvas.fill_canvas(colors);
-    // canvas.save_binary("pleasework.ppm").expect("Works");
-    let other = ppmify("pleasework.ppm").expect("Life is wrong");
+    canvas.save_binary("./pics/pleasework.ppm").expect("Works");
+    let other = ppmify("./pics/pleasework.ppm", true).expect("Life is wrong");
     assert_eq!(canvas.pixels(), other.pixels());
 }
 
 #[test]
 fn external_fun() {
-    let mut canvas = ppmify("./pics/index.png").expect("Implmentation is wrong");
+    let pos_glitch = true;
+    let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
+    canvas.set_config(CanvasConfig::new(false, pos_glitch));
     canvas.display().expect("Could not display image");
-    canvas.sobel_incorrect();
+    canvas.blur();
     canvas.display().expect("Could not display image");
     canvas
         .save_extension("corro.png")
