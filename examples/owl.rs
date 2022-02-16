@@ -57,7 +57,7 @@ fn owl() {
             //     rng.gen_range(0..=255),
             //     rng.gen_range(0..=255),
             // );
-            // owl.save_binary(&format!("anim/owl{:04}.ppm", i))
+            // owl.save_binary(&format!("./anim/owl{:04}.ppm", i))
             //     .expect("could not save image");
             owl.draw_line(
                 owl.line,
@@ -69,7 +69,7 @@ fn owl() {
         }
     });
     owl.display().expect("Could not display image");
-    // owl.save_binary(&format!("anim/owl{:04}.ppm", 319))
+    // owl.save_binary(&format!("./anim/owl{:04}.ppm", 319))
     //     .expect("could not save image");
     // utils::animation("owl", "owl.gif");
     // utils::view_animation("owl.gif");

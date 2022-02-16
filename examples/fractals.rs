@@ -65,7 +65,7 @@ mod test {
         mandelcos.sobel_incorrect();
         mandelcos.display().expect("Could not render image");
         mandelcos
-            .save_extension("pics/sobel_cos.png")
+            .save_extension("./pics/sobel_cos.png")
             .expect("Could not save image");
     }
 
@@ -106,7 +106,7 @@ mod test {
         });
         nfam.fill_canvas(data);
         nfam.display().expect("Could not render image");
-        nfam.save_extension("nfam.png")
+        nfam.save_extension("./pics/nfam.png")
             .expect("Could not save image");
     }
 
@@ -148,7 +148,7 @@ mod test {
         mandel.fill_canvas(data);
         mandel.sobel_incorrect();
         mandel
-            .save_extension("mandel.png")
+            .save_extension("./pics/mandel.png")
             .expect("Could not save image")
     }
 
@@ -195,7 +195,7 @@ mod test {
         ship.fill_canvas(data);
         ship.sobel_incorrect();
         ship.display().expect("Could not render image");
-        ship.save_extension("red_ship.png")
+        ship.save_extension("./pics/red_ship.png")
             .expect("Could not render image")
     }
 
@@ -285,7 +285,7 @@ mod test {
         color_domain.fill_canvas(data);
         color_domain.display().expect("Could not render image");
         color_domain
-            .save_extension("failed_domain20.png")
+            .save_extension("./pics/failed_domain20.png")
             .expect("Could not render image")
     }
 
@@ -321,7 +321,7 @@ mod test {
         julia.sobel_incorrect();
         julia.display().expect("Could not render image");
         julia
-            .save_extension("juila.png")
+            .save_extension("./pics/juila.png")
             .expect("Could not render image")
     }
 }

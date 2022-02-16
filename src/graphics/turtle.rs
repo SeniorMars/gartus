@@ -227,8 +227,8 @@ mod test {
             turtle.set_heading(90.0);
             turtle.move_turtle(&mut canvas, 10);
         }
-        println!("{:?}", turtle.corrdinates());
-        canvas.display().expect("Could not render image")
+        // println!("{:?}", turtle.corrdinates());
+        // canvas.display().expect("Could not render image")
     }
 
     #[test]
@@ -253,8 +253,8 @@ mod test {
             flag -= 1;
         }
         canvas
-            .save_binary("pics/spiral.png")
+            .save_binary("./pics/spiral.png")
             .expect("Image is writeable");
-        canvas.display().expect("Could not render image")
+        // canvas.display().expect("Could not render image")
     }
 }

@@ -119,6 +119,7 @@ impl Canvas<Rgb> {
         });
     }
 
+    /// Applies a sobel filter to the current canvas
     pub fn sobel(&mut self) {
         let width = self.width() as isize;
         let size = self.len() as isize;

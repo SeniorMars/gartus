@@ -49,7 +49,7 @@ fn donut() {
     }
     donut.display().expect("Could not draw circle");
     donut
-        .save_extension("donut.png")
+        .save_extension("./pics/donut.png")
         .expect("Could not save donut")
 }
 

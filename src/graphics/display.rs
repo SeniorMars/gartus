@@ -676,21 +676,28 @@ where
         if self.config.pos_glitch {
             writeln!(
                 stdin,
-                "P3\n{} {}\n{}",
+                "P6\n{} {}\n{}",
                 self.height, self.width, self.color_depth
             )?;
         } else {
             writeln!(
                 stdin,
-                "P3\n{} {}\n{}",
+                "P6\n{} {}\n{}",
                 self.width, self.height, self.color_depth
             )?;
         }
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
-                .expect("Cannot write to stdin");
+            stdin
+                .write_all(&rgb.red.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.green.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.blue.to_be_bytes())
+                .expect("Could not write as binary");
         });
         stdin.flush()
     }
@@ -721,20 +728,27 @@ where
         if self.config.pos_glitch {
             writeln!(
                 stdin,
-                "P3\n{} {}\n{}",
+                "P6\n{} {}\n{}",
                 self.height, self.width, self.color_depth
             )?;
         } else {
             writeln!(
                 stdin,
-                "P3\n{} {}\n{}",
+                "P6\n{} {}\n{}",
                 self.width, self.height, self.color_depth
             )?;
         }
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            write!(stdin, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
-                .expect("Cannot write to stdin");
+            stdin
+                .write_all(&rgb.red.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.green.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.blue.to_be_bytes())
+                .expect("Could not write as binary");
         });
         stdin.flush()
     }

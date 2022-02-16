@@ -15,16 +15,17 @@ use std::process::{Command, Stdio};
 /// ```
 pub fn animation(file_name_prefix: &str, output: &str) {
     println!("Making a new animation: {}", output);
-    let mut child = Command::new("convert")
+    Command::new("convert")
         .arg("-delay")
         .arg("1.2")
-        .arg(&format!("anim/{}*", file_name_prefix))
+        .arg(&format!("./anim/{}*", file_name_prefix))
         .arg(output)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .unwrap();
-    child.wait().expect("Could not make animation");
+        .unwrap()
+        .wait()
+        .expect("Could not make animation");
 }
 
 /// Open's a given animation using imagemagick's `animate`.

@@ -1,4 +1,3 @@
-use crate::graphics::display::CanvasConfig;
 use std::{collections::VecDeque, fs::File};
 use std::{
     ffi::OsStr,
@@ -21,16 +20,16 @@ pub fn ppmify(
         .extension()
         .and_then(OsStr::to_str)
         .unwrap_or_else(|| panic!("Check your file input: {:?}", path));
+    let correct_ext = path.with_extension("ppm");
     if ext != "ppm" {
-        let new_ext = path.with_extension("ppm");
-        let converted = new_ext.to_str().expect("Cannot get new file name");
-        let mut child = Command::new("convert")
+        let converted = correct_ext.to_str().expect("Cannot get new file name");
+        Command::new("convert")
             .arg(file_name)
             .arg(converted)
-            .spawn()?;
-        child.wait()?;
+            .spawn()?
+            .wait()?;
     };
-    parse_ppm(&path.with_extension("ppm"), pos_glitch)
+    parse_ppm(&correct_ext, pos_glitch)
 }
 
 fn vec_to_int(vec: Vec<u8>) -> u32 {
@@ -72,7 +71,7 @@ fn ascii_to_num(byte: u8) -> u8 {
 }
 
 fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
-    // this will take so long and is naive
+    // this is a naive parser. Not 100% compatible with the spec
     let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
     let mut bytes = reader
@@ -81,20 +80,14 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
         .collect::<VecDeque<u8>>();
 
     let p_type = (bytes.pop_front().unwrap(), bytes.pop_front().unwrap());
-    let canvas_type = match p_type {
-        (80, 51) => "P3",
-        (80, 54) => "P6",
-        (_, _) => panic!("Unsupported spec"),
-    };
 
     // pop off newline
     bytes.pop_front();
 
+    // We have to loop as a Canvas's width/height can be very large
     let mut height_vec = Vec::new();
     let mut width_vec = Vec::new();
-    // We have to loop as a Canvas's width/height can be very large
-    // inccorectly gathers width and height wrong. May look cool.
-    // if pos_glitch is on, then use display_alt to see image.
+    // if pos_glitch is on, then inccorectly gathers width and height wrong. May look cool.
     if pos_glitch {
         byte_vec_fill(&mut bytes, &mut height_vec);
         byte_vec_fill(&mut bytes, &mut width_vec);
@@ -117,30 +110,32 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
     let mut canvas = Canvas::with_capacity(width, height, color_depth, Rgb::default());
 
     let mut pixels = Vec::with_capacity(height as usize * width as usize);
-    match canvas_type {
-        "P3" => {
+    match p_type {
+        // p3
+        (80, 51) => {
             while !bytes.is_empty() {
-                let mut red = Vec::with_capacity(3);
-                byte_vec_fill(&mut bytes, &mut red);
-                let mut green = Vec::with_capacity(3);
-                byte_vec_fill(&mut bytes, &mut green);
-                let mut blue = Vec::with_capacity(3);
-                byte_vec_fill(&mut bytes, &mut blue);
+                let mut red_vec = Vec::with_capacity(3);
+                let mut green_vec = Vec::with_capacity(3);
+                let mut blue_vec = Vec::with_capacity(3);
+                byte_vec_fill(&mut bytes, &mut red_vec);
+                byte_vec_fill(&mut bytes, &mut green_vec);
+                byte_vec_fill(&mut bytes, &mut blue_vec);
                 let (red, green, blue) = (
-                    vec_to_int(red)
+                    vec_to_int(red_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
-                    vec_to_int(green)
+                    vec_to_int(green_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
-                    vec_to_int(blue)
+                    vec_to_int(blue_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
                 );
                 pixels.push(Rgb::new(red, green, blue));
             }
         }
-        "P6" => {
+        // p6
+        (80, 54) => {
             while !bytes.is_empty() {
                 let red = bytes.pop_front().expect("File does not follow ppm spec");
                 let green = bytes.pop_front().expect("File does not follow ppm spec");
@@ -148,7 +143,7 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
                 pixels.push(Rgb::new(red, green, blue));
             }
         }
-        _ => unreachable!(),
+        _ => panic!("Unsupported spec"),
     };
     canvas.fill_canvas(pixels);
     Ok(canvas)
@@ -176,6 +171,7 @@ fn file_parse_test() {
 
 #[test]
 fn external_fun() {
+    use crate::graphics::display::CanvasConfig;
     let pos_glitch = true;
     let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
     canvas.set_config(CanvasConfig::new(false, pos_glitch));

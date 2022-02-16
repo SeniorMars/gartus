@@ -54,7 +54,7 @@ fn geass() {
         copy.draw_lines(&base.mult_matrix(
             &Matrix::rotate_y(i as f64).mult_matrix(&Matrix::translate(400.0, 400.0, 0.0)),
         ));
-        copy.save_extension(&format!("anim/geass{:04}.png", i))
+        copy.save_extension(&format!("./anim/geass{:04}.png", i))
             .expect("Could not save image")
     }
     // img.display().expect("Could not display image")
