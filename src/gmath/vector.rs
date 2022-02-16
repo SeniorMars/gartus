@@ -3,8 +3,8 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
 };
 
-/// Representing a ray color
-pub type Color = Vector;
+/// Representing a point that has three dimensions.
+pub type Point = Vector;
 
 #[derive(Debug, Clone, Copy)]
 /// A 3D geometric vector

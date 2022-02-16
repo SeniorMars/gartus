@@ -107,9 +107,9 @@ impl ColorSpace for Rgb {}
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
         Self {
-            red: (255.00 * color[0] as f64) as u8,
-            green: (255.00 * color[1] as f64) as u8,
-            blue: (255.00 * color[2] as f64) as u8,
+            red: (255.999 * color[0] as f64) as u8,
+            green: (255.999 * color[1] as f64) as u8,
+            blue: (255.999 * color[2] as f64) as u8,
         }
     }
 }
@@ -156,9 +156,9 @@ impl From<Hsl> for Rgb {
             b = hue_conversion(p, q, hue - (1.0 / 3.0));
         }
         Rgb {
-            red: (r * 255.00) as u8,
-            green: (g * 255.00) as u8,
-            blue: (b * 255.00) as u8,
+            red: (r * 255.999) as u8,
+            green: (g * 255.999) as u8,
+            blue: (b * 255.999) as u8,
         }
     }
 }
