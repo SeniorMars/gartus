@@ -4,6 +4,16 @@
 //! Provides an "art canvas" to work with drawings, a mini matrix library
 //! with several 3D transformations, and a parser to read scripts.
 //! This library is still a work in progress project. Be warn.
+//!
+//! # The prelude
+//!
+//! Importing each trait individually can become a chore, so we provide a
+//! `prelude` module to allow you to import the main traits all at once. For
+//! example:
+//!
+//! ```rust
+//! use curves_rs::prelude::*;
+//! ```
 
 /// A module that includes method to read external PPM and allows them to be used with this system.
 pub mod external;
@@ -15,6 +25,8 @@ pub mod graphics;
 /// This module hosts a [Parser] that allows an image to be created through
 /// a detailed specification. More information found in the module.
 pub mod parser;
+/// prelude with
+pub mod prelude;
 /// This module provides utilities that might be needed to use more
 /// advance features that are not fully integrated into parser
 /// or graphics modules.
