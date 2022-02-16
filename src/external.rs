@@ -180,7 +180,7 @@ fn external_fun() {
     let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
     canvas.set_config(CanvasConfig::new(false, pos_glitch));
     canvas.display().expect("Could not display image");
-    canvas.blur();
+    canvas.sobel();
     canvas.display().expect("Could not display image");
     canvas
         .save_extension("corro.png")
