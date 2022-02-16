@@ -1,12 +1,16 @@
-use curves_rs::gmath::matrix::*;
-use curves_rs::graphics::colors::*;
-use curves_rs::graphics::display::*;
+use curves_rs::{
+    graphics::display::CanvasConfig,
+    prelude::{Canvas, Matrix, Rgb},
+};
 // use curves_rs::utils;
 
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));
     let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
-    img.upper_left_system = true;
+    img.set_config(CanvasConfig {
+        upper_left_system: true,
+        pos_glitch: false,
+    });
 
     let geass_corrs = [
         170, 216, 190, 249, 190, 249, 220, 274, 220, 274, 250, 295, 250, 295, 289, 318, 289, 318,

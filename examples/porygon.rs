@@ -1,11 +1,15 @@
-use curves_rs::gmath::matrix::Matrix;
-use curves_rs::graphics::colors::Rgb;
-use curves_rs::graphics::display::Canvas;
+use curves_rs::{
+    graphics::display::CanvasConfig,
+    prelude::{Canvas, Matrix, Rgb},
+};
 
 pub fn make_pory() {
     let mut porygon = Canvas::new_with_bg(512, 512, 255, Rgb::new(17, 46, 81));
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
-    porygon.upper_left_system = true;
+    porygon.set_config(CanvasConfig {
+        upper_left_system: true,
+        pos_glitch: false,
+    });
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
         604, 621, 604, 621, 622, 654, 622, 654, 604, 621, 604, 621, 540, 607, 540, 607, 552, 661,

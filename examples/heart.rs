@@ -1,10 +1,14 @@
-use curves_rs::gmath::matrix::*;
-use curves_rs::graphics::colors::*;
-use curves_rs::graphics::display::*;
+use curves_rs::{
+    graphics::display::CanvasConfig,
+    prelude::{Canvas, Matrix, Rgb},
+};
 
 fn main() {
     let mut heart = Canvas::new(610, 610, 255, Rgb::default());
-    heart.upper_left_system = true;
+    heart.set_config(CanvasConfig {
+        upper_left_system: true,
+        pos_glitch: false,
+    });
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(120));
     let corrs = [
         365, 341, 376, 315, 376, 315, 404, 289, 404, 289, 429, 263, 429, 263, 458, 239, 458, 239,

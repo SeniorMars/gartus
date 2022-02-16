@@ -1,11 +1,14 @@
-use curves_rs::graphics::{colors::Rgb, display::*};
+use curves_rs::{
+    graphics::display::CanvasConfig,
+    prelude::{Canvas, Rgb},
+};
 
 #[allow(clippy::vec_init_then_push)]
 fn cat() {
     let mut cat = Canvas::new(610, 610, 255, Rgb::default());
 
     let mut head: Vec<(i32, i32)> = Vec::new();
-    cat.upper_left_system = true;
+    cat.set_config(CanvasConfig::new(true, false));
     cat.set_line_color_rgb(255, 255, 255);
 
     head.push((350 - 150, 222));

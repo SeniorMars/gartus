@@ -1,5 +1,4 @@
-use curves_rs::graphics::colors::Rgb;
-use curves_rs::graphics::display::Canvas;
+use curves_rs::prelude::{Canvas, Rgb};
 
 fn main() {
     let mut img = Canvas::with_capacity(256, 256, 255, Rgb::default());
@@ -23,7 +22,7 @@ fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use curves_rs::graphics::colors::Hsl;
+    use curves_rs::graphics::{colors::Hsl, display::CanvasConfig};
     use num::complex::Complex;
     use std::f32::consts::PI;
 
@@ -38,7 +37,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut mandelcos = Canvas::with_capacity(HEIGHT, WIDTH, 255, Rgb::default());
+        let mut mandelcos = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -81,7 +80,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut nfam = Canvas::with_capacity(HEIGHT, WIDTH, 255, Rgb::default());
+        let mut nfam = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -122,7 +121,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut mandel = Canvas::with_capacity(HEIGHT, WIDTH, 255, Rgb::default());
+        let mut mandel = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -165,7 +164,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut ship = Canvas::with_capacity(HEIGHT, WIDTH, 255, Rgb::default());
+        let mut ship = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -213,8 +212,8 @@ mod test {
         let cymax = 1.8f32;
         let scalex = (cxmax - cxmin) / ZOOM as f32;
         let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut ship = Canvas::with_capacity(HEIGHT, WIDTH, 255, Hsl::default());
-        ship.upper_left_system = true;
+        let mut ship = Canvas::with_capacity(WIDTH, HEIGHT, 255, Hsl::default());
+        ship.set_config(CanvasConfig::new(true, false));
         let mut data: Vec<Hsl> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -260,7 +259,7 @@ mod test {
         let cymax = 5f32;
         let scalex = (cxmax - cxmin) / ZOOM as f32;
         let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut color_domain = Canvas::with_capacity(HEIGHT, WIDTH, 255, Hsl::default());
+        let mut color_domain = Canvas::with_capacity(WIDTH, HEIGHT, 255, Hsl::default());
         let mut data: Vec<Hsl> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         let unit = Complex::new(1.0, 0.0);
         let four = Complex::new(4.0, 0.0);
