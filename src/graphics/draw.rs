@@ -20,11 +20,11 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// use crate::curves_rs::graphics::colors::Rgb;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
-    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
-    /// let background_color = Pixel::RGB(RGB::new(0, 0, 0));
+    /// let background_color = Rgb::new(0, 0, 0);
+    /// let mut image = Canvas::new(25, 25, 255, background_color);
+    /// let color = Rgb::new(0, 64, 255);
     /// image.fill(10, 10, &color, &background_color)
     /// ```
     pub fn fill(&mut self, x: i32, y: i32, fill_color: &C, boundary_color: &C) {
@@ -34,58 +34,16 @@ where
             if pixel == boundary_color || pixel == fill_color {
                 continue;
             }
+            // if self.config.animation() {
+            //     self.save_binary(&format!(
+            //         "anim/{}{:08}.ppm",
+            //         self.config.file_prefix(),
+            //         self.config.anim_index(),
+            //     ))
+            //     .expect("Could not save to file");
+            //     self.config.increase_anim_index()
+            // }
             self.plot(fill_color, x, y);
-            points.push((x + 1, y));
-            points.push((x, y + 1));
-            points.push((x - 1, y));
-            points.push((x, y - 1));
-            // points.push((x - 1, y - 1));
-            // points.push((x - 1, y + 1));
-            // points.push((x + 1, y - 1));
-            // points.push((x + 1, y + 1));
-        }
-    }
-
-    /// Fills in the area of a 2D figure given a random point
-    /// inside the figure that is meant for animation.
-    ///
-    /// # Arguments
-    ///
-    /// * `x` - A signed i32 int that represents the x of the random point
-    /// * `y` - A signed i32 int that represents the y of the random point
-    /// * `fill_color` - A [Pixel] will be the color the polygon will be filled in
-    /// * `boundary_color` - A [Pixel] that is the represents the outline of the shape
-    /// * `filename` - The prefix of the name the animation will belong to
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
-    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
-    /// let background_color = Pixel::RGB(RGB::new(0, 0, 0));
-    /// image.fill_with_animation(10, 10, &color, &background_color, "image")
-    /// ```
-    pub fn fill_with_animation(
-        &mut self,
-        x: i32,
-        y: i32,
-        fill_color: &C,
-        boundary_color: &C,
-        filename: &str,
-    ) {
-        let mut points = vec![(x, y)];
-        while let Some((x, y)) = points.pop() {
-            let pixel = self.get_pixel(x, y);
-            if pixel == boundary_color || pixel == fill_color {
-                continue;
-            }
-            self.plot(fill_color, x, y);
-            self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))
-                .expect("Could not save to file");
-            self.anim_index += 1;
             points.push((x + 1, y));
             points.push((x, y + 1));
             points.push((x - 1, y));
@@ -109,10 +67,10 @@ where
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
+    /// use crate::curves_rs::graphics::colors::Rgb;
     /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
-    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
+    /// let mut image = Canvas::new(25, 25, 255, Rgb::default());
+    /// let color = Rgb::new(0, 64, 255);
     /// image.set_line_pixel(&color);
     /// let matrix = Matrix::identity_matrix(4);
     /// image.draw_lines(&matrix)
@@ -125,54 +83,25 @@ where
                 Some(p1) => (p1[0], p1[1], p1[2]),
                 None => panic!("Need at least 2 points to draw"),
             };
-
-            self.draw_line(self.line, x0, y0, x1, y1);
-        }
-    }
-
-    /// Draws all lines in provided in a given [Matrix] onto the [Canvas] for an animation
-    ///
-    /// # Arguments
-    ///
-    /// * `matrix` - A [Matrix] reference that has at least two points
-    /// (2 by 4) to draw onto the [Canvas]
-    /// * `filename` - The prefix of the name the animation will belong to
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
-    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
-    /// image.set_line_pixel(&color);
-    /// let matrix = Matrix::identity_matrix(4);
-    /// image.draw_lines_for_animation(&matrix, "cool_picture")
-    /// ```
-    pub fn draw_lines_for_animation(&mut self, matrix: &Matrix, filename: &str) {
-        let mut iter = matrix.iter_by_point();
-        while let Some(point) = iter.next() {
-            let (x0, y0, _z0) = (point[0], point[1], point[3]);
-            let (x1, y1, _z1) = match iter.next() {
-                Some(p1) => (p1[0], p1[1], p1[2]),
-                None => panic!("Need at least 2 points to draw"),
-            };
-
-            self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))
+            if self.config.animation() {
+                self.save_binary(&format!(
+                    "anim/{}{:08}.ppm",
+                    self.config.file_prefix(),
+                    self.config.anim_index(),
+                ))
                 .expect("Could not save to file");
+            }
             self.draw_line(self.line, x0, y0, x1, y1);
         }
-        self.save_binary(&format!("anim/{}{:08}.ppm", filename, self.anim_index))
+        if self.config.animation() {
+            self.save_binary(&format!(
+                "anim/{}{:08}.ppm",
+                self.config.file_prefix(),
+                self.config.anim_index(),
+            ))
             .expect("Could not save to file");
+        }
     }
-
-    // def add_circle( points, cx, cy, cz, r, step ):
-    //     pass
-
-    // def add_curve( points, x0, y0, x1, y1, x2, y2, x3, y3, step, curve_type ):
-    //     pass
 
     /// Draws a line onto the [Canvas] provided two sets of points.
     ///
@@ -189,13 +118,15 @@ where
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let mut image = Canvas::new(25, 25, 255, Pixel::RGB(RGB::default()));
-    /// let color = Pixel::RGB(RGB::new(0, 64, 255));
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let mut image = Canvas::new(25, 25, 255, Rgb::default());
+    /// let color = Rgb::new(0, 64, 255);
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)
     /// ```
     pub fn draw_line(&mut self, color: C, x0: f64, y0: f64, x1: f64, y1: f64) {
-        self.anim_index += 1;
+        if self.config.animation() {
+            self.config.increase_anim_index()
+        }
         let (x0, y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)
         } else {

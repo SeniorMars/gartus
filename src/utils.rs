@@ -1,6 +1,11 @@
-use std::process::{Command, Stdio};
+use std::process::Command;
+
+use crate::graphics::{
+    colors::{ColorSpace, Rgb},
+    display::Canvas,
+};
 /// Returns a new animation given a file name prefix.
-///
+/// TODO: update documentation
 /// # Arguments
 ///
 /// * `file_name_prefix` - The prefix of the name the animation belongs to
@@ -9,26 +14,35 @@ use std::process::{Command, Stdio};
 /// # Examples
 ///
 /// Basic usage:
-/// ```
+/// ```no_run
 /// use crate::curves_rs::utils;
-/// utils::animation("cool_picture", "gifs/final.gif");
+/// use crate::curves_rs::prelude::{Canvas, Rgb};
+/// use crate::curves_rs::graphics::display::{AnimationConfig, CanvasConfig};
+/// let file_prefix = "test";
+/// let purplish = Rgb::new(17, 46, 81);
+/// let mut canvas = Canvas::new_with_bg(512, 512, 255, purplish);
+/// canvas.set_config(CanvasConfig::new(true, false));
+/// canvas.set_animation(AnimationConfig::new(file_prefix.to_string()));
+/// utils::animation(&canvas, "final.gif");
 /// ```
-pub fn animation(file_name_prefix: &str, output: &str) {
+pub fn animation<C>(canvas: &Canvas<C>, output: &str)
+where
+    C: ColorSpace,
+    Rgb: From<C>,
+{
     println!("Making a new animation: {}", output);
     Command::new("convert")
         .arg("-delay")
         .arg("1.2")
-        .arg(&format!("./anim/{}*", file_name_prefix))
+        .arg(&format!("./anim/{}*", canvas.config().file_prefix()))
         .arg(output)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
         .spawn()
         .unwrap()
         .wait()
         .expect("Could not make animation");
 }
 
-/// Open's a given animation using imagemagick's `animate`.
+/// Open's a given animation
 ///
 /// # Arguments
 ///
@@ -37,18 +51,16 @@ pub fn animation(file_name_prefix: &str, output: &str) {
 /// # Examples
 ///
 /// Basic usage:
-/// ```
+/// ```no_run
 /// use crate::curves_rs::utils;
-/// utils::view_animation("final.gif");
+/// utils::view_animation("owl.gif");
 /// ```
 pub fn view_animation(file_name: &str) {
     // animate doesn't play nicely
     println!("Playing animation: {}", &file_name);
     // Command::new("animate")
-    Command::new("sxiv")
+    Command::new("open")
         .arg(&file_name)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
         .spawn()
         .expect("Could not view animation");
 }
