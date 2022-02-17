@@ -9,7 +9,7 @@ fn geass() {
     let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
     img.set_config(CanvasConfig {
         upper_left_system: true,
-        pos_glitch: false,
+        ..Default::default()
     });
 
     let geass_corrs = [

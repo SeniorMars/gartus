@@ -8,6 +8,38 @@ use std::{
 
 use crate::graphics::{colors::Rgb, display::Canvas};
 /// ppmifizes an image so that it works with with this systems
+///
+/// # Arguments
+/// * `file_name` - The name, an &str, of the file to be ppmifizes
+/// * `pos_glitch` - A bool that turns potential glitch on.
+///
+/// # Note
+/// Make sure to turn on [Canvas] with pos_glitch on
+/// with [CanvasConfig] if `pos_glitch` is turned on
+///
+/// # Examples
+///
+/// Basic usage:
+///```no_run
+/// use crate::curves_rs::prelude::{Canvas, Rgb};
+/// use crate::curves_rs::external;
+/// let colors = vec![
+///     Rgb::GREEN,
+///     Rgb::BLUE,
+///     Rgb::RED,
+///     Rgb::GREEN,
+///     Rgb::BLUE,
+///     Rgb::RED,
+///     Rgb::GREEN,
+///     Rgb::BLUE,
+///     Rgb::RED,
+/// ];
+/// let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
+/// canvas.fill_canvas(colors);
+/// canvas.save_binary("./works.ppm").expect("Works");
+/// let other = external::ppmify("./works.ppm", true).expect("Life is wrong");
+/// assert_eq!(canvas.pixels(), other.pixels());
+/// ```
 pub fn ppmify(
     file_name: &str,
     pos_glitch: bool,
@@ -147,26 +179,6 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
     };
     canvas.fill_canvas(pixels);
     Ok(canvas)
-}
-
-#[test]
-fn file_parse_test() {
-    let colors = vec![
-        Rgb::GREEN,
-        Rgb::BLUE,
-        Rgb::RED,
-        Rgb::GREEN,
-        Rgb::BLUE,
-        Rgb::RED,
-        Rgb::GREEN,
-        Rgb::BLUE,
-        Rgb::RED,
-    ];
-    let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
-    canvas.fill_canvas(colors);
-    canvas.save_binary("./pics/pleasework.ppm").expect("Works");
-    let other = ppmify("./pics/pleasework.ppm", true).expect("Life is wrong");
-    assert_eq!(canvas.pixels(), other.pixels());
 }
 
 #[test]

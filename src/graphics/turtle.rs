@@ -46,11 +46,9 @@ where
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
-    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
-    /// let turle = Turtle::new(drawing, red, 0.0, 25, 25);
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let red = Rgb::new(255, 0, 0);
+    /// let turle = Turtle::new(red, 0.0, 25, 25);
     /// ```
     pub fn new(color: C, direction_angle: f64, x: u32, y: u32) -> Self {
         let corrdinates = vec![(x, y)];
@@ -75,12 +73,10 @@ where
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
-    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
-    /// let green = Pixel::RGB(RGB::new(0, 255, 0));
-    /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let red = Rgb::new(255, 0, 0);
+    /// let green = Rgb::new(0, 255, 0);
+    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
     /// turle.set_color(green)
     /// ```
     pub fn set_color(&mut self, new_color: C) {
@@ -98,11 +94,9 @@ where
     /// Basic usage:
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
-    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
-    /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let red = Rgb::new(255, 0, 0);
+    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
     /// turle.set_heading(90.0);
     /// ```
     pub fn set_heading(&mut self, direction_angle: f64) {
@@ -127,11 +121,11 @@ where
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
-    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
-    /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
-    /// turle.move_turtle(-3);
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
+    /// let red = Rgb::new(255, 0, 0);
+    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
+    /// turle.move_turtle(&mut drawing, -3);
     /// ```
     pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: i32) {
         let (dx, dy) = polar_to_xy(step.into(), self.direction_angle);
@@ -163,11 +157,11 @@ where
     /// ```
     /// use crate::curves_rs::graphics::turtle::Turtle;
     /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::{Pixel, RGB};
-    /// let drawing = Box::new(Canvas::new(50, 50, 255, Pixel::RGB(RGB::default())));
-    /// let red = Pixel::RGB(RGB::new(255, 0, 0));
-    /// let mut turle = Turtle::new(drawing, red, 0.0, 25, 25);
-    /// turle.goto(49, 49);
+    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
+    /// let red = Rgb::new(255, 0, 0);
+    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
+    /// turle.goto(&mut drawing, 49, 49);
     /// ```
     pub fn goto(&mut self, canvas: &mut Canvas<C>, new_x: u32, new_y: u32) {
         assert!(new_x < canvas.width());

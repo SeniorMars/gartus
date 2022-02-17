@@ -6,8 +6,8 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::*};
-    /// let colors = [YELLOW, CYAN, RED, BLUE];
+    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
     /// canvas.grayscale()
@@ -25,11 +25,11 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use curves_rs::graphics::filters::Canvas;
-    ///
-    /// let mut canvas = ;
-    /// canvas.grayscale();
-    /// assert_eq!(canvas, );
+    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
+    /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
+    /// canvas.fill_canvas(colors.to_vec());
+    /// canvas.sepia()
     /// ```
     pub fn sepia(&mut self) {
         self.iter_mut().for_each(|pixel| {
@@ -47,11 +47,11 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use curves_rs::graphics::filters::Canvas;
-    ///
-    /// let mut canvas = ;
-    /// canvas.grayscale();
-    /// assert_eq!(canvas, );
+    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
+    /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
+    /// canvas.fill_canvas(colors.to_vec());
+    /// canvas.reflect()
     /// ```
     pub fn reflect(&mut self) {
         self.iter_row_mut().for_each(|row| {
@@ -86,6 +86,16 @@ impl Canvas<Rgb> {
     }
 
     /// Applies a blur filter to the current canvas
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
+    /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
+    /// canvas.fill_canvas(colors.to_vec());
+    /// canvas.blur()
+    /// ```
     pub fn blur(&mut self) {
         let width = self.width() as isize;
         let size = self.len() as isize;
@@ -120,6 +130,14 @@ impl Canvas<Rgb> {
     }
 
     /// Applies a sobel filter to the current canvas
+    ///
+    /// ```
+    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
+    /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
+    /// canvas.fill_canvas(colors.to_vec());
+    /// canvas.sobel()
+    /// ```
     pub fn sobel(&mut self) {
         let width = self.width() as isize;
         let size = self.len() as isize;

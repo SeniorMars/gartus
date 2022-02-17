@@ -7,7 +7,7 @@ fn main() {
     let mut heart = Canvas::new(610, 610, 255, Rgb::default());
     heart.set_config(CanvasConfig {
         upper_left_system: true,
-        pos_glitch: false,
+        ..Default::default()
     });
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(120));
     let corrs = [

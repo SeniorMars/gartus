@@ -1,14 +1,17 @@
 // extern crate rand;
 // use curves_rs::utils;
-use curves_rs::prelude::{Canvas, Rgb};
+use curves_rs::{
+    graphics::display::CanvasConfig,
+    prelude::{Canvas, Rgb},
+};
 // use rand::Rng;
 
 fn owl() {
     // let mut rng = rand::thread_rng();
     let mut owl = Canvas::new(500, 500, 255, Rgb::new(255, 255, 255));
-    owl.set_config(curves_rs::graphics::display::CanvasConfig {
+    owl.set_config(CanvasConfig {
         upper_left_system: true,
-        pos_glitch: false,
+        ..Default::default()
     });
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,

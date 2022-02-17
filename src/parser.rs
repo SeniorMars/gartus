@@ -71,13 +71,13 @@ impl Parser {
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
-    /// * `color` - A [ColorSpace] that represents the color of the drawing line
+    /// * `color` - A [Rgb] that represents the color of the drawing line
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::graphics::colors::{ColorSpace, Rgb};
+    /// use crate::curves_rs::prelude::{Rgb};
     /// use crate::curves_rs::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);

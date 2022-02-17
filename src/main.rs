@@ -1,5 +1,3 @@
-use std::io::{stderr, Write};
-
 use curves_rs::gmath::ray::Ray;
 use curves_rs::gmath::vector::{Point, Vector};
 use curves_rs::graphics::colors::Rgb;
@@ -32,7 +30,7 @@ pub fn main() {
 
     (0..IMAGE_HEIGHT).rev().for_each(|j| {
         // eprintln!("Scanlines reminaing: {}", IMAGE_HEIGHT - j - 1);
-        // stderr().flush().unwrap();
+        // stderk().flush().unwrap();
         (0..IMAGE_WIDTH).for_each(|i| {
             let u = i as f64 / ((IMAGE_WIDTH - 1) as f64);
             let v = j as f64 / ((IMAGE_HEIGHT - 1) as f64);
