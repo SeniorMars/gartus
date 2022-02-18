@@ -183,14 +183,14 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
 
 #[test]
 fn external_fun() {
-    use crate::graphics::display::CanvasConfig;
+    use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
     let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
     canvas.set_config(CanvasConfig::new(false, pos_glitch));
     canvas.display().expect("Could not display image");
-    canvas.sobel();
-    canvas.display().expect("Could not display image");
-    canvas
+    let sobel = canvas.sobel();
+    sobel.display().expect("Could not display image");
+    sobel
         .save_extension("corro.png")
         .expect("Could not save image");
 }

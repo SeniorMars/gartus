@@ -22,7 +22,8 @@ fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use curves_rs::graphics::{colors::Hsl, display::CanvasConfig};
+    use curves_rs::graphics::colors::Hsl;
+    use curves_rs::graphics::config::CanvasConfig;
     use num::complex::Complex;
     use std::f32::consts::PI;
 
@@ -62,10 +63,9 @@ mod test {
             });
         });
         mandelcos.fill_canvas(data);
-        mandelcos.sobel_incorrect();
-        mandelcos.display().expect("Could not render image");
-        mandelcos
-            .save_extension("./pics/sobel_cos.png")
+        let cos = mandelcos.sobel();
+        cos.display().expect("Could not render image");
+        cos.save_extension("./pics/sobel_cos.png")
             .expect("Could not save image");
     }
 
@@ -146,9 +146,8 @@ mod test {
             });
         });
         mandel.fill_canvas(data);
-        mandel.sobel_incorrect();
-        mandel
-            .save_extension("./pics/mandel.png")
+        let brot = mandel.sobel();
+        brot.save_extension("./pics/mandel.png")
             .expect("Could not save image")
     }
 
@@ -193,7 +192,7 @@ mod test {
             });
         });
         ship.fill_canvas(data);
-        ship.sobel_incorrect();
+        let ship = ship.sobel();
         ship.display().expect("Could not render image");
         ship.save_extension("./pics/red_ship.png")
             .expect("Could not render image")
@@ -318,7 +317,7 @@ mod test {
             }
         }
         julia.fill_canvas(data);
-        julia.sobel_incorrect();
+        let julia = julia.sobel();
         julia.display().expect("Could not render image");
         julia
             .save_extension("./pics/juila.png")

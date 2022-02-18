@@ -1,5 +1,5 @@
 use curves_rs::{
-    graphics::display::CanvasConfig,
+    graphics::config::CanvasConfig,
     prelude::{Canvas, Matrix, Rgb},
 };
 // use curves_rs::utils;

@@ -1,7 +1,7 @@
 // extern crate rand;
 // use curves_rs::utils;
 use curves_rs::{
-    graphics::display::CanvasConfig,
+    graphics::config::CanvasConfig,
     prelude::{Canvas, Rgb},
 };
 // use rand::Rng;

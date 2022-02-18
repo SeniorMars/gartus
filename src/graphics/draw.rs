@@ -34,6 +34,7 @@ where
             if pixel == boundary_color || pixel == fill_color {
                 continue;
             }
+            // Terrible idea
             // if self.config.animation() {
             //     self.save_binary(&format!(
             //         "anim/{}{:08}.ppm",

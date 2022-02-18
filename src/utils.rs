@@ -17,7 +17,7 @@ use crate::graphics::{
 /// ```no_run
 /// use crate::curves_rs::utils;
 /// use crate::curves_rs::prelude::{Canvas, Rgb};
-/// use crate::curves_rs::graphics::display::{AnimationConfig, CanvasConfig};
+/// use crate::curves_rs::graphics::config::{AnimationConfig, CanvasConfig};
 /// let file_prefix = "test";
 /// let purplish = Rgb::new(17, 46, 81);
 /// let mut canvas = Canvas::new_with_bg(512, 512, 255, purplish);
