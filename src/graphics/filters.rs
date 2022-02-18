@@ -1,7 +1,8 @@
 use super::{colors::Rgb, display::Canvas};
 
 impl Canvas<Rgb> {
-    /// Applies a grayscale filter to the current canvas
+    #[must_use]
+    /// Applies a grayscale filter to the current canvas and results in a new canvas
     ///
     /// # Examples
     ///
@@ -10,16 +11,19 @@ impl Canvas<Rgb> {
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
-    /// canvas.grayscale()
+    /// let gray = canvas.grayscale();
     /// ```
-    pub fn grayscale(&mut self) {
-        self.iter_mut().for_each(|pixel| {
+    pub fn grayscale(&self) -> Canvas<Rgb> {
+        let mut filtered_image = self.clone();
+        filtered_image.iter_mut().for_each(|pixel| {
             let (r, g, b) = pixel.values();
             let average = ((r as f32 + g as f32 + b as f32) / 3.0).round() as u8;
             *pixel = Rgb::new(average, average, average)
-        })
+        });
+        filtered_image
     }
 
+    #[must_use]
     /// Applies the sepia filter to the current canvas
     ///
     /// # Examples
@@ -29,20 +33,23 @@ impl Canvas<Rgb> {
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
-    /// canvas.sepia()
+    /// let sepia = canvas.sepia();
     /// ```
-    pub fn sepia(&mut self) {
-        self.iter_mut().for_each(|pixel| {
+    pub fn sepia(&self) -> Canvas<Rgb> {
+        let mut filtered_image = self.clone();
+        filtered_image.iter_mut().for_each(|pixel| {
             let (r, g, b) = pixel.values();
             let sepia_red = (0.393 * r as f32 + 0.769 * g as f32 + 0.198 * b as f32).round() as u8;
             let sepia_green =
                 (0.349 * r as f32 + 0.686 * g as f32 + 0.168 * b as f32).round() as u8;
             let sepia_blue = (0.272 * r as f32 + 0.534 * g as f32 + 0.131 * b as f32).round() as u8;
             *pixel = Rgb::new(sepia_red, sepia_green, sepia_blue)
-        })
+        });
+        filtered_image
     }
 
-    /// Applies the reflect filter to the current canvas
+    #[must_use]
+    /// Applies the reflect filter to the current canvas and results in a new canvas
     ///
     /// # Examples
     ///
@@ -51,15 +58,17 @@ impl Canvas<Rgb> {
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
-    /// canvas.reflect()
+    /// let reflect = canvas.reflect();
     /// ```
-    pub fn reflect(&mut self) {
-        self.iter_row_mut().for_each(|row| {
+    pub fn reflect(&self) -> Canvas<Rgb> {
+        let mut filtered_image = self.clone();
+        filtered_image.iter_row_mut().for_each(|row| {
             let len = row.len();
             (0..row.len() / 2).for_each(|i| {
                 row.swap(i, len - i - 1);
             });
-        })
+        });
+        filtered_image
     }
 
     fn grid(i: usize, width: isize) -> [isize; 9] {
@@ -85,7 +94,8 @@ impl Canvas<Rgb> {
         ]
     }
 
-    /// Applies a blur filter to the current canvas
+    #[must_use]
+    /// Applies a blur filter to the current canvas and results in a new canvas
     ///
     /// # Examples
     ///
@@ -94,13 +104,12 @@ impl Canvas<Rgb> {
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
-    /// canvas.blur()
+    /// let blur = canvas.blur();
     /// ```
-    pub fn blur(&mut self) {
+    pub fn blur(&self) -> Canvas<Rgb> {
         let width = self.width() as isize;
         let size = self.len() as isize;
-        let mut copy = Vec::with_capacity(size as usize);
-        copy.extend_from_slice(self.pixels());
+        let mut filtered_image = self.clone();
 
         let blur = |i: usize| -> (u8, u8, u8) {
             let mut counter = 0f32;
@@ -109,7 +118,7 @@ impl Canvas<Rgb> {
             blur_grid.iter().for_each(|element| {
                 let index = *element;
                 if index >= 0 && index < size {
-                    let pixel = copy[index as usize];
+                    let pixel = self[index as usize];
                     red_sum += pixel.red as u16;
                     green_sum += pixel.green as u16;
                     blue_sum += pixel.blue as u16;
@@ -123,26 +132,30 @@ impl Canvas<Rgb> {
             )
         };
 
-        self.iter_mut().enumerate().for_each(|(i, pixel)| {
-            let (red, green, blue) = blur(i);
-            *pixel = Rgb::new(red, blue, green);
-        });
+        filtered_image
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, pixel)| {
+                let (red, green, blue) = blur(i);
+                *pixel = Rgb::new(red, blue, green);
+            });
+        filtered_image
     }
 
-    /// Applies a sobel filter to the current canvas
+    #[must_use]
+    /// Applies a sobel filter to the current canvas and results in a new canvas
     ///
     /// ```
     /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
-    /// canvas.sobel()
+    /// let sobel = canvas.sobel();
     /// ```
-    pub fn sobel(&mut self) {
+    pub fn sobel(&self) -> Canvas<Rgb> {
         let width = self.width() as isize;
         let size = self.len() as isize;
-        let mut copy = Vec::with_capacity(size as usize);
-        copy.extend_from_slice(self.pixels());
+        let mut filtered_image = self.clone();
 
         let gx_kernel = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
         let gy_kernel = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
@@ -162,7 +175,7 @@ impl Canvas<Rgb> {
             grid.iter().enumerate().for_each(|(g_index, element)| {
                 let copy_index = *element;
                 if copy_index >= 0 && copy_index < size {
-                    let pixel = copy[copy_index as usize];
+                    let pixel = self[copy_index as usize];
                     let (r, g, b) = (pixel.red as i16, pixel.green as i16, pixel.blue as i16);
 
                     red_x += r * gx_kernel[g_index];
@@ -182,10 +195,14 @@ impl Canvas<Rgb> {
             )
         };
 
-        self.iter_mut().enumerate().for_each(|(i, pixel)| {
-            let (red, green, blue) = sobel(i);
-            *pixel = Rgb::new(red, blue, green);
-        });
+        filtered_image
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, pixel)| {
+                let (red, green, blue) = sobel(i);
+                *pixel = Rgb::new(red, blue, green);
+            });
+        filtered_image
     }
 }
 
@@ -204,6 +221,5 @@ fn blur_test() {
     ];
     let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
     canvas.fill_canvas(colors);
-    canvas.blur();
-    println!("{}", canvas)
+    println!("{}", canvas.blur())
 }
