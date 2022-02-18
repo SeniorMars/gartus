@@ -12,6 +12,7 @@ where
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A computer pixel struct is represented by its red, green, blue values
+// TODO: in ppm spec, Rgb is actually u16 max. Reimplment this to make sure it follows the spec correctly
 pub struct Rgb {
     /// The first byte that represents red light
     pub red: u8,
@@ -98,7 +99,12 @@ impl Rgb {
 
     /// Returns the values of a pixel
     pub fn values(&self) -> (u8, u8, u8) {
-        (self.red, self.blue, self.green)
+        (self.red, self.green, self.blue)
+    }
+
+    /// Returns the values of a pixel in an array to be bytes
+    pub fn to_be_bytes(&self) -> [u8; 3] {
+        [self.red, self.green, self.blue]
     }
 }
 

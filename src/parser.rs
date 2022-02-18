@@ -70,7 +70,7 @@ impl Parser {
     /// * `file_name` - The name of the file that will be created.
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
-    /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
+    /// * `color_depth` - An unsigned int that will represent maximum depth of colors in the [Canvas]
     /// * `color` - A [Rgb] that represents the color of the drawing line
     ///
     /// # Examples
@@ -82,13 +82,13 @@ impl Parser {
     /// let purplish = Rgb::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
-    pub fn new(file_name: &str, width: u32, height: u32, range: u8, color: &Rgb) -> Self {
+    pub fn new(file_name: &str, width: u32, height: u32, color_depth: u16, color: &Rgb) -> Self {
         let line = Rgb::default();
         Self {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
-            canvas: Canvas::new(width, height, range, line),
+            canvas: Canvas::new(width, height, color_depth, line),
             color: *color,
         }
     }
@@ -102,7 +102,7 @@ impl Parser {
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
     /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
-    /// * `color` - A [Rgb] that represents the color of the drawing line
+    /// * `color_depth` - A [Rgb] that represents the color of the drawing line
     /// * `bg` - A [Rgb] the default background color of self.canvas
     ///
     /// # Examples
@@ -119,7 +119,7 @@ impl Parser {
         file_name: &str,
         width: u32,
         height: u32,
-        range: u8,
+        color_depth: u16,
         color: &Rgb,
         bg: &Rgb,
     ) -> Self {
@@ -127,7 +127,7 @@ impl Parser {
             file_name: file_name.to_string(),
             edge_matrix: Matrix::new(4, 0, Vec::new()),
             trans_matrix: Matrix::identity_matrix(4),
-            canvas: Canvas::new_with_bg(width, height, range, *bg),
+            canvas: Canvas::new_with_bg(width, height, color_depth, *bg),
             color: *color,
         }
     }

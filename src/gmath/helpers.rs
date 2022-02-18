@@ -1,4 +1,5 @@
-#[allow(dead_code)]
+#![allow(dead_code)]
+#![allow(unused_variables)]
 /// Returns and calcuates the new x,y corrdinates from the polar corrdinate system
 ///
 /// # Arguments

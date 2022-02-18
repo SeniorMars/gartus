@@ -1,6 +1,7 @@
 use curves_rs::{
     graphics::display::CanvasConfig,
     prelude::{Canvas, Matrix, Rgb},
+    utils,
 };
 
 pub fn make_pory() {
@@ -47,12 +48,12 @@ pub fn make_pory() {
 }
 
 fn main() {
-    make_pory()
+    make_pory_anim()
 }
 
 // BAD IDEA TO DO THIS IN A GARBAGE COMPUTER
 // BAD IDEA OVERALL
-#[test]
+// #[test]
 pub fn make_pory_anim() {
     use curves_rs::graphics::display::AnimationConfig;
     let outline = Rgb::new(235, 219, 178);

@@ -135,7 +135,7 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
     byte_vec_fill(&mut bytes, &mut color_depth_vec);
 
     // Note due to the spec, this will never overflow or other unspecified behavior
-    let color_depth: u8 = vec_to_int(color_depth_vec)
+    let color_depth: u16 = vec_to_int(color_depth_vec)
         .try_into()
         .expect("File does not follow ppm spec");
 

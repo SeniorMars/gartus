@@ -99,7 +99,7 @@ where
     /// The height of the canvas
     height: u32,
     /// The maximum depth of the canvas
-    color_depth: u8,
+    color_depth: u16,
     /// The "body" of the canvas that holds all the [Pixel]s that will be displayed
     pixels: Vec<C>,
     /// Provides a way to configure [Canvas]
@@ -119,7 +119,7 @@ where
     ///
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
-    /// * `range` - An unsigned int that will represent maximum depth of colors in the [Canvas]
+    /// * `color_depth` - An unsigned int that will represent maximum depth of colors in the [Canvas]
     /// * `line_color` - An RGB or HSL value that will also represent the default color for the
     /// drawing line
     ///
@@ -130,12 +130,12 @@ where
     /// use crate::curves_rs::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// ```
-    pub fn new(width: u32, height: u32, range: u8, line_color: C) -> Self {
+    pub fn new(width: u32, height: u32, color_depth: u16, line_color: C) -> Self {
         let pixels: Vec<C> = vec![C::default(); (height * width) as usize];
         Self {
             height,
             width,
-            color_depth: range,
+            color_depth,
             pixels,
             config: CanvasConfig::default(),
             line: line_color,
@@ -148,7 +148,7 @@ where
     ///
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
-    /// * `range` - An unsigned int that will represent maximum depth
+    /// * `color_depth` - An unsigned int that will represent maximum depth
     /// of colors in the [Canvas]
     /// * `background_color` - A RGB or HSL value that will represent the color of the
     /// background color that will fill the [Canvas]
@@ -161,12 +161,12 @@ where
     /// let background_color = Rgb::new(1, 2, 3);
     /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// ```
-    pub fn new_with_bg(width: u32, height: u32, range: u8, background_color: C) -> Self {
+    pub fn new_with_bg(width: u32, height: u32, color_depth: u16, background_color: C) -> Self {
         let line = C::default();
         Self {
             height,
             width,
-            color_depth: range,
+            color_depth,
             pixels: vec![background_color; (height * width) as usize],
             config: CanvasConfig::default(),
             line,
@@ -180,7 +180,7 @@ where
     ///
     /// * `height` - An unsigned int that will represent height of the [Canvas]
     /// * `width` - An unsigned int that will represent width of the [Canvas]
-    /// * `range` - An unsigned int that will represent maximum depth
+    /// * `color_depth` - An unsigned int that will represent maximum depth
     /// of colors in the [Canvas]
     /// * `line_color` - An RGB or HSL value that will also represent the default color for the
     /// drawing line
@@ -192,12 +192,12 @@ where
     /// use crate::curves_rs::prelude::{Canvas, Rgb};
     /// let image = Canvas::with_capacity(500, 500, 255, Rgb::default());
     /// ```
-    pub fn with_capacity(width: u32, height: u32, range: u8, line_color: C) -> Self {
+    pub fn with_capacity(width: u32, height: u32, color_depth: u16, line_color: C) -> Self {
         let line = line_color;
         Self {
             height,
             width,
-            color_depth: range,
+            color_depth,
             pixels: Vec::with_capacity((height * width) as usize),
             config: CanvasConfig::default(),
             line,
@@ -651,7 +651,7 @@ where
     /// ``no_run
     /// use crate::curves_rs::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
-    /// image.save_binary("pics/test.ppm").expect("Could not save file")
+    /// image.save_ascii("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
         let mut file = BufWriter::new(File::create(file_name)?);
@@ -694,13 +694,8 @@ where
         )?;
 
         self.iter().for_each(|pixel| {
-            let rgb = Rgb::from(*pixel);
-            file.write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            file.write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            file.write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
+            let bytes = Rgb::from(*pixel).to_be_bytes();
+            file.write_all(&bytes).expect("Could not write as binary")
         });
 
         Ok(())
@@ -744,16 +739,8 @@ where
         }
 
         self.iter().for_each(|pixel| {
-            let rgb = Rgb::from(*pixel);
-            stdin
-                .write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
+            let bytes = Rgb::from(*pixel).to_be_bytes();
+            stdin.write_all(&bytes).expect("Could not write as binary")
         });
         stdin.flush()
     }
@@ -794,16 +781,8 @@ where
             )?;
         }
         self.iter().for_each(|pixel| {
-            let rgb = Rgb::from(*pixel);
-            stdin
-                .write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
+            let bytes = Rgb::from(*pixel).to_be_bytes();
+            stdin.write_all(&bytes).expect("Could not write as binary")
         });
         stdin.flush()
     }
