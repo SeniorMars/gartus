@@ -364,6 +364,27 @@ impl Matrix {
     }
 }
 
+// #[rustfmt::skip]
+// impl<const SIZE: usize> ConstMatrix<{ SIZE }> {
+//     /// Returns a hermite [ConstMatrix].
+//     ///
+//     /// # Examples
+//     ///
+//     /// Basic usage:
+//     /// ```
+//     /// use crate::curves_rs::gmath::matrix::ConstMatrix;
+//     /// let h = ConstMatrix::hermite();
+//     /// ```
+//     pub fn hermite() -> Self {
+//         ConstMatrix {
+//             data: [0.0, 1.0, 0.0, 3.0,
+//                 0.0, 1.0, 0.0, 2.0,
+//                 0.0, 1.0, 1.0, 1.0,
+//                 1.0, 1.0, 0.0, 0.0],
+//         }
+//     }
+// }
+//
 // #[test]
 // // #[should_panic]
 // fn print_matrices() {

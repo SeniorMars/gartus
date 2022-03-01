@@ -224,7 +224,7 @@ impl Parser {
                     self.trans_matrix = Matrix::identity_matrix(4);
                 }
                 "apply" => {
-                    self.edge_matrix = self.edge_matrix.mult_matrix(&self.trans_matrix);
+                    self.edge_matrix = &self.trans_matrix * &self.edge_matrix;
                 }
                 "display" => {
                     self.canvas.clear_canvas();

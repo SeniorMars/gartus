@@ -20,4 +20,6 @@ impl Matrix {
             step,
         );
     }
+
+    // pub fn add_triange(&mut self, cx: f64)
 }

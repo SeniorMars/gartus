@@ -3,7 +3,19 @@ use curves_rs::gmath::vector::{Point, Vector};
 use curves_rs::graphics::colors::Rgb;
 use curves_rs::graphics::display::Canvas;
 
+fn hit_sphere(center: Point, radius: f64, r: &Ray) -> bool {
+    let oc = *r.orgin() - center;
+    let a = r.direction().dot(*r.direction());
+    let b = 2.0 * oc.dot(*r.direction());
+    let c = oc.dot(oc) - radius * radius;
+    let discriminant = b * b - 4.0 * a * c;
+    discriminant > 0.0
+}
+
 pub fn ray_color(r: &Ray) -> Vector {
+    if hit_sphere(Point::new(0.0, 0.0, -1.0), 0.5, r) {
+        return Vector::new(1.0, 0.0, 0.0);
+    }
     let unit_direction = r.direction().normalized();
     let t = 0.5 * (unit_direction[1] + 1.0);
     (1.0 - t) * Vector::new(1.0, 1.0, 1.0) + t * Vector::new(0.5, 0.7, 1.0)

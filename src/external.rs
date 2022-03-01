@@ -37,7 +37,7 @@ use crate::graphics::{colors::Rgb, display::Canvas};
 /// let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
 /// canvas.fill_canvas(colors);
 /// canvas.save_binary("./works.ppm").expect("Works");
-/// let other = external::ppmify("./works.ppm", true).expect("Life is wrong");
+/// let other = external::ppmify("./works.ppm", false).expect("Life is wrong");
 /// assert_eq!(canvas.pixels(), other.pixels());
 /// ```
 pub fn ppmify(
@@ -190,6 +190,7 @@ fn external_fun() {
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
+    eprintln!("{}", sobel);
     sobel
         .save_extension("corro.png")
         .expect("Could not save image");

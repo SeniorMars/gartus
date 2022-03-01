@@ -114,15 +114,18 @@ pub fn make_pory_anim() {
         405, 194, 353, 237, 245, 214, 210, 183, 275, 153, 202, 156, 206, 227, 189, 207, 164, 214,
         150, 235, 259, 177, 242,
     ];
+    let mut binary_name = String::with_capacity(20);
     for (vector, color) in fill_points.chunks(2).zip(fill_colors) {
         porygon.fill(vector[0], vector[1], &color, &outline);
         porygon.config_mut().increase_anim_index();
+        binary_name.clear();
+        binary_name.push_str(&format!(
+            "anim/{}{:08}.ppm",
+            file_prefix,
+            porygon.config().anim_index()
+        ));
         porygon
-            .save_binary(&format!(
-                "anim/{}{:08}.ppm",
-                file_prefix,
-                porygon.config().anim_index()
-            ))
+            .save_binary(&binary_name)
             .expect("Could not save to file");
     }
     utils::animation(&porygon, "porygon.gif");

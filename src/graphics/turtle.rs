@@ -203,7 +203,6 @@ where
         &mut self.corrdinates
     }
 }
-
 #[cfg(test)]
 mod test {
     use crate::graphics::colors::Rgb;

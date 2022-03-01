@@ -28,7 +28,6 @@ where
     pub line: C,
 }
 
-#[allow(dead_code)]
 impl<C: ColorSpace> Canvas<C>
 where
     Rgb: From<C>,
@@ -553,7 +552,6 @@ where
 }
 
 // saving
-#[allow(dead_code)]
 impl<C: ColorSpace> Canvas<C>
 where
     Rgb: From<C>,
@@ -614,8 +612,16 @@ where
         )?;
 
         self.iter().for_each(|pixel| {
-            let bytes = Rgb::from(*pixel).to_be_bytes();
-            file.write_all(&bytes).expect("Could not write as binary")
+            let rgb = Rgb::from(*pixel);
+            file.write_all(&rgb.red.to_be_bytes())
+                .expect("Could not write as binary");
+            file.write_all(&rgb.green.to_be_bytes())
+                .expect("Could not write as binary");
+            file.write_all(&rgb.blue.to_be_bytes())
+                .expect("Could not write as binary");
+
+            // let bytes = Rgb::from(*pixel).to_be_bytes();
+            // file.write_all(&bytes).expect("Could not write as binary")
         });
 
         Ok(())
@@ -659,8 +665,18 @@ where
         }
 
         self.iter().for_each(|pixel| {
-            let bytes = Rgb::from(*pixel).to_be_bytes();
-            stdin.write_all(&bytes).expect("Could not write as binary")
+            let rgb = Rgb::from(*pixel);
+            stdin
+                .write_all(&rgb.red.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.green.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.blue.to_be_bytes())
+                .expect("Could not write as binary");
+            // let bytes = Rgb::from(*pixel).to_be_bytes();
+            // stdin.write_all(&bytes).expect("Could not write as binary")
         });
         stdin.flush()
     }
@@ -701,8 +717,18 @@ where
             )?;
         }
         self.iter().for_each(|pixel| {
-            let bytes = Rgb::from(*pixel).to_be_bytes();
-            stdin.write_all(&bytes).expect("Could not write as binary")
+            let rgb = Rgb::from(*pixel);
+            stdin
+                .write_all(&rgb.red.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.green.to_be_bytes())
+                .expect("Could not write as binary");
+            stdin
+                .write_all(&rgb.blue.to_be_bytes())
+                .expect("Could not write as binary");
+            // let bytes = Rgb::from(*pixel).to_be_bytes();
+            // stdin.write_all(&bytes).expect("Could not write as binary")
         });
         stdin.flush()
     }

@@ -16,6 +16,13 @@ pub struct Matrix {
     data: Vec<f64>,
 }
 
+// #[derive(Debug)]
+// /// A matrix that has a constant size
+// pub struct ConstMatrix<const SIZE: usize> {
+//     /// The actual data the Matrix includes
+//     data: [f64; SIZE],
+// }
+
 #[allow(dead_code)]
 impl Matrix {
     /// Returns a new row x column [Matrix] with a vector that contains the data.
@@ -664,7 +671,7 @@ impl Matrix {
 impl Matrix {
     #[must_use]
     /// Returns the result of multiplying self by another [Matrix].
-    /// Self's columns must be the same size as the other's Matrix's rwos.
+    /// Self's rows must be the same size as the other's Matrix's cols.
     ///
     /// # Arguments
     ///
@@ -680,17 +687,17 @@ impl Matrix {
     /// ```
     pub fn mult_matrix(&self, other: &Self) -> Self {
         assert_eq!(
-            self.rows, other.cols,
-            "rows of self must equal cols of other"
+            self.cols, other.rows,
+            "cols of self must equal rows of other"
         );
-        let (rows, cols) = (other.rows, self.cols);
+        let (rows, cols) = (self.rows, other.cols);
         let mut data = vec![0.0; rows * cols];
-        for (index, element) in data.iter_mut().enumerate() {
+        data.iter_mut().enumerate().for_each(|(index, element)| {
             *element = self
-                .iter_col(index / rows)
-                .zip(other.iter_row(index % rows))
+                .iter_row(index % rows)
+                .zip(other.iter_col(index / rows))
                 .fold(0.0, |acc, (s, o)| acc + s * o);
-        }
+        });
         Matrix { rows, cols, data }
     }
 
@@ -712,17 +719,17 @@ impl Matrix {
     /// ```
     pub fn mult_trans(&self, other: &Self) -> Self {
         assert_eq!(
-            self.cols, other.rows,
+            self.rows, other.cols,
             "cols of self must equal rows of other"
         );
-        let (rows, cols) = (self.rows, other.cols);
+        let (rows, cols) = (self.cols, other.rows);
         let mut data = vec![0.0; rows * cols];
-        for (index, element) in data.iter_mut().enumerate() {
+        data.iter_mut().enumerate().for_each(|(index, element)| {
             *element = self
-                .iter_row(index % rows)
-                .zip(other.iter_col(index / rows))
+                .iter_col(index / rows)
+                .zip(other.iter_row(index % rows))
                 .fold(0.0, |acc, (s, o)| acc + s * o);
-        }
+        });
         Matrix { rows, cols, data }
     }
 
@@ -867,13 +874,13 @@ impl Mul for Matrix {
 
 impl MulAssign for Matrix {
     fn mul_assign(&mut self, other: Self) {
-        *self = other * self.clone()
+        *self = self.clone() * other;
     }
 }
 
 impl MulAssign<&Self> for Matrix {
     fn mul_assign(&mut self, other: &Matrix) {
-        *self = other * self
+        *self = self.clone() * other;
     }
 }
 
@@ -1020,25 +1027,36 @@ mod tests {
     // #[should_panic]
     #[allow(clippy::many_single_char_names)]
     fn mul_for_now() {
-        let a = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
-        let _b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
-        let mut c = Matrix::new(
-            4,
+        let mut a = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
+        // let _b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
+        let c = Matrix::new(
             3,
+            4,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
-        let _d: Matrix = Matrix::new(
-            4,
-            3,
-            vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
-        );
+        // let _d: Matrix = Matrix::new(
+        //     4,
+        //     3,
+        //     vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
+        // );
         println!("{}", a);
         println!("{}", c);
-        c *= a;
-        println!("{}", c);
+        a *= c;
+        println!("{}", a);
         // let e = b * d;
         // println!("{}", c);
         // assert_eq!(c, e)
+    }
+
+    #[test]
+    fn multipled() {
+        let m1_contents = vec![2.0, -1.0, 7.0, 4.0, -2.0, -12.0];
+        let m1 = Matrix::new(3, 2, m1_contents);
+
+        let m2_contents = vec![5.0, -3.0];
+        let m2 = Matrix::new(2, 1, m2_contents);
+
+        assert_eq!(m1 * m2, Matrix::new(3, 1, vec![-2.0, 1.0, 71.0]))
     }
 
     #[test]
@@ -1080,9 +1098,21 @@ mod tests {
 
     #[test]
     fn transpose_test() {
-        let a = Matrix::new(2, 2, vec![-5.0, -35.0, 165.0, 189.0]);
+        let a = Matrix::new(2, 2, vec![-15.0, 14.0, 70.0, 91.0]);
         println!("{}", a);
         let b = a.transpose();
         println!("{}", b)
+    }
+
+    #[test]
+    fn comp140() {
+        let m1_contents = vec![5.0, 14.0, 10.0, 7.0];
+        let m1 = Matrix::new(2, 2, m1_contents);
+
+        let m2_contents = vec![-3.0, 1.0, 7.0, 13.0];
+        let m2 = Matrix::new(2, 2, m2_contents);
+
+        let correct = Matrix::new(2, 2, vec![-5.0, -35.0, 165.0, 189.0]);
+        assert_eq!(m1 * m2, correct)
     }
 }
