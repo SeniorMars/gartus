@@ -13,22 +13,73 @@ fn script_test() {
         255,
         &Rgb::new(0, 255, 0),
     );
-    dw.parse_file()
+    dw.parse_file();
+}
+
+#[test]
+fn matrix_cmp() {
+    let correct = Matrix::new(
+        4,
+        4,
+        vec![
+            0.9396926207859084,
+            0.3213938048432697,
+            0.11697777844051097,
+            0.0,
+            -0.3420201433256687,
+            0.8830222215594891,
+            0.3213938048432697,
+            0.0,
+            0.0,
+            -0.3420201433256687,
+            0.9396926207859084,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ],
+    );
+    let new = Matrix::new(
+        4,
+        4,
+        [
+            0.9396926207859084,
+            0.3420201433256687,
+            0.0,
+            0.0,
+            -0.3420201433256687,
+            0.9396926207859084,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ]
+        .to_vec(),
+    );
+    let rotate_x = Matrix::rotate_x(20.0);
+    assert_eq!(correct, rotate_x * new)
 }
 
 #[test]
 fn matrix_test() {
     let mut edge_matrix = Matrix::new(4, 0, Vec::with_capacity(4 * 2));
     // println!("{}", edge_matrix);
-    println!("Testing add_edge. Adding (1, 2, 3), (4, 5, 6) m2");
+    println!("Testing add_edge. Adding (1, 2, 3), (4, 5, 6) m2 = ");
     edge_matrix.add_edge(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
     println!("{}", edge_matrix);
-    let mut ident = Matrix::identity_matrix(4);
+    let ident = Matrix::identity_matrix(4);
     println!("Testing ident. m1 =");
-    println!("{:?}", ident);
+    println!("{}", ident);
     println!("Testing Matrix mult. m1 * m2 =");
-    ident *= edge_matrix.clone();
-    println!("{:#?}", ident);
+    let result = ident * edge_matrix.clone();
+    println!("{}", result);
     println!("Testing Matrix mult. m1 =");
     let mut m1 = Matrix::new(
         4,
@@ -39,7 +90,7 @@ fn matrix_test() {
     );
     println!("{}", m1);
     println!("Testing Matrix mult. m1 * m2 =");
-    m1 *= edge_matrix;
+    m1 *= result;
     println!("{}", m1);
     assert_eq!(
         m1,

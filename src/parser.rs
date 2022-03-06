@@ -164,14 +164,14 @@ impl Parser {
                     let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
                     let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
-                    self.trans_matrix = self.trans_matrix.mult_matrix(&dilate_matrix);
+                    self.trans_matrix = &dilate_matrix * &self.trans_matrix;
                 }
                 "move" => {
                     let next_line = iter.next().expect("Error reading line");
                     let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
                     assert_eq!(3, args.len());
                     let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
-                    self.trans_matrix = self.trans_matrix.mult_matrix(&translation_matrix);
+                    self.trans_matrix = &translation_matrix * &self.trans_matrix;
                 }
                 "rotate" => {
                     let next_line = iter.next().expect("Error reading line");
@@ -184,7 +184,7 @@ impl Parser {
                         "z" => Matrix::rotate_z(theta),
                         _ => panic!("Unknown axis: {}", line),
                     };
-                    self.trans_matrix = self.trans_matrix.mult_matrix(&rotate_matrix);
+                    self.trans_matrix = &rotate_matrix * &self.trans_matrix;
                 }
                 "reflect" => {
                     let next_line = iter.next().expect("Error reading line");
@@ -195,7 +195,7 @@ impl Parser {
                         "z" => Matrix::reflect_xy(),
                         _ => panic!("Unknown command: {}", line),
                     };
-                    self.trans_matrix = self.trans_matrix.mult_matrix(&reflect_matrix);
+                    self.trans_matrix = &reflect_matrix * &self.trans_matrix;
                 }
                 "shear" => {
                     let next_line = iter.next().expect("Error reading line");
@@ -205,13 +205,13 @@ impl Parser {
                         args[1].parse().expect("Error parsing number"),
                         args[2].parse().expect("Error parsing number"),
                     );
-                    let reflect_matrix = match axis {
+                    let shear_matrix = match axis {
                         "x" => Matrix::shearing_x(sh_factor_one, sh_factor_two),
                         "y" => Matrix::shearing_y(sh_factor_one, sh_factor_two),
                         "z" => Matrix::shearing_z(sh_factor_one, sh_factor_two),
                         _ => panic!("Unknown command: {}", line),
                     };
-                    self.trans_matrix = self.trans_matrix.mult_matrix(&reflect_matrix);
+                    self.trans_matrix = &shear_matrix * &self.trans_matrix;
                 }
                 "color" => {
                     let next_line = iter.next().expect("Error reading line");
