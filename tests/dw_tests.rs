@@ -5,7 +5,7 @@ use curves_rs::parser::Parser;
 use std::io;
 
 #[test]
-fn script_test() {
+fn script_transform() {
     let mut dw = Parser::new(
         "./tests/script_transform",
         500,
@@ -17,54 +17,9 @@ fn script_test() {
 }
 
 #[test]
-fn matrix_cmp() {
-    let correct = Matrix::new(
-        4,
-        4,
-        vec![
-            0.9396926207859084,
-            0.3213938048432697,
-            0.11697777844051097,
-            0.0,
-            -0.3420201433256687,
-            0.8830222215594891,
-            0.3213938048432697,
-            0.0,
-            0.0,
-            -0.3420201433256687,
-            0.9396926207859084,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-        ],
-    );
-    let new = Matrix::new(
-        4,
-        4,
-        [
-            0.9396926207859084,
-            0.3420201433256687,
-            0.0,
-            0.0,
-            -0.3420201433256687,
-            0.9396926207859084,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-        ]
-        .to_vec(),
-    );
-    let rotate_x = Matrix::rotate_x(20.0);
-    assert_eq!(correct, rotate_x * new)
+fn curve_script() {
+    let mut dw = Parser::new("./tests/script_curves", 500, 500, 255, &Rgb::new(0, 255, 0));
+    dw.parse_file();
 }
 
 #[test]

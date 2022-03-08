@@ -232,6 +232,31 @@ impl Parser {
                     self.canvas.draw_lines(&self.edge_matrix);
                     self.canvas.display().unwrap();
                 }
+                "circle" => {
+                    let next_line = iter.next().expect("Error reading line");
+                    let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
+                    assert_eq!(4, args.len());
+                    self.edge_matrix
+                        .add_circle(args[0], args[1], args[2], args[3], 0.001);
+                }
+                "hermite" => {
+                    let next_line = iter.next().expect("Error reading line");
+                    let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
+                    assert_eq!(8, args.len());
+                    let p0 = (args[0], args[1]);
+                    let p1 = (args[2], args[3]);
+                    let r0 = (args[4], args[5]);
+                    let r1 = (args[6], args[7]);
+                    self.edge_matrix.add_hermite(p0, p1, r0, r1)
+                }
+                "bezier" => {
+                    let next_line = iter.next().expect("Error reading line");
+                    let args = Parser::parse_as::<f64>(next_line.to_string()).unwrap();
+                    assert_eq!(8, args.len());
+                    // bezier: add a bezier curve to the edge matrix -
+                    //     takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
+                    // todo!()
+                }
                 "save" => {
                     self.canvas.clear_canvas();
                     self.canvas.set_line_pixel(&self.color);
