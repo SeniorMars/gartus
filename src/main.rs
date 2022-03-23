@@ -1,116 +1,399 @@
-extern crate num;
-extern crate rand;
-use num::complex::Complex;
+mod graphics;
+use graphics::display::*;
 use rand::Rng;
-use std::{
-    fs::File,
-    io::{self, BufWriter, Write},
-};
+use std::io;
 
-const WIDTH: usize = 800;
-const HEIGHT: usize = 800;
-const RANGE: usize = 255;
-
-#[derive(Default)]
-struct Pixel {
-    red: u8,
-    green: u8,
-    blue: u8,
-}
-
-fn writer_image(mut writer: impl Write) -> io::Result<()> {
-    let width = 8000;
-    let height = 6000;
-    writeln!(writer, "P3 {} {} {}\n", height, width, RANGE)?;
-
-    let cx = -0.9;
-    let cy = 0.27015;
-    let interations = 110;
-    for x in 0..width {
-        for y in 0..height {
-            let mut zx = 3.0 * (x as f32 - 0.5 * width as f32) / (width as f32);
-            let mut zy = 2.0 * (y as f32 - 0.5 * height as f32) / (height as f32);
-            let mut i = interations;
-            while zx * zx + zy * zy < 4.0 && i > 1 {
-                let temp = zx * zx - zy * zy + cx;
-                zy = 2.0 * zx * zy + cy;
-                zx = temp;
-                i -= 1;
-            }
-            write!(writer, "{} {} {} ", i as u8, i as u8, i as u8)?;
-            // let red = (i << 3) as u8;
-            // let green = (i << 5) as u8;
-            // let blue = (i << 4) as u8;
-            // write!(writer, "{} {} {} ", red, green, blue)?;
-        }
-        write!(writer, "\n")?;
-    }
-    Ok(())
-}
-
-fn write_blocks(mut writer: impl Write) -> io::Result<()> {
-    writeln!(writer, "P3 {} {} {}\n", HEIGHT, WIDTH, RANGE)?;
+fn main() -> io::Result<()> {
     let mut rng = rand::thread_rng();
-    let mut blockrow = String::new();
-    for _row in 0..8 {
-        blockrow.clear();
-        for _col in 0..8 {
-            let rgb = Pixel {
-                red: rng.gen_range(100, 250),
-                green: rng.gen_range(0, 200),
-                blue: rng.gen_range(50, 200),
-            };
-            for _blockrow in 0..100 {
-                blockrow += &format!("{} {} {} ", rgb.red, rgb.green, rgb.blue);
-            }
-        }
-        for _blockscol in 0..100 {
-            writeln!(writer, "{}", blockrow)?;
+    let mut owl = Canvas::new(500, 500, 255);
+    let corrs: [(i32, i32); 320] = [
+        (140, 39),
+        (157, 77),
+        (136, 103),
+        (136, 153),
+        (143, 174),
+        (135, 201),
+        (142, 215),
+        (139, 244),
+        (154, 279),
+        (170, 325),
+        (203, 341),
+        (208, 352),
+        (249, 363),
+        (188, 384),
+        (243, 378),
+        (257, 389),
+        (250, 363),
+        (378, 482),
+        (357, 441),
+        (379, 472),
+        (377, 457),
+        (357, 440),
+        (377, 449),
+        (373, 416),
+        (331, 388),
+        (373, 411),
+        (356, 365),
+        (383, 404),
+        (373, 321),
+        (349, 286),
+        (376, 318),
+        (371, 257),
+        (357, 240),
+        (374, 256),
+        (366, 225),
+        (307, 158),
+        (307, 106),
+        (286, 81),
+        (302, 37),
+        (261, 55),
+        (221, 52),
+        (181, 57),
+        (140, 39),
+        (139, 40),
+        (168, 66),
+        (178, 57),
+        (155, 79),
+        (174, 90),
+        (168, 67),
+        (174, 90),
+        (178, 57),
+        (218, 75),
+        (258, 56),
+        (218, 75),
+        (263, 93),
+        (269, 68),
+        (299, 40),
+        (284, 79),
+        (258, 56),
+        (263, 93),
+        (284, 79),
+        (277, 96),
+        (262, 104),
+        (250, 102),
+        (219, 119),
+        (218, 76),
+        (174, 92),
+        (160, 95),
+        (155, 78),
+        (133, 104),
+        (158, 96),
+        (132, 130),
+        (148, 153),
+        (151, 106),
+        (171, 114),
+        (176, 105),
+        (154, 107),
+        (150, 125),
+        (172, 120),
+        (163, 139),
+        (178, 127),
+        (176, 157),
+        (188, 130),
+        (206, 148),
+        (197, 127),
+        (202, 116),
+        (199, 106),
+        (189, 102),
+        (176, 106),
+        (178, 105),
+        (171, 111),
+        (171, 120),
+        (177, 127),
+        (185, 131),
+        (193, 128),
+        (217, 121),
+        (219, 148),
+        (230, 150),
+        (240, 126),
+        (249, 128),
+        (231, 148),
+        (262, 157),
+        (250, 131),
+        (258, 127),
+        (260, 156),
+        (259, 127),
+        (264, 123),
+        (275, 140),
+        (262, 127),
+        (265, 120),
+        (288, 126),
+        (269, 114),
+        (287, 106),
+        (267, 105),
+        (251, 103),
+        (240, 108),
+        (237, 114),
+        (240, 123),
+        (221, 119),
+        (175, 91),
+        (161, 95),
+        (176, 105),
+        (187, 115),
+        (188, 105),
+        (188, 115),
+        (196, 107),
+        (189, 114),
+        (201, 116),
+        (186, 114),
+        (198, 125),
+        (188, 115),
+        (188, 127),
+        (188, 114),
+        (182, 127),
+        (188, 114),
+        (173, 120),
+        (186, 115),
+        (173, 115),
+        (187, 116),
+        (177, 107),
+        (177, 107),
+        (174, 89),
+        (218, 77),
+        (263, 92),
+        (262, 104),
+        (251, 114),
+        (251, 102),
+        (252, 116),
+        (243, 108),
+        (252, 115),
+        (237, 116),
+        (248, 115),
+        (238, 126),
+        (249, 114),
+        (248, 128),
+        (252, 116),
+        (256, 129),
+        (250, 112),
+        (263, 122),
+        (251, 117),
+        (266, 114),
+        (252, 114),
+        (287, 125),
+        (276, 140),
+        (263, 154),
+        (292, 156),
+        (289, 108),
+        (277, 100),
+        (307, 132),
+        (307, 157),
+        (293, 157),
+        (335, 195),
+        (270, 173),
+        (293, 159),
+        (263, 155),
+        (223, 167),
+        (270, 175),
+        (266, 200),
+        (294, 199),
+        (271, 175),
+        (335, 196),
+        (325, 226),
+        (296, 200),
+        (293, 228),
+        (268, 200),
+        (268, 202),
+        (295, 199),
+        (334, 197),
+        (352, 238),
+        (326, 225),
+        (349, 252),
+        (351, 242),
+        (347, 282),
+        (324, 251),
+        (326, 226),
+        (323, 279),
+        (277, 251),
+        (293, 228),
+        (277, 251),
+        (267, 200),
+        (244, 217),
+        (277, 251),
+        (243, 217),
+        (221, 168),
+        (178, 176),
+        (221, 169),
+        (178, 157),
+        (144, 177),
+        (179, 177),
+        (156, 201),
+        (143, 212),
+        (142, 179),
+        (156, 202),
+        (159, 242),
+        (144, 216),
+        (159, 243),
+        (178, 225),
+        (178, 177),
+        (212, 199),
+        (243, 219),
+        (252, 274),
+        (221, 247),
+        (213, 201),
+        (219, 249),
+        (182, 226),
+        (178, 263),
+        (189, 309),
+        (154, 281),
+        (159, 244),
+        (178, 265),
+        (220, 301),
+        (220, 251),
+        (251, 274),
+        (268, 326),
+        (220, 301),
+        (246, 362),
+        (191, 309),
+        (210, 354),
+        (246, 363),
+        (252, 381),
+        (241, 379),
+        (214, 374),
+        (245, 364),
+        (315, 430),
+        (293, 385),
+        (245, 366),
+        (294, 387),
+        (267, 329),
+        (305, 342),
+        (324, 385),
+        (294, 386),
+        (315, 427),
+        (354, 439),
+        (326, 386),
+        (309, 344),
+        (270, 327),
+        (253, 275),
+        (293, 299),
+        (322, 313),
+        (336, 355),
+        (322, 312),
+        (345, 339),
+        (348, 307),
+        (323, 281),
+        (322, 316),
+        (324, 252),
+        (347, 282),
+        (348, 308),
+        (368, 344),
+        (354, 366),
+        (345, 341),
+        (354, 365),
+        (368, 346),
+        (371, 320),
+        (349, 285),
+        (349, 254),
+        (351, 239),
+        (338, 196),
+        (339, 194),
+        (326, 224),
+        (324, 251),
+        (293, 227),
+        (278, 253),
+        (293, 300),
+        (254, 277),
+        (269, 328),
+        (306, 344),
+        (294, 299),
+        (304, 345),
+        (336, 359),
+        (351, 362),
+        (307, 344),
+        (321, 383),
+        (297, 388),
+        (249, 365),
+        (218, 303),
+        (219, 247),
+        (213, 200),
+        (177, 176),
+        (220, 174),
+        (218, 152),
+        (233, 150),
+        (220, 118),
+        (218, 75),
+        (220, 50),
+        (219, 77),
+        (218, 117),
+        (206, 151),
+        (200, 127),
+        (206, 152),
+        (191, 136),
+        (207, 150),
+        (181, 153),
+        (223, 168),
+        (179, 154),
+        (178, 132),
+        (178, 153),
+        (149, 156),
+        (149, 156),
+        (135, 158),
+    ];
+
+    for i in 0..corrs.len() {
+        if i + 1 != corrs.len() {
+            owl.set_line_color(
+                rng.gen_range(0..=255),
+                rng.gen_range(0..=255),
+                rng.gen_range(0..=255),
+            );
+
+            owl.draw_line(
+                owl.line,
+                corrs[i].0,
+                corrs[i].1,
+                corrs[i + 1].0,
+                corrs[i + 1].1,
+            )
         }
     }
-    Ok(())
+    owl.display()?;
+    owl.save_binary("binary.ppm")?;
+    owl.save_ascii("ascii.ppm")?;
+    owl.save_extension("img.png")
 }
 
-fn writer_mandel(mut writer: impl Write) -> io::Result<()> {
-    let max_iterations = 256u16;
-    let cxmin = -2f32;
-    let cxmax = 1f32;
-    let cymin = -1.5f32;
-    let cymax = 1.5f32;
-    let scalex = (cxmax - cxmin) / HEIGHT as f32;
-    let scaley = (cymax - cymin) / WIDTH as f32;
+#[cfg(test)]
+mod tests {
+    use super::graphics::display::*;
+    use std::io;
 
-    writeln!(writer, "P3 {} {} {}\n", HEIGHT, WIDTH, RANGE)?;
-    for x in 0..WIDTH {
-        for y in 0..HEIGHT {
-            let cx = cxmin + x as f32 * scalex;
-            let cy = cymin + y as f32 * scaley;
+    #[test]
+    fn dw_line_test() -> io::Result<()> {
+        let xres: i32 = 500;
+        let yres: i32 = 500;
+        let mut screen = Canvas::new(xres as u32, yres as u32, 255);
+        screen.set_line_color(0, 255, 0);
 
-            let c = Complex::new(cx, cy);
-            let mut z = Complex::new(0f32, 0f32);
+        // octants 1 and 5
+        screen.draw_line(screen.line, 0, 0, xres - 1, yres - 1);
+        screen.draw_line(screen.line, 0, 0, xres - 1, yres / 2);
+        screen.draw_line(screen.line, xres - 1, yres - 1, 0, yres / 2);
 
-            let mut i = 0;
-            for t in 0..max_iterations {
-                if z.norm() > 2.0 {
-                    break;
-                }
-                z = z * z + c;
-                i = t;
-            }
-            let red = (i << 3) as u8;
-            let green = (i << 5) as u8;
-            let blue = (i << 4) as u8;
-            write!(writer, "{} {} {} ", red, green, blue)?;
-        }
-        write!(writer, "\n")?;
+        // octants 8 and 4
+        screen.line.blue = 255;
+        screen.draw_line(screen.line, 0, yres - 1, xres - 1, 0);
+        screen.draw_line(screen.line, 0, yres - 1, xres - 1, yres / 2);
+        screen.draw_line(screen.line, xres - 1, 0, 0, yres / 2);
+
+        // octants 2 and 6
+        screen.set_line_color(255, 0, 0);
+        screen.draw_line(screen.line, 0, 0, xres / 2, yres - 1);
+        screen.draw_line(screen.line, xres - 1, yres - 1, xres / 2, 0);
+
+        // octants 7 and 3
+        screen.line.blue = 255;
+        screen.draw_line(screen.line, 0, yres - 1, xres / 2, 0);
+        screen.draw_line(screen.line, xres - 1, 0, xres / 2, yres - 1);
+
+        // horizontal and vertical
+        screen.set_line_color(255, 255, 0);
+        screen.draw_line(screen.line, 0, yres / 2, xres - 1, yres / 2);
+        screen.draw_line(screen.line, xres / 2, 0, xres / 2, yres - 1);
+
+        // saving
+        screen.display()?;
+        screen.save_binary("binary.ppm")?;
+        screen.save_ascii("ascii.ppm")?;
+        screen.save_extension("img.png")
     }
-    Ok(())
-}
-
-pub fn main() -> io::Result<()> {
-    let mut file = File::create("image.ppm").unwrap();
-    let writer = BufWriter::new(&mut file);
-    // writer_mandel(writer)
-    writer_image(writer)
-    // write_blocks(writer)
 }

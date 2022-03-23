@@ -1,5 +1,6 @@
-# picmaker_rs
-Remaking graphics in rust
+# line_rs
+Line alg in rust
 
-![First Image](./colorless.png)
-![Second Image](./mandel.png)
+![Owl gif](./owl.gif)
+![Rainbow-Owl](./img.png)
+![White-Owl](./white.png)
