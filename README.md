@@ -1,6 +1,7 @@
-# line_rs
-Line alg in rust
+# matrix_rs
+Basic matrix library for computer graphics in Rust
 
-![Owl gif](./owl.gif)
-![Rainbow-Owl](./img.png)
-![White-Owl](./white.png)
+![Final Image](./gifs/geass.gif)
+
+Other works found in `./gifs/`
+
