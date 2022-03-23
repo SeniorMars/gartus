@@ -212,7 +212,7 @@ mod test {
         let scalex = (cxmax - cxmin) / ZOOM as f32;
         let scaley = (cymax - cymin) / ZOOM as f32;
         let mut ship = Canvas::with_capacity(WIDTH, HEIGHT, 255, Hsl::default());
-        ship.set_config(CanvasConfig::new(true, false));
+        ship.set_config(CanvasConfig::new(true, false, true));
         let mut data: Vec<Hsl> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {

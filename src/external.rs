@@ -186,11 +186,10 @@ fn external_fun() {
     use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
     let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.set_config(CanvasConfig::new(false, pos_glitch));
+    canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
-    eprintln!("{}", sobel);
     sobel
         .save_extension("corro.png")
         .expect("Could not save image");

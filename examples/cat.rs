@@ -8,7 +8,7 @@ fn cat() {
     let mut cat = Canvas::new(610, 610, 255, Rgb::default());
 
     let mut head: Vec<(i32, i32)> = Vec::new();
-    cat.set_config(CanvasConfig::new(true, false));
+    cat.set_config(CanvasConfig::new(true, false, true));
     cat.set_line_color_rgb(255, 255, 255);
 
     head.push((350 - 150, 222));

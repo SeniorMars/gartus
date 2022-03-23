@@ -1,4 +1,4 @@
-use super::{helpers::hermite_curve_coeffs, parametric::Parametric, vector::Vector};
+use super::{parametric::Parametric, vector::Vector};
 use std::{
     fmt,
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
@@ -647,16 +647,20 @@ impl Matrix {
     /// * `p1` - a point (x, y) that represents the start of the curve
     /// * `r0` - the slope of p0
     /// * `r1` - the slope of p1
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// use crate::curves_rs::gmath::parametric::Parametric;
-    /// let mut matrix = Matrix::new(4, 0, Vec::new());
-    /// ```
     pub fn add_hermite(&mut self, p0: (f64, f64), p1: (f64, f64), r0: (f64, f64), r1: (f64, f64)) {
+        // These are the numbers you get when you multiply by the Inverse Hermite Matrix
+        fn hermite_curve_coeffs(p0: f64, p1: f64, r0: f64, r1: f64) -> (f64, f64, f64, f64) {
+            (
+                // Take advantage that p1 is greater than p0...so
+                // another way to write this is:
+                // 2.0 * p0 + -2 * p1 + ro + r1, but since the first temrs will cancel out
+                //   technically this is fine
+                2.0 * (p0 - p1) + r0 + r1,
+                3.0 * (-p0 + p1) - 2.0 * r0 - r1,
+                r0,
+                p0,
+            )
+        }
         let (ax, bx, cx, dx) = hermite_curve_coeffs(p0.0, p1.0, r0.0, r1.0);
         let (ay, by, cy, dy) = hermite_curve_coeffs(p0.1, p1.1, r0.1, r1.1);
         self.add_parametric_curve(
@@ -665,6 +669,32 @@ impl Matrix {
             0.0,
             0.0001,
         );
+    }
+
+    /// Adds a third degree bezier curve to Matrix
+    ///
+    /// # Arguments
+    ///
+    ///
+    /// * `p0` - a point (x, y) that represents the start of the curve
+    /// * `p1` - a point (x, y) that represents the start of the curve
+    /// * `r0` - the slope of p0
+    /// * `r1` - the slope of p1
+    ///
+    pub fn add_bezier3(&mut self, p0: (f64, f64), p1: (f64, f64), r0: (f64, f64), r1: (f64, f64)) {
+        todo!();
+        // These are the numbers you get when you multiply by the Inverse Hermite Matrix
+        fn bezier_curve_coeffs(p0: f64, p1: f64, p2: f64, p3: f64) -> (f64, f64, f64, f64) {
+            todo!()
+        }
+        // let (ax, bx, cx, dx) = bezier_curve_coeffs();
+        // let (ay, by, cy, dy) = bezier_curve_coeffs();
+        // self.add_parametric_curve(
+        //     |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
+        //     |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
+        //     0.0,
+        //     0.0001,
+        // );
     }
 }
 

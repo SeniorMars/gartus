@@ -3,6 +3,8 @@
 pub struct CanvasConfig {
     /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
     pub upper_left_system: bool,
+    /// A boolean that will determine whether to wrap the canvas or not. On by default.
+    pub wrapped: bool,
     /// A boolean that will determine whether to possibly create glitch art
     /// It will write ppm files inccorectly
     pub pos_glitch: bool,
@@ -12,9 +14,10 @@ pub struct CanvasConfig {
 
 impl CanvasConfig {
     /// constructor for a new config
-    pub fn new(upper_left_system: bool, pos_glitch: bool) -> Self {
+    pub fn new(upper_left_system: bool, pos_glitch: bool, wrapped: bool) -> Self {
         Self {
             upper_left_system,
+            wrapped,
             pos_glitch,
             animation_config: AnimationConfig::default(),
         }
@@ -50,6 +53,11 @@ impl CanvasConfig {
     /// Get the animation config's animation.
     pub fn animation(&self) -> bool {
         self.animation_config.animation
+    }
+
+    /// Set the canvas config's wrapped.
+    pub fn set_wrapped(&mut self, wrapped: bool) {
+        self.wrapped = wrapped;
     }
 }
 

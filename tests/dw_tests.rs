@@ -13,13 +13,13 @@ fn script_transform() {
         255,
         &Rgb::new(0, 255, 0),
     );
-    dw.parse_file();
+    dw.parse_file().expect("Script is valid");
 }
 
 #[test]
 fn curve_script() {
     let mut dw = Parser::new("./tests/script_curves", 500, 500, 255, &Rgb::new(0, 255, 0));
-    dw.parse_file();
+    dw.parse_file().expect("Script is valid");
 }
 
 #[test]

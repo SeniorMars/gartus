@@ -335,7 +335,11 @@ where
     /// let color = image.get_pixel(250, 250);
     /// ```
     pub fn get_pixel(&self, x: i32, y: i32) -> &C {
-        let (x, y, width, height) = self.deal_with_negs(x, y);
+        let (x, y, width, height) = if self.config.wrapped {
+            self.deal_with_negs(x, y)
+        } else {
+            (x, y, self.width as i32, self.height as i32)
+        };
         // println!("i32:{} as {}", x, x as u32);
         if self.config.upper_left_system {
             let index = self.index(x as u32, y as u32);
@@ -346,7 +350,7 @@ where
                 let index = self.index(x as u32, new_y as u32);
                 &self.pixels[index]
             } else {
-                panic!("Wrong input and reference can not be retrieved")
+                unreachable!()
             }
         }
     }
