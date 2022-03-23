@@ -45,8 +45,8 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let red = Rgb::new(255, 0, 0);
     /// let turle = Turtle::new(red, 0.0, 25, 25);
     /// ```
@@ -72,8 +72,8 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let red = Rgb::new(255, 0, 0);
     /// let green = Rgb::new(0, 255, 0);
     /// let mut turle = Turtle::new(red, 0.0, 25, 25);
@@ -93,8 +93,8 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let red = Rgb::new(255, 0, 0);
     /// let mut turle = Turtle::new(red, 0.0, 25, 25);
     /// turle.set_heading(90.0);
@@ -119,9 +119,9 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
     /// let red = Rgb::new(255, 0, 0);
     /// let mut turle = Turtle::new(red, 0.0, 25, 25);
@@ -155,9 +155,9 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::turtle::Turtle;
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
     /// let red = Rgb::new(255, 0, 0);
     /// let mut turle = Turtle::new(red, 0.0, 25, 25);

@@ -20,8 +20,8 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Rgb;
-    /// use crate::curves_rs::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::display::Canvas;
     /// let background_color = Rgb::new(0, 0, 0);
     /// let mut image = Canvas::new(25, 25, 255, background_color);
     /// let color = Rgb::new(0, 64, 255);
@@ -67,9 +67,9 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Rgb;
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut image = Canvas::new(25, 25, 255, Rgb::default());
     /// let color = Rgb::new(0, 64, 255);
     /// image.set_line_pixel(&color);
@@ -118,8 +118,8 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::display::Canvas;
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let mut image = Canvas::new(25, 25, 255, Rgb::default());
     /// let color = Rgb::new(0, 64, 255);
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)

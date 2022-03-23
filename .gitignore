@@ -46,3 +46,4 @@ Cargo.lock
 *.ppm
 *.png
 *.jpg
+/doc

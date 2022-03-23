@@ -21,8 +21,8 @@ use crate::graphics::{colors::Rgb, display::Canvas};
 ///
 /// Basic usage:
 ///```no_run
-/// use crate::curves_rs::prelude::{Canvas, Rgb};
-/// use crate::curves_rs::external;
+/// use crate::gartus::prelude::{Canvas, Rgb};
+/// use crate::gartus::external;
 /// let colors = vec![
 ///     Rgb::GREEN,
 ///     Rgb::BLUE,
@@ -46,7 +46,7 @@ pub fn ppmify(
 ) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
     let path = Path::new(file_name);
     if !path.exists() {
-        panic!("File Does not exit");
+        panic!("File does not exit");
     }
     let ext = path
         .extension()
@@ -185,7 +185,7 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
 fn external_fun() {
     use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
-    let mut canvas = ppmify("./pics/index.png", pos_glitch).expect("Implmentation is wrong");
+    let mut canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
     canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();

@@ -1,7 +1,7 @@
-use curves_rs::gmath::matrix::*;
-use curves_rs::graphics::colors::*;
-use curves_rs::graphics::display::*;
-use curves_rs::parser::Parser;
+use gartus::gmath::matrix::*;
+use gartus::graphics::colors::*;
+use gartus::graphics::display::*;
+use gartus::parser::Parser;
 use std::io;
 
 #[test]

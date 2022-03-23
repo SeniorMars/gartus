@@ -15,13 +15,13 @@ use crate::graphics::{
 ///
 /// Basic usage:
 /// ```no_run
-/// use crate::curves_rs::utils;
-/// use crate::curves_rs::prelude::{Canvas, Rgb};
-/// use crate::curves_rs::graphics::config::{AnimationConfig, CanvasConfig};
+/// use crate::gartus::utils;
+/// use crate::gartus::prelude::{Canvas, Rgb};
+/// use crate::gartus::graphics::config::{AnimationConfig, CanvasConfig};
 /// let file_prefix = "test";
 /// let purplish = Rgb::new(17, 46, 81);
 /// let mut canvas = Canvas::new_with_bg(512, 512, 255, purplish);
-/// canvas.set_config(CanvasConfig::new(true, false));
+/// canvas.set_config(CanvasConfig::new(true, false, true));
 /// canvas.set_animation(AnimationConfig::new(file_prefix.to_string()));
 /// utils::animation(&canvas, "final.gif");
 /// ```
@@ -52,7 +52,7 @@ where
 ///
 /// Basic usage:
 /// ```no_run
-/// use crate::curves_rs::utils;
+/// use crate::gartus::utils;
 /// utils::view_animation("owl.gif");
 /// ```
 pub fn view_animation(file_name: &str) {

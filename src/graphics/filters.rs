@@ -7,7 +7,7 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// use crate::gartus::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
@@ -29,7 +29,7 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// use crate::gartus::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
@@ -54,7 +54,7 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// use crate::gartus::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
@@ -100,7 +100,7 @@ impl Canvas<Rgb> {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// use crate::gartus::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());
@@ -146,7 +146,7 @@ impl Canvas<Rgb> {
     /// Applies a sobel filter to the current canvas and results in a new canvas
     ///
     /// ```
-    /// use crate::curves_rs::graphics::{display::Canvas, colors::Rgb};
+    /// use crate::gartus::graphics::{display::Canvas, colors::Rgb};
     /// let colors = [Rgb::YELLOW, Rgb::CYAN, Rgb::RED, Rgb::BLUE];
     /// let mut canvas = Canvas::with_capacity(2, 2, 255, Rgb::new(0, 0, 0));
     /// canvas.fill_canvas(colors.to_vec());

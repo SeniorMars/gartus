@@ -71,6 +71,8 @@ pub enum ParserError {
     ArugmentError(usize, String),
     /// An unknown command for the Parser
     CommandError(usize, String),
+    /// An a custom Error message
+    FileError(usize, String, String),
 }
 
 impl fmt::Display for ParserError {
@@ -87,8 +89,15 @@ impl fmt::Display for ParserError {
             ParserError::ArugmentError(line_num, line) => {
                 write!(
                     f,
-                    "There was an error with parsing line: {}:{}",
+                    "Read spec. There was an error with parsing the arugments in line: {}:{}",
                     line, line_num
+                )
+            }
+            ParserError::FileError(line_num, line, mssg) => {
+                write!(
+                    f,
+                    "There was an error with the file: {} with line {}:{}",
+                    mssg, line, line_num
                 )
             }
         }
@@ -113,8 +122,8 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::prelude::{Rgb};
-    /// use crate::curves_rs::parser::Parser;
+    /// use crate::gartus::prelude::{Rgb};
+    /// use crate::gartus::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
     /// let porygon = Parser::new("tests/porygon_script", 512, 512, 255, &purplish);
     /// ```
@@ -145,8 +154,8 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::graphics::colors::Rgb;
-    /// use crate::curves_rs::parser::Parser;
+    /// use crate::gartus::graphics::colors::Rgb;
+    /// use crate::gartus::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
     /// let outline = Rgb::new(235, 219, 178);
     /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
@@ -174,8 +183,8 @@ impl Parser {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::graphics::colors::Rgb;
-    /// use crate::curves_rs::parser::Parser;
+    /// use crate::gartus::graphics::colors::Rgb;
+    /// use crate::gartus::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
     /// let outline = Rgb::new(235, 219, 178);
     /// let mut porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, 255, &purplish, &outline);
@@ -207,9 +216,15 @@ impl Parser {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
                         }
                     };
-                    assert_eq!(3, args.len());
-                    let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
-                    self.trans_matrix = &dilate_matrix * &self.trans_matrix;
+                    match args.len() == 3 {
+                        true => {
+                            let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
+                            self.trans_matrix = &dilate_matrix * &self.trans_matrix
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "move" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
@@ -219,9 +234,15 @@ impl Parser {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
                         }
                     };
-                    assert_eq!(3, args.len());
-                    let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
-                    self.trans_matrix = &translation_matrix * &self.trans_matrix;
+                    match args.len() == 3 {
+                        true => {
+                            let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
+                            self.trans_matrix = &translation_matrix * &self.trans_matrix;
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "rotate" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
@@ -289,9 +310,15 @@ impl Parser {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
                         }
                     };
-                    assert_eq!(3, args.len());
-                    let color = Rgb::new(args[0], args[1], args[0]);
-                    self.set_color(&color);
+                    match args.len() == 3 {
+                        true => {
+                            let color = Rgb::new(args[0], args[1], args[0]);
+                            self.set_color(&color);
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "ident" => {
                     self.trans_matrix = Matrix::identity_matrix(4);
@@ -313,9 +340,15 @@ impl Parser {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
                         }
                     };
-                    assert_eq!(4, args.len());
-                    self.edge_matrix
-                        .add_circle(args[0], args[1], args[2], args[3], 0.001);
+                    match args.len() == 4 {
+                        true => {
+                            self.edge_matrix
+                                .add_circle(args[0], args[1], args[2], args[3], 0.001);
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "hermite" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
@@ -325,27 +358,55 @@ impl Parser {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
                         }
                     };
-                    assert_eq!(8, args.len());
-                    let p0 = (args[0], args[1]);
-                    let p1 = (args[2], args[3]);
-                    let r0 = (args[4], args[5]);
-                    let r1 = (args[6], args[7]);
-                    self.edge_matrix.add_hermite(p0, p1, r0, r1)
+                    match args.len() == 8 {
+                        true => {
+                            let p0 = (args[0], args[1]);
+                            let p1 = (args[2], args[3]);
+                            let r0 = (args[4], args[5]);
+                            let r1 = (args[6], args[7]);
+                            self.edge_matrix.add_hermite(p0, p1, r0, r1)
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "bezier" => {
-                    let (_, line) = iter.next().expect("Error reading line");
+                    let (line_num, line) = iter.next().expect("Error reading line");
                     let args = Parser::parse_as::<f64>(line.to_string()).unwrap();
-                    assert_eq!(8, args.len());
-                    // bezier: add a bezier curve to the edge matrix -
-                    //     takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
-                    // todo!()
+                    match args.len() == 8 {
+                        true => {
+                            let p0 = (args[0], args[1]);
+                            let p1 = (args[2], args[3]);
+                            let p2 = (args[4], args[5]);
+                            let p3 = (args[6], args[7]);
+                            self.edge_matrix.add_bezier3(p0, p1, p2, p3)
+                        }
+                        false => {
+                            return Err(ParserError::ArugmentError(line_num, line.to_string()))
+                        }
+                    }
                 }
                 "save" => {
                     self.canvas.clear_canvas();
                     self.canvas.set_line_pixel(&self.color);
                     self.canvas.draw_lines(&self.edge_matrix);
-                    let (_, file_name) = iter.next().expect("Error reading line");
-                    self.canvas.save_extension(file_name).unwrap();
+                    let (line_num, file_name) = iter.next().expect("Error reading line");
+                    match file_name.ends_with("png")
+                        | file_name.ends_with("ppm")
+                        | file_name.ends_with("jpg")
+                    {
+                        true => {
+                            self.canvas.save_extension(file_name).unwrap();
+                        }
+                        false => {
+                            return Err(ParserError::FileError(
+                                line_num,
+                                file_name.to_string(),
+                                file_name.to_string(),
+                            ))
+                        }
+                    }
                 }
                 _ => return Err(ParserError::CommandError(line_num, line.to_string())),
             }

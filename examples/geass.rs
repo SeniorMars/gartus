@@ -1,8 +1,8 @@
-use curves_rs::{
+use gartus::{
     graphics::config::CanvasConfig,
     prelude::{Canvas, Matrix, Rgb},
 };
-// use curves_rs::utils;
+// use gartus::utils;
 
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));

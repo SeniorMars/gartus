@@ -38,7 +38,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// ```
@@ -60,7 +60,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let matrix = Matrix::with_capacity(2, 2);
     /// ```
     pub fn with_capacity(rows: usize, cols: usize) -> Self {
@@ -74,7 +74,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.cols();
@@ -89,7 +89,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.rows();
@@ -109,7 +109,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// ```
     pub fn identity_matrix(size: usize) -> Self {
@@ -194,7 +194,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let transpose = ident.transpose();
     /// ```
@@ -215,7 +215,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let mut matrix = Matrix::new(2, 2, vector);
     /// matrix.identifize();
@@ -246,7 +246,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let mut matrix = Matrix::new(2, 2, vector);
     /// matrix.fill(0.0);
@@ -266,7 +266,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.swap_cols(0, 1);
     /// ```
@@ -290,7 +290,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```no_run
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let num = ident.get(0, 0);
     /// ```
@@ -312,7 +312,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// ident.set(0, 0, 100.0);
     /// ```
@@ -378,7 +378,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_row(0);
     /// ```
@@ -396,7 +396,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_row_mut(0);
     /// ```
@@ -415,7 +415,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_col(0);
     /// ```
@@ -434,7 +434,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_col_mut(0);
     /// ```
@@ -449,7 +449,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_by_point();
     /// ```
@@ -463,7 +463,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
     /// let mut iter = ident.iter_by_point_mut();
     /// ```
@@ -496,7 +496,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// matrix.add_point(0.0, 0.1, 0.2);
     /// ```
@@ -523,7 +523,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// matrix.add_edge(0.0, 0.1, 0.2, 0.3, 0.4, 0.5);
     /// ```
@@ -543,7 +543,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// let vector = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
     /// matrix.add_edge_vec(vector);
@@ -564,8 +564,8 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// use crate::curves_rs::gmath::vector::Vector;
+    /// use crate::gartus::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::vector::Vector;
     /// let mut matrix = Matrix::new(4, 0, Vec::new());
     /// let vector = Vector::new(1.0, 2.0, 3.0);
     /// matrix.append_point(&vector);
@@ -589,7 +589,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.add_dataset(&Matrix::identity_matrix(4));
     /// ```
@@ -615,8 +615,8 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// use crate::curves_rs::gmath::parametric::Parametric;
+    /// use crate::gartus::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::parametric::Parametric;
     /// let mut matrix = Matrix::new(4, 0, Vec::new());
     /// ```
     pub fn add_parametric_curve<F: Fn(f64) -> f64, G: Fn(f64) -> f64>(
@@ -681,20 +681,26 @@ impl Matrix {
     /// * `r0` - the slope of p0
     /// * `r1` - the slope of p1
     ///
-    pub fn add_bezier3(&mut self, p0: (f64, f64), p1: (f64, f64), r0: (f64, f64), r1: (f64, f64)) {
-        todo!();
+    pub fn add_bezier3(&mut self, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64), p3: (f64, f64)) {
+        // (-P0 + 3P1 - 3P2 + P3)t^3 + (3P0 - 6P1 + 3P2)t^2 + (-3P0 + 3P1)t + P0
         // These are the numbers you get when you multiply by the Inverse Hermite Matrix
         fn bezier_curve_coeffs(p0: f64, p1: f64, p2: f64, p3: f64) -> (f64, f64, f64, f64) {
-            todo!()
+            // simple optimization
+            (
+                -p0 + 3.0 * (p1 - p2) + p3,
+                3.0 * p0 - 6.0 * p1 + 3.0 * p2,
+                3.0 * (-p0 + p1),
+                p0,
+            )
         }
-        // let (ax, bx, cx, dx) = bezier_curve_coeffs();
-        // let (ay, by, cy, dy) = bezier_curve_coeffs();
-        // self.add_parametric_curve(
-        //     |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
-        //     |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
-        //     0.0,
-        //     0.0001,
-        // );
+        let (ax, bx, cx, dx) = bezier_curve_coeffs(p0.0, p1.0, p2.0, p3.0);
+        let (ay, by, cy, dy) = bezier_curve_coeffs(p0.1, p1.1, p2.1, p3.1);
+        self.add_parametric_curve(
+            |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
+            |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
+            0.0,
+            0.001,
+        );
     }
 }
 
@@ -711,7 +717,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
     /// ```
@@ -743,7 +749,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.mult_trans(&Matrix::identity_matrix(4));
     /// ```
@@ -773,8 +779,8 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
-    /// use crate::curves_rs::gmath::vector::Vector;
+    /// use crate::gartus::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::vector::Vector;
     /// let ident1 = Matrix::identity_matrix(4);
     /// let mut vector = Vector::new(0.0, 0.1, 0.2);
     /// ident1.mult_vector(vector);

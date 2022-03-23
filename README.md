@@ -1,4 +1,4 @@
-# curves_rs
+# gartus
 
 I finished this some time ago. But i just added a bunch of features.
 

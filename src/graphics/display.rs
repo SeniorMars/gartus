@@ -46,7 +46,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// ```
     pub fn new(width: u32, height: u32, color_depth: u16, line_color: C) -> Self {
@@ -76,7 +76,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let background_color = Rgb::new(1, 2, 3);
     /// let image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// ```
@@ -108,7 +108,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::with_capacity(500, 500, 255, Rgb::default());
     /// ```
     pub fn with_capacity(width: u32, height: u32, color_depth: u16, line_color: C) -> Self {
@@ -129,7 +129,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let width = image.width();
     /// ```
@@ -143,7 +143,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let height = image.height();
     /// ```
@@ -157,7 +157,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let size = image.len();
     /// ```
@@ -171,7 +171,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let size = image.len();
     /// ```
@@ -209,7 +209,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, 255, Rgb::default());
     /// let new_color = Rgb::new(12, 20, 30);
     /// image.set_line_pixel(&new_color);
@@ -229,7 +229,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::with_capacity(1, 1, 255, Rgb::default());
     /// let mut data = vec![Rgb::default()];
     /// image.fill_canvas(data)
@@ -262,7 +262,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::with_capacity(1, 1, 255, Rgb::default());
     /// let mut data = vec![Rgb::default()];
     /// image.fill_canvas(data);
@@ -277,7 +277,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::with_capacity(1, 1, 255, Rgb::default());
     /// let mut data = vec![Rgb::default()];
     /// image.fill_canvas(data);
@@ -330,7 +330,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let color = image.get_pixel(250, 250);
     /// ```
@@ -367,7 +367,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, 255, Rgb::default());
     /// let color = Rgb::new(1, 1, 1);
     /// image.plot(&color, 100, 100);
@@ -392,7 +392,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let background_color = Rgb::new(1, 2, 3);
     /// let mut image = Canvas::new_with_bg(500, 500, 255, background_color);
     /// image.clear_canvas()
@@ -411,7 +411,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let background_color = Rgb::new(1, 2, 3);
     /// let mut image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.fill_color(&background_color)
@@ -438,8 +438,8 @@ impl Canvas<Hsl> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::Canvas;
-    /// use crate::curves_rs::graphics::colors::Hsl;
+    /// use crate::gartus::prelude::Canvas;
+    /// use crate::gartus::graphics::colors::Hsl;
     /// let mut image = Canvas::new(500, 500, 255, Hsl::default());
     /// image.set_line_color_hsl(55, 95, 100);
     /// ```
@@ -457,8 +457,8 @@ impl Canvas<Hsl> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::Canvas;
-    /// use crate::curves_rs::graphics::colors::Hsl;
+    /// use crate::gartus::prelude::Canvas;
+    /// use crate::gartus::graphics::colors::Hsl;
     /// let mut image = Canvas::new(500, 500, 255, Hsl::default());
     /// image.set_line_hsl(Hsl::default());
     /// ```
@@ -480,7 +480,7 @@ impl Canvas<Rgb> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.set_line_color_rgb(55, 95, 100);
     /// ```
@@ -498,7 +498,7 @@ impl Canvas<Rgb> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.set_line_rgb(Rgb::default());
     /// ```
@@ -571,7 +571,7 @@ where
     ///
     /// Basic usage:
     /// ``no_run
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_ascii("pics/test.ppm").expect("Could not save file")
     /// ```
@@ -602,7 +602,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
@@ -641,7 +641,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_extension("pics/test.png").expect("Could not save file")
     /// ```
@@ -690,7 +690,7 @@ where
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::prelude::{Canvas, Rgb};
+    /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.display().expect("Could not display image")
     /// ```

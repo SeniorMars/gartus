@@ -12,7 +12,7 @@
 //! example:
 //!
 //! ```rust
-//! use curves_rs::prelude::*;
+//! use gartus::prelude::*;
 //! ```
 
 /// A module that includes method to read external PPM and allows them to be used with this system.

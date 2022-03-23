@@ -1,4 +1,4 @@
-use curves_rs::{
+use gartus::{
     gmath::helpers::polar_to_xy,
     gmath::matrix::Matrix,
     graphics::{

@@ -1,7 +1,7 @@
-use curves_rs::gmath::ray::Ray;
-use curves_rs::gmath::vector::{Point, Vector};
-use curves_rs::graphics::colors::Rgb;
-use curves_rs::graphics::display::Canvas;
+use gartus::gmath::ray::Ray;
+use gartus::gmath::vector::{Point, Vector};
+use gartus::graphics::colors::Rgb;
+use gartus::graphics::display::Canvas;
 
 fn hit_sphere(center: Point, radius: f64, r: &Ray) -> bool {
     let oc = *r.orgin() - center;

@@ -48,4 +48,4 @@ y 20
 apply
 display
 save
-pics/pic.png
+./pics/pic.png

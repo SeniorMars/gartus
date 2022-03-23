@@ -21,7 +21,7 @@ impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::parametric::Parametric;
+    /// use crate::gartus::gmath::parametric::Parametric;
     /// fn value(num: f64) -> f64 {
     ///    num
     /// }
@@ -41,7 +41,7 @@ impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::parametric::Parametric;
+    /// use crate::gartus::gmath::parametric::Parametric;
     /// fn value(num: f64) -> f64 {
     ///    num
     /// }

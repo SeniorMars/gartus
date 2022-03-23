@@ -1,4 +1,4 @@
-use curves_rs::{
+use gartus::{
     graphics::config::CanvasConfig,
     prelude::{Canvas, Matrix, Rgb},
 };
@@ -54,8 +54,8 @@ fn main() {
 // BAD IDEA OVERALL
 #[test]
 pub fn make_pory_anim() {
-    use curves_rs::graphics::config::AnimationConfig;
-    use curves_rs::utils;
+    use gartus::graphics::config::AnimationConfig;
+    use gartus::utils;
     let outline = Rgb::new(235, 219, 178);
     let white = Rgb::new(243, 244, 248);
     let purplish = Rgb::new(17, 46, 81);

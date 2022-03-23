@@ -90,7 +90,7 @@ impl Rgb {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Rgb;
+    /// use crate::gartus::graphics::colors::Rgb;
     /// let color = Rgb::new(0, 64, 255);
     /// ```
     pub fn new(red: u8, green: u8, blue: u8) -> Self {
@@ -196,7 +196,7 @@ impl Hsl {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::graphics::colors::Hsl;
+    /// use crate::gartus::graphics::colors::Hsl;
     /// let color = Hsl::new(10, 50, 0);
     /// ```
     pub fn new(hue: u16, saturation: u16, light: u16) -> Self {

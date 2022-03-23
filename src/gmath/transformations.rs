@@ -8,7 +8,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let h = Matrix::hermite();
     /// ```
     pub fn hermite() -> Self {
@@ -24,7 +24,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let h_inverse = Matrix::inverse_hermite();
     /// ```
     pub fn inverse_hermite() -> Self {
@@ -40,7 +40,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let h_inverse = Matrix::inverse_bezier();
     /// ```
     pub fn inverse_bezier() -> Self {
@@ -56,7 +56,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_yz();
     /// ```
     pub fn reflect_yz() -> Self {
@@ -72,7 +72,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_xz();
     /// ```
     pub fn reflect_xz() -> Self {
@@ -88,7 +88,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_xy();
     /// ```
     pub fn reflect_xy() -> Self {
@@ -104,7 +104,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_45();
     /// ```
     pub fn reflect_45() -> Self {
@@ -120,7 +120,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_neg45();
     /// ```
     pub fn reflect_neg45() -> Self {
@@ -136,7 +136,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_origin();
     /// ```
     pub fn reflect_origin() -> Self {
@@ -158,7 +158,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let translate = Matrix::translate(50.0, -100.0, 0.0);
     /// ```
     pub fn translate(x: f64, y: f64, z: f64) -> Self {
@@ -180,7 +180,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let dilation = Matrix::scale(0.5, 0.25, 0.1);
     /// ```
     pub fn scale(x: f64, y: f64, z: f64) -> Self {
@@ -205,7 +205,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_point(180.0, 100.0, 100.0, 100.0);
     /// ```
     pub fn rotate_point(theta: f64, x: f64, y: f64, z: f64) -> Self {
@@ -247,7 +247,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_x(45.0);
     /// ```
     pub fn rotate_x(theta: f64) -> Self {
@@ -268,7 +268,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_y(45.0);
     /// ```
     pub fn rotate_y(theta: f64) -> Self {
@@ -289,7 +289,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_z(45.0);
     /// ```
     pub fn rotate_z(theta: f64) -> Self {
@@ -311,7 +311,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_x(1.3, 0.5);
     /// ```
     pub fn shearing_x(sh_y: f64, sh_z: f64) -> Self {
@@ -332,7 +332,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_y(1.3, 0.5);
     /// ```
     pub fn shearing_y(sh_x: f64, sh_z: f64) -> Self {
@@ -353,7 +353,7 @@ impl Matrix {
     ///
     /// Basic usage:
     /// ```
-    /// use crate::curves_rs::gmath::matrix::Matrix;
+    /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_z(1.3, 0.5);
     /// ```
     pub fn shearing_z(sh_x: f64, sh_y: f64) -> Self {
@@ -372,7 +372,7 @@ impl Matrix {
 //     ///
 //     /// Basic usage:
 //     /// ```
-//     /// use crate::curves_rs::gmath::matrix::ConstMatrix;
+//     /// use crate::gartus::gmath::matrix::ConstMatrix;
 //     /// let h = ConstMatrix::hermite();
 //     /// ```
 //     pub fn hermite() -> Self {

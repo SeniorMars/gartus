@@ -1,4 +1,4 @@
-use curves_rs::{
+use gartus::{
     graphics::config::CanvasConfig,
     prelude::{Canvas, Rgb},
 };

@@ -1,4 +1,4 @@
-use curves_rs::prelude::{Canvas, Rgb};
+use gartus::prelude::{Canvas, Rgb};
 
 fn main() {
     let mut img = Canvas::with_capacity(256, 256, 255, Rgb::default());
@@ -22,8 +22,8 @@ fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use curves_rs::graphics::colors::Hsl;
-    use curves_rs::graphics::config::CanvasConfig;
+    use gartus::graphics::colors::Hsl;
+    use gartus::graphics::config::CanvasConfig;
     use num::complex::Complex;
     use std::f32::consts::PI;
 

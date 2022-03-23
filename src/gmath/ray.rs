@@ -19,8 +19,8 @@ impl Ray {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::gmath::vector::Vector;
-    /// use crate::curves_rs::gmath::ray::Ray;
+    /// use crate::gartus::gmath::vector::Vector;
+    /// use crate::gartus::gmath::ray::Ray;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
@@ -49,8 +49,8 @@ impl Ray {
     /// # Examples
     ///
     /// ```
-    /// use crate::curves_rs::gmath::vector::Vector;
-    /// use crate::curves_rs::gmath::ray::Ray;
+    /// use crate::gartus::gmath::vector::Vector;
+    /// use crate::gartus::gmath::ray::Ray;
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
