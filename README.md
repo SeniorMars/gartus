@@ -1,7 +1,4 @@
-# matrix_rs
-Basic matrix library for computer graphics in Rust
+# transform_rs
 
-![Final Image](./gifs/geass.gif)
-
-Other works found in `./gifs/`
-
+The next step for my graphics engine - a parser, documentation, and a scripting file. 
+![Porygon](./porygon.gif)

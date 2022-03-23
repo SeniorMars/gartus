@@ -12,8 +12,7 @@ test:
 
 clean: 
 	cargo clean
-	rm *.ppm *.png
 
 rmf:
+	rm anim/*.ppm anim/*.png
 	rm pics/*.ppm pics/*.png
-	rm anim/*.ppm

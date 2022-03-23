@@ -5,9 +5,13 @@ use std::{
 };
 
 #[derive(Default, Clone, Debug)]
+/// A m x n Matrix is represented here
 pub struct Matrix {
+    /// The rows (m) componet of the Matrix
     rows: usize,
+    /// The column (n) componet of the Matrix
     cols: usize,
+    /// The actual data the Matrix includes
     data: Vec<f64>,
 }
 
@@ -17,15 +21,58 @@ pub struct Matrix {
 
 #[allow(dead_code)]
 impl Matrix {
+    /// Returns a new row x column [Matrix] with a vector that contains the data.
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - An unsigned usize int that represents
+    /// the number of rows in the [Matrix]
+    /// * `cols` - An unsigned usize int that represents
+    /// the number of columns in the [Matrix]
+    /// * `data` - A vector comprised of floats that is the body of the [Matrix]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
+    /// let matrix = Matrix::new(2, 2, vector);
+    /// ```
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
         assert_eq!(rows * cols, data.len(), "Matrix must be filled completely");
         Self { rows, cols, data }
     }
 
-    pub fn num_points(&self) -> usize {
+    /// Returns the number of points (rows) currently in the [Matrix].
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
+    /// let matrix = Matrix::new(2, 2, vector);
+    /// let num = matrix.get_num_points();
+    /// ```
+    pub fn get_num_points(&self) -> usize {
         self.rows
     }
 
+    /// Returns a new N by N identity [Matrix].
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - An unsigned usize int that represents
+    /// the size of the identity [Matrix]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// ```
     pub fn identity_matrix(size: usize) -> Self {
         let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
         for i in 0..size {
@@ -34,23 +81,55 @@ impl Matrix {
         matrix
     }
 
-    pub fn inverse(&self) -> Self {
+    // Returns the inverse [Matrix] of self.
+    //
+    // # Examples
+    //
+    // Basic usage:
+    // ```
+    // use transform_rs::graphics::matrix::Matrix;
+    // let ident = Matrix::identity_matrix(4);
+    // let inverse = ident.inverse();
+    // ```
+    fn inverse(&self) -> Self {
         // may not do this
         todo!()
     }
 
+    /// Returns the transpose [Matrix] of self.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let transpose = ident.transpose();
+    /// ```
     pub fn transpose(&self) -> Self {
         Matrix::new(self.cols, self.rows, self.data.clone())
     }
 
-    pub fn to_identity(&mut self) {
+    /// Makes self an identity [Matrix] if the matrix is N by N.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
+    /// let mut matrix = Matrix::new(2, 2, vector);
+    /// matrix.identifize();
+    /// ```
+    pub fn identifize(&mut self) {
         assert_eq!(self.rows, self.cols, "An identity matrix must be N x N");
         let cols = self.cols;
-        // self.iter_mut()
-        //     .enumerate()
-        //     .map(|(i, d)| *d = if i / cols == i % cols { 1.0 } else { 0.0 });
-        for (i, e) in self.iter_mut().enumerate() {
-            *e = if i / cols == i % cols { 1.0 } else { 0.0 }
+        for (index, element) in self.iter_mut().enumerate() {
+            *element = if index / cols == index % cols {
+                1.0
+            } else {
+                0.0
+            }
         }
     }
 
@@ -58,10 +137,40 @@ impl Matrix {
         row * self.cols + col
     }
 
-    pub fn fill(&mut self, n: f64) {
-        self.data = vec![n; self.rows * self.cols]
+    /// Fills every element of self.data with a specific float.
+    ///
+    /// # Arguments
+    ///
+    /// * `float` - A f64 float that override every element in self.data
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
+    /// let mut matrix = Matrix::new(2, 2, vector);
+    /// matrix.fill(0.0);
+    /// ```
+    pub fn fill(&mut self, float: f64) {
+        self.data = vec![float; self.rows * self.cols]
     }
 
+    /// Swaps two rows in self.data.
+    ///
+    /// # Arguments
+    ///
+    /// * `row_one` - The index of the first row to be swapped.
+    /// * `row_two` - The index of the second row to be swapped.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// ident.swap_rows(0, 1);
+    /// ```
     pub fn swap_rows(&mut self, row_one: usize, row_two: usize) {
         let mut points = self.iter_by_point_mut();
         points
@@ -70,11 +179,44 @@ impl Matrix {
             .swap_with_slice(points.nth(row_two - row_one - 1).unwrap());
     }
 
+    /// Returns the corresponding self.data element
+    /// given a row and column.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The index of the row of the data point to be accessed
+    /// * `column` - The index of the column of the data point to be accessed
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let num = ident.get(0, 0);
+    /// ```
     pub fn get(&self, row: usize, col: usize) -> f64 {
         assert!(row < self.rows && col < self.cols, "Index out of bound");
         self.data[self.index(row, col)]
     }
 
+    /// Sets the corresponding self.data element a new value
+    /// given a row and column.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The index of the row of the data point to be changed
+    /// * `column` - The index of the column of the data point to be changed
+    /// * `new_point` - The new value to be added
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// ident.set(0, 0, 100.0);
+    /// ```
     pub fn set(&mut self, row: usize, col: usize, new_point: f64) {
         assert!(row < self.rows && col < self.cols, "Index out of bound");
         let i = self.index(row, col);
@@ -105,6 +247,20 @@ impl Matrix {
         self.data.iter_mut()
     }
 
+    /// Returns a iterator that iterates over a specific row.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The index of the row to be interated over
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_row(0);
+    /// ```
     pub fn iter_row(&self, r: usize) -> impl Iterator<Item = &f64> + '_ {
         let start = r * self.cols;
         self.data[start..self.cols + start].iter()
@@ -115,156 +271,69 @@ impl Matrix {
         self.data[start..self.cols + start].iter_mut()
     }
 
-    pub fn iter_col(&self, c: usize) -> impl Iterator<Item = &f64> + '_ {
-        self.iter().skip(c).step_by(self.cols)
+    /// Returns a iterator that iterates over a specific column.
+    ///
+    /// # Arguments
+    ///
+    /// * `column` - The index of the column to be interated over
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_col(0);
+    /// ```
+    pub fn iter_col(&self, column: usize) -> impl Iterator<Item = &f64> + '_ {
+        self.iter().skip(column).step_by(self.cols)
     }
 
-    pub fn iter_col_mut(&mut self, c: usize) -> impl Iterator<Item = &mut f64> + '_ {
+    /// Returns a mutable iterator that iterates over a specific column.
+    ///
+    /// # Arguments
+    ///
+    /// * `column` - The index of the column to be interated over
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// let mut iter = ident.iter_col(0);
+    /// ```
+    pub fn iter_col_mut(&mut self, column: usize) -> impl Iterator<Item = &mut f64> + '_ {
         let col = self.cols;
-        self.iter_mut().skip(c).step_by(col)
+        self.iter_mut().skip(column).step_by(col)
     }
 
+    /// Returns a iterator that iterates over the [Matrix]'s points.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_by_point();
+    /// ```
     pub fn iter_by_point(&self) -> slice::ChunksExact<'_, f64> {
         self.data.chunks_exact(self.cols)
     }
 
+    /// Returns a mutable iterator that iterates over the [Matrix]'s points.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut ident = Matrix::identity_matrix(4);
+    /// let mut iter = ident.iter_by_point_mut();
+    /// ```
     pub fn iter_by_point_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
         self.data.chunks_exact_mut(self.cols)
-    }
-}
-
-// transformations
-#[allow(dead_code)]
-impl Matrix {
-    // reflection over y-axis
-    pub fn reflect_yz() -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(0, 0, -1.0);
-        t
-    }
-
-    // reflection over x-axis
-    pub fn reflect_xz() -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(1, 1, -1.0);
-        t
-    }
-
-    // reflect over z
-    pub fn reflect_xy() -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(2, 2, -1.0);
-        t
-    }
-
-    pub fn reflect_45() -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(0, 0, 0.0);
-        t.set(1, 0, 1.0);
-        t.set(0, 1, 1.0);
-        t.set(1, 1, 0.0);
-        t
-    }
-
-    pub fn reflect_neg45() -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(0, 0, 0.0);
-        t.set(1, 0, -1.0);
-        t.set(0, 1, -1.0);
-        t.set(1, 1, 0.0);
-        t
-    }
-
-    pub fn reflect_origin() -> Self {
-        let mut t = Self::new(4, 4, vec![]);
-        t.set(0, 0, -1.0);
-        t.set(1, 1, -1.0);
-        t
-    }
-
-    pub fn translate(x: f64, y: f64, z: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(3, 0, x);
-        t.set(3, 1, y);
-        t.set(3, 2, z);
-        t
-    }
-
-    pub fn scale(x: f64, y: f64, z: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(0, 0, x);
-        t.set(1, 1, y);
-        t.set(2, 2, z);
-        t
-    }
-
-    pub fn rotate_point(theta: f64, x: f64, y: f64, z: f64) -> Self {
-        let mut m = Self::identity_matrix(4);
-        let angle = theta.to_radians();
-        let c = angle.cos();
-        let s = angle.sin();
-        let t = 1.0 - c;
-        m.set(0, 0, (t * x * x) + c);
-        m.set(0, 1, (t * x * y) - (s * z));
-        m.set(0, 2, (t * x * z) + (s * z));
-        m.set(1, 0, (t * x * y) + (s * z));
-        m.set(1, 1, (t * y * y) + c);
-        m.set(1, 2, (t * y * z) - (s * x));
-        m.set(2, 0, (t * x * z) - (s * y));
-        m.set(2, 1, (t * y * z) + (s * x));
-        m.set(2, 2, (t * z * z) + c);
-        m
-    }
-
-    pub fn rotate_x(theta: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        let angle = theta.to_radians();
-        t.set(1, 1, angle.cos());
-        t.set(2, 1, -angle.sin());
-        t.set(1, 2, angle.sin());
-        t.set(2, 2, angle.cos());
-        t
-    }
-
-    pub fn rotate_y(theta: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        let angle = theta.to_radians();
-        t.set(0, 0, angle.cos());
-        t.set(0, 2, -angle.sin());
-        t.set(2, 0, angle.sin());
-        t.set(2, 2, angle.cos());
-        t
-    }
-
-    pub fn rotate_z(theta: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        let angle = theta.to_radians();
-        t.set(0, 0, angle.cos());
-        t.set(1, 0, -angle.sin());
-        t.set(0, 1, angle.sin());
-        t.set(1, 1, angle.cos());
-        t
-    }
-
-    pub fn shearing_x(sh_y: f64, sh_z: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(0, 1, sh_y);
-        t.set(0, 2, sh_z);
-        t
-    }
-
-    pub fn shearing_y(sh_x: f64, sh_z: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(1, 0, sh_x);
-        t.set(1, 2, sh_z);
-        t
-    }
-
-    pub fn shearing_z(sh_x: f64, sh_y: f64) -> Self {
-        let mut t = Self::identity_matrix(4);
-        t.set(2, 0, sh_x);
-        t.set(2, 1, sh_y);
-        t
     }
 }
 
@@ -280,6 +349,22 @@ impl PartialEq for Matrix {
 // add + append
 #[allow(dead_code)]
 impl Matrix {
+    /// Adds a new point (x, y, z) to a [Matrix].
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - A f64 float representing the x corrdinate of a point
+    /// * `y` - A f64 float representing the y corrdinate of a point
+    /// * `z` - A f64 float representing the z corrdinate of a point
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut matrix = Matrix::new(0, 4, Vec::new());
+    /// matrix.add_point(0.0, 0.1, 0.2);
+    /// ```
     pub fn add_point(&mut self, x: f64, y: f64, z: f64) {
         self.data.push(x);
         self.data.push(y);
@@ -288,22 +373,93 @@ impl Matrix {
         self.rows += 1;
     }
 
+    /// Appends a point in the form of a vector to the edge [Matrix].
+    ///
+    /// # Arguments
+    ///
+    /// * `point` - a mutable vector that has three floats, which will be append to the [Matrix]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut matrix = Matrix::new(0, 4, Vec::new());
+    /// let mut vector = vec![0.0, 0.1, 0.2];
+    /// matrix.append_point(&mut vector);
+    /// ```
+    pub fn append_point(&mut self, point: &mut Vec<f64>) {
+        assert_eq!(
+            self.cols,
+            point.len() + 1,
+            "self.cols and new row's len are not equal"
+        );
+        point.push(1.0);
+        self.data.append(point);
+        self.rows += 1;
+    }
+
+    /// Adds a new edge to an edge [Matrix].
+    ///
+    /// # Arguments
+    ///
+    /// * `x0` - A f64 float representing the start x corrdinate of an edge
+    /// * `y0` - A f64 float representing the start y corrdinate of an edge
+    /// * `z0` - A f64 float representing the start z corrdinate of an edge
+    /// * `x1` - A f64 float representing the end x corrdinate of an edge
+    /// * `y1` - A f64 float representing the end y corrdinate of an edge
+    /// * `z1` - A f64 float representing the end z corrdinate of an edge
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut matrix = Matrix::new(0, 4, Vec::new());
+    /// matrix.add_edge(0.0, 0.1, 0.2, 0.3, 0.4, 0.5);
+    /// ```
     pub fn add_edge(&mut self, x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) {
         self.add_point(x0, y0, z0);
         self.add_point(x1, y1, z1);
     }
 
-    pub fn append_row(&mut self, row: &mut Vec<f64>) {
-        assert_eq!(
-            self.cols,
-            row.len() + 1,
-            "self.cols and edge len are not equal"
-        );
-        row.push(1.0);
-        self.data.append(row);
-        self.rows += 1;
+    /// Adds a new edge in the form of a f64 vector to an edge [Matrix].
+    ///
+    /// # Arguments
+    ///
+    /// * `edge` - A vector with six floats representing two points
+    /// to be added to the edge [Matrix]
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut matrix = Matrix::new(0, 4, Vec::new());
+    /// let vector = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
+    /// matrix.add_edge_vec(vector);
+    /// ```
+    pub fn add_edge_vec(&mut self, edge: Vec<f64>) {
+        assert_eq!(6, edge.len());
+        self.add_point(edge[0], edge[1], edge[2]);
+        self.add_point(edge[3], edge[4], edge[5]);
     }
 
+    /// Returns a the result of multiplying self by another [Matrix].
+    /// Self's columns must be the same size as the other's Matrix's rwos.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - A reference to a Matrix to be multipled with self
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let mut ident1 = Matrix::identity_matrix(4);
+    /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
+    /// ```
     pub fn mult_matrix(&self, other: &Self) -> Self {
         assert_eq!(
             self.cols, other.rows,
@@ -320,15 +476,29 @@ impl Matrix {
         Matrix { rows, cols, data }
     }
 
+    /// Returns the resulting vecotr when multiplying by self.
+    ///
+    /// # Arguments
+    ///
+    /// * `vector` - A mutable vector that will be mutliplied with self.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use transform_rs::graphics::matrix::Matrix;
+    /// let ident1 = Matrix::identity_matrix(4);
+    /// let mut vector = vec![0.0, 0.1, 0.2, 1.0];
+    /// ident1.mult_vector(vector);
+    /// ```
     pub fn mult_vector(&self, mut vector: Vec<f64>) {
         assert_eq!(
             self.rows, self.cols,
             "Multiply only with identity matrix transformation"
         );
         let copy = vector.clone();
-        // let mut new = vec![1.0, 1.0, 1.0, 1.0];
-        for i in 0..4 {
-            vector[i] = self.get(0, i) * copy[0]
+        for (i, element) in vector.iter_mut().enumerate().take(4) {
+            *element = self.get(0, i) * copy[0]
                 + self.get(1, i) * copy[1]
                 + self.get(2, i) * copy[2]
                 + self.get(3, i) * copy[3]
@@ -376,8 +546,8 @@ impl AddAssign<[f64; 3]> for Matrix {
 }
 
 impl AddAssign<Vec<f64>> for Matrix {
-    fn add_assign(&mut self, mut other: Vec<f64>) {
-        self.append_row(&mut other)
+    fn add_assign(&mut self, other: Vec<f64>) {
+        self.add_edge_vec(other)
     }
 }
 
@@ -409,7 +579,7 @@ impl SubAssign for Matrix {
 
 impl SubAssign<f64> for Matrix {
     fn sub_assign(&mut self, other: f64) {
-        self.iter_mut().for_each(|e| *e += other)
+        self.iter_mut().for_each(|e| *e -= other)
     }
 }
 
@@ -558,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    // #[should_panic]
+    #[should_panic]
     fn add_points() {
         let mut matrix = Matrix::new(0, 4, Vec::with_capacity(8));
         let x = [0.0, 0.1, 0.2];
@@ -568,7 +738,7 @@ mod tests {
         matrix += x;
         matrix += x;
         println!("{}", matrix);
-        matrix.to_identity();
+        matrix.identifize();
         println!("{}", matrix);
     }
 

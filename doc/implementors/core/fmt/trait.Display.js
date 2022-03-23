@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["lib"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html\" title=\"trait core::fmt::Display\">Display</a> for <a class=\"struct\" href=\"lib/graphics/matrix/struct.Matrix.html\" title=\"struct lib::graphics::matrix::Matrix\">Matrix</a>","synthetic":false,"types":["lib::graphics::matrix::Matrix"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
