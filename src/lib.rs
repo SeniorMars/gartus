@@ -1,4 +1,5 @@
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
+#![warn(clippy::pedantic)]
 //! An amateur computer graphics engine made in Rust.
 //!
 //! Provides an "art canvas" to work with drawings, a mini matrix library
@@ -7,9 +8,9 @@
 //!
 //! # The prelude
 //!
-//! Importing each trait individually can become a chore, so `prelude` module is provided
-//! to allow you to import the main traits all at once. For
-//! example:
+//! Importing each trait individually can become a chore, so the `prelude`
+//! module is provided to allow you to import the main traits all at once.
+//! For example:
 //!
 //! ```rust
 //! use gartus::prelude::*;

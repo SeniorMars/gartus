@@ -1,10 +1,6 @@
-use std::{collections::VecDeque, fs::File};
-use std::{
-    ffi::OsStr,
-    io::{BufReader, Read},
-    path::Path,
-    process::Command,
-};
+use std::collections::VecDeque;
+use std::fs::OpenOptions;
+use std::{ffi::OsStr, io::Read, path::Path, process::Command};
 
 use crate::graphics::{colors::Rgb, display::Canvas};
 /// ppmifizes an image so that it works with with this systems
@@ -14,8 +10,14 @@ use crate::graphics::{colors::Rgb, display::Canvas};
 /// * `pos_glitch` - A bool that turns potential glitch on.
 ///
 /// # Note
-/// Make sure to turn on [Canvas] with pos_glitch on
-/// with [CanvasConfig] if `pos_glitch` is turned on
+/// Make sure to turn on [Canvas] with `pos_glitch` on
+/// with [`CanvasConfig`] if `pos_glitch` is turned on
+///
+/// # Panics
+/// If file does not exist, or it cannot be converted into a ppm file
+///
+/// # Errors
+/// todo!()
 ///
 /// # Examples
 ///
@@ -45,9 +47,7 @@ pub fn ppmify(
     pos_glitch: bool,
 ) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
     let path = Path::new(file_name);
-    if !path.exists() {
-        panic!("File does not exit");
-    }
+    assert!(path.exists(), "File does not exit");
     let ext = path
         .extension()
         .and_then(OsStr::to_str)
@@ -61,17 +61,18 @@ pub fn ppmify(
             .spawn()?
             .wait()?;
     };
-    parse_ppm(&correct_ext, pos_glitch)
+    Ok(parse_ppm(&correct_ext, pos_glitch))
 }
 
 fn vec_to_int(vec: Vec<u8>) -> u32 {
+    #[allow(clippy::cast_possible_truncation)]
     let mut length = vec.len() as u32;
     let mut sum = 0u32;
-    vec.into_iter().for_each(|i| {
-        let i_num = ascii_to_num(i) as u32;
+    for i in vec {
+        let i_num = u32::from(ascii_to_num(i));
         length -= 1;
-        sum += i_num * 10_u32.pow(length)
-    });
+        sum += i_num * 10_u32.pow(length);
+    }
     sum
 }
 
@@ -79,7 +80,7 @@ fn byte_vec_fill(bytes: &mut VecDeque<u8>, vec: &mut Vec<u8>) {
     loop {
         let pot_num = bytes.pop_front();
         if pot_num != Some(32) && pot_num != Some(10) {
-            vec.push(pot_num.unwrap())
+            vec.push(pot_num.unwrap());
         } else {
             break;
         };
@@ -102,11 +103,11 @@ fn ascii_to_num(byte: u8) -> u8 {
     }
 }
 
-fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
+fn parse_ppm(path: &Path, pos_glitch: bool) -> Canvas<Rgb> {
     // this is a naive parser. Not 100% compatible with the spec
-    let file = File::open(path).unwrap();
-    let reader = BufReader::new(file);
-    let mut bytes = reader
+    let file = OpenOptions::new().read(true).open(path).unwrap();
+
+    let mut bytes = file
         .bytes()
         .map(|pos_byte| pos_byte.expect("File Follows Spec"))
         .collect::<VecDeque<u8>>();
@@ -178,7 +179,7 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Result<Canvas<Rgb>, Box<dyn std::
         _ => panic!("Unsupported spec"),
     };
     canvas.fill_canvas(pixels);
-    Ok(canvas)
+    canvas
 }
 
 #[test]

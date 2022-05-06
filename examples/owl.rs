@@ -1,18 +1,21 @@
+use gartus::graphics::config::AnimationConfig;
 // extern crate rand;
-// use gartus::utils;
+use gartus::utils;
 use gartus::{
     graphics::config::CanvasConfig,
     prelude::{Canvas, Rgb},
 };
-// use rand::Rng;
+use rand::Rng;
 
 fn owl() {
-    // let mut rng = rand::thread_rng();
+    let mut rng = rand::thread_rng();
     let mut owl = Canvas::new(500, 500, 255, Rgb::new(255, 255, 255));
     owl.set_config(CanvasConfig {
         upper_left_system: true,
         ..Default::default()
     });
+
+    owl.set_animation(AnimationConfig::new("owl".to_string()));
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,
         170, 325, 203, 341, 208, 352, 249, 363, 188, 384, 243, 378, 257, 389, 250, 363, 378, 482,
@@ -55,13 +58,13 @@ fn owl() {
     let chunks = 2;
     (0..corrs.len()).step_by(chunks).for_each(|i| {
         if i != corrs.len() - chunks {
-            // owl.set_line_color_rgb(
-            //     rng.gen_range(0..=255),
-            //     rng.gen_range(0..=255),
-            //     rng.gen_range(0..=255),
-            // );
-            // owl.save_binary(&format!("./anim/owl{:04}.ppm", i))
-            //     .expect("could not save image");
+            owl.set_line_color_rgb(
+                rng.gen_range(0..=255),
+                rng.gen_range(0..=255),
+                rng.gen_range(0..=255),
+            );
+            owl.save_binary(&format!("./anim/owl{:04}.ppm", i))
+                .expect("could not save image");
             owl.draw_line(
                 owl.line,
                 corrs[i] as f64,
@@ -74,7 +77,7 @@ fn owl() {
     owl.display().expect("Could not display image");
     // owl.save_binary(&format!("./anim/owl{:04}.ppm", 319))
     //     .expect("could not save image");
-    // utils::animation("owl", "owl.gif");
+    utils::animation(&owl, "./owl.gif");
     // utils::view_animation("owl.gif");
 }
 

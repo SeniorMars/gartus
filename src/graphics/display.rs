@@ -181,7 +181,7 @@ where
 
     /// Set a new configuration for canvas
     pub fn set_config(&mut self, config: CanvasConfig) {
-        self.config = config
+        self.config = config;
     }
 
     /// Get the configuration for canvas
@@ -197,7 +197,6 @@ where
     /// Sets up the configuration for animation
     pub fn set_animation(&mut self, config: AnimationConfig) {
         self.config.set_animation(config);
-        assert!(self.config().animation())
     }
     /// Sets the color of the drawing line to a different color given a [Pixel].
     ///
@@ -215,7 +214,7 @@ where
     /// image.set_line_pixel(&new_color);
     /// ```
     pub fn set_line_pixel(&mut self, new_color: &C) {
-        self.line = *new_color
+        self.line = *new_color;
     }
 
     /// Fills in an empty canvas
@@ -224,6 +223,9 @@ where
     ///
     /// * `new_pixels` - A vector of pixels that represents new data
     /// to append to an empty canvas
+    ///
+    /// # Panics
+    /// If the size of `new_pixels` is not the size of the expected canvas
     ///
     /// # Examples
     ///
@@ -239,7 +241,7 @@ where
             new_pixels.len() == (self.width * self.height) as usize,
             "New data must fill canvas"
         );
-        self.pixels.append(&mut new_pixels)
+        self.pixels.append(&mut new_pixels);
     }
 
     /// Sets an (X, Y) pair to the proper spot in Pixels
@@ -288,16 +290,17 @@ where
     }
 
     /// Deals with negative numbers by wrapping the [Canvas]
-    fn deal_with_negs(&self, x: i32, y: i32) -> (i32, i32, i32, i32) {
-        let (width, height) = (self.width as i32, self.height as i32);
+    fn deal_with_negs(&self, x: i64, y: i64) -> (i64, i64, i64, i64) {
+        #[allow(clippy::cast_possible_wrap, clippy::cast_lossless)]
+        let (width, height) = (self.width as i64, self.height as i64);
         let x = if x > width {
             x % width
         } else if x < 0 {
             let r = x % width;
-            if r != 0 {
-                r + width
-            } else {
+            if r == 0 {
                 r
+            } else {
+                r + width
             }
         } else {
             x
@@ -307,10 +310,10 @@ where
             y % height
         } else if y < 0 {
             let r = y % height;
-            if r != 0 {
-                r + height
-            } else {
+            if r == 0 {
                 r
+            } else {
+                r + height
             }
         } else {
             y
@@ -334,11 +337,16 @@ where
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// let color = image.get_pixel(250, 250);
     /// ```
-    pub fn get_pixel(&self, x: i32, y: i32) -> &C {
+    #[allow(
+        clippy::cast_lossless,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation
+    )]
+    pub fn get_pixel(&self, x: i64, y: i64) -> &C {
         let (x, y, width, height) = if self.config.wrapped {
             self.deal_with_negs(x, y)
         } else {
-            (x, y, self.width as i32, self.height as i32)
+            (x, y, self.width as i64, self.height as i64)
         };
         // println!("i32:{} as {}", x, x as u32);
         if self.config.upper_left_system {
@@ -355,7 +363,7 @@ where
         }
     }
 
-    /// Plots new_color to the (X, Y) coordinate pair corresponding to the [Canvas] body.
+    /// Plots `new_color` to the (X, Y) coordinate pair corresponding to the [Canvas] body.
     ///
     /// # Arguments
     ///
@@ -372,21 +380,22 @@ where
     /// let color = Rgb::new(1, 1, 1);
     /// image.plot(&color, 100, 100);
     /// ```
-    pub fn plot(&mut self, new_color: &C, x: i32, y: i32) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    pub fn plot(&mut self, new_color: &C, x: i64, y: i64) {
         let (x, y, width, height) = self.deal_with_negs(x, y);
         if self.config.upper_left_system {
             let index = self.index(x as u32, y as u32);
-            self.pixels[index] = *new_color
+            self.pixels[index] = *new_color;
         } else {
             let new_y = height - 1 - y;
             if x >= 0 && x < width && new_y >= 0 && new_y < height {
                 let index = self.index(x as u32, new_y as u32);
-                self.pixels[index] = *new_color
+                self.pixels[index] = *new_color;
             }
         }
     }
 
-    /// Clears the [Canvas] to Pixel::default()
+    /// Clears the [Canvas] to `Pixel::default`()
     ///
     /// # Examples
     ///
@@ -398,7 +407,7 @@ where
     /// image.clear_canvas()
     /// ```
     pub fn clear_canvas(&mut self) {
-        self.iter_mut().for_each(|i| *i = C::default())
+        self.iter_mut().for_each(|i| *i = C::default());
     }
 
     /// Fills the entire [Canvas] with one [Pixel]
@@ -463,7 +472,7 @@ impl Canvas<Hsl> {
     /// image.set_line_hsl(Hsl::default());
     /// ```
     pub fn set_line_hsl(&mut self, color: Hsl) {
-        self.line = color
+        self.line = color;
     }
 }
 
@@ -485,7 +494,7 @@ impl Canvas<Rgb> {
     /// image.set_line_color_rgb(55, 95, 100);
     /// ```
     pub fn set_line_color_rgb(&mut self, red: u8, green: u8, blue: u8) {
-        self.line = Rgb::new(red, green, blue)
+        self.line = Rgb::new(red, green, blue);
     }
 
     /// Sets the color of the drawing line to a different color given an RGB Pixel
@@ -503,7 +512,7 @@ impl Canvas<Rgb> {
     /// image.set_line_rgb(Rgb::default());
     /// ```
     pub fn set_line_rgb(&mut self, color: Rgb) {
-        self.line = color
+        self.line = color;
     }
 }
 
@@ -549,7 +558,8 @@ where
             self.height, self.width, self.color_depth
         )?;
         self.iter().enumerate().for_each(|(i, pixel)| {
-            writeln!(f, "(index: {}, value: {:?})", i, pixel).expect("Could not print pixel values")
+            writeln!(f, "(index: {}, value: {:?})", i, pixel)
+                .expect("Could not print pixel values");
         });
         Ok(())
     }
@@ -570,7 +580,7 @@ where
     /// # Examples
     ///
     /// Basic usage:
-    /// ``no_run
+    /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_ascii("pics/test.ppm").expect("Could not save file")

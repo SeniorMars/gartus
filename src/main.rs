@@ -4,6 +4,7 @@ use gartus::graphics::colors::Rgb;
 use gartus::graphics::config::CanvasConfig;
 use gartus::graphics::display::Canvas;
 use gartus::prelude::Matrix;
+use gartus::utils;
 
 pub fn main() {
     let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));
@@ -43,24 +44,26 @@ pub fn main() {
 
     let white = Rgb::new(255, 255, 255);
     img.set_line_pixel(&white);
-    img.draw_lines(
-        &geass
-            .mult_matrix(&Matrix::scale(0.1, 0.1, 0.1))
-            .mult_matrix(&Matrix::translate(360.0, 370.0, 0.0)),
-    );
+
+    let off_center_transformation =
+        &Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
+    img.draw_lines(&off_center_transformation.mult_matrix(&geass));
     img.fill(406, 413, &white, &white);
     img.set_line_pixel(&Rgb::new(191, 70, 61));
-    for i in 0..180 {
+    let back_translation = &Matrix::translate(400.0, 400.0, 0.0);
+    for i in 0..2 {
         let mut copy = img.clone();
-        copy.draw_lines(&base.mult_matrix(
-            &Matrix::rotate_y(i as f64).mult_matrix(&Matrix::translate(400.0, 400.0, 0.0)),
-        ));
+        copy.draw_lines(
+            &Matrix::rotate_y(i as f64)
+                .mult_matrix(back_translation)
+                .mult_matrix(&base),
+        );
         copy.save_extension(&format!("./anim/geass{:04}.png", i))
             .expect("Could not save image")
     }
-    // img.display().expect("Could not display image")
-    // let file_name = "./geass.gif";
-    // utils::animation("geass", file_name);
+    // img.display().expect("Could not display image");
+    let file_name = "./geass.gif";
+    utils::animation(&img, file_name);
     // utils::view_animation(file_name)
 }
 

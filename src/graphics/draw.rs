@@ -27,7 +27,7 @@ where
     /// let color = Rgb::new(0, 64, 255);
     /// image.fill(10, 10, &color, &background_color)
     /// ```
-    pub fn fill(&mut self, x: i32, y: i32, fill_color: &C, boundary_color: &C) {
+    pub fn fill(&mut self, x: i64, y: i64, fill_color: &C, boundary_color: &C) {
         let mut points = vec![(x, y)];
         while let Some((x, y)) = points.pop() {
             let pixel = self.get_pixel(x, y);
@@ -62,6 +62,9 @@ where
     ///
     /// * `matrix` - A [Matrix] reference that has at least two points
     /// (2 by 4) to draw onto the [Canvas]
+    ///
+    /// # Panics
+    /// * If Matrix does not have two points to draw
     ///
     /// # Examples
     ///
@@ -126,18 +129,22 @@ where
     /// ```
     pub fn draw_line(&mut self, color: C, x0: f64, y0: f64, x1: f64, y1: f64) {
         if self.config.animation() {
-            self.config.increase_anim_index()
+            {
+                let this = &mut self.config;
+                this.increase_anim_index();
+            }
         }
         let (x0, y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)
         } else {
             (x0, y0, x1, y1)
         };
+        #[allow(clippy::cast_possible_truncation)]
         let (mut x0, mut y0, x1, y1) = (
-            x0.round() as i32,
-            y0.round() as i32,
-            x1.round() as i32,
-            y1.round() as i32,
+            x0.round() as i64,
+            y0.round() as i64,
+            x1.round() as i64,
+            y1.round() as i64,
         );
         let (delta_y, delta_x) = (2 * (y1 - y0), -2 * (x1 - x0));
 

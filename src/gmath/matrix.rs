@@ -34,6 +34,10 @@ impl Matrix {
     /// * `cols` - An unsigned usize int that represents
     /// the number of columns in the [Matrix]
     /// * `data` - A vector comprised of floats that is the body of the [Matrix]
+    ///
+    /// # Panics
+    /// If the size of data isn't the same as rows * cols
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -42,12 +46,13 @@ impl Matrix {
     /// let vector = vec![0.0, 0.1, 0.2, 0.3];
     /// let matrix = Matrix::new(2, 2, vector);
     /// ```
+    #[must_use]
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
         assert_eq!(rows * cols, data.len(), "Matrix must be filled completely");
         Self { rows, cols, data }
     }
 
-    /// Returns a new row x column [Matrix] with a vector with_capacity of row * column
+    /// Returns a new row x column [Matrix] with a vector `with_capacity` of row * column
     ///
     /// # Arguments
     ///
@@ -63,6 +68,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let matrix = Matrix::with_capacity(2, 2);
     /// ```
+    #[must_use]
     pub fn with_capacity(rows: usize, cols: usize) -> Self {
         let data = Vec::with_capacity(rows * cols);
         Self { rows, cols, data }
@@ -79,6 +85,7 @@ impl Matrix {
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.cols();
     /// ```
+    #[must_use]
     pub fn cols(&self) -> usize {
         self.cols
     }
@@ -94,6 +101,7 @@ impl Matrix {
     /// let matrix = Matrix::new(2, 2, vector);
     /// let num = matrix.rows();
     /// ```
+    #[must_use]
     pub fn rows(&self) -> usize {
         self.rows
     }
@@ -112,6 +120,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
     /// ```
+    #[must_use]
     pub fn identity_matrix(size: usize) -> Self {
         let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
         (0..size).for_each(|i| {
@@ -211,6 +220,9 @@ impl Matrix {
 
     /// Makes self an identity [Matrix] if the matrix is N by N.
     ///
+    /// # Panics
+    /// self.rows and self.cols must be the same to convert the Matrix into an indentity matrix
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -252,7 +264,7 @@ impl Matrix {
     /// matrix.fill(0.0);
     /// ```
     pub fn fill(&mut self, float: f64) {
-        self.data = vec![float; self.rows * self.cols]
+        self.data = vec![float; self.rows * self.cols];
     }
 
     /// Swaps two rows in self.data.
@@ -261,6 +273,9 @@ impl Matrix {
     ///
     /// * `row_one` - The index of the first row to be swapped.
     /// * `row_two` - The index of the second row to be swapped.
+    ///
+    /// # Panics
+    /// Will not panic
     ///
     /// # Examples
     ///
@@ -286,6 +301,9 @@ impl Matrix {
     /// * `row` - The index of the row of the data point to be accessed
     /// * `column` - The index of the column of the data point to be accessed
     ///
+    /// # Panics
+    /// If index is out of bounds
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -294,6 +312,7 @@ impl Matrix {
     /// let ident = Matrix::identity_matrix(4);
     /// let num = ident.get(0, 0);
     /// ```
+    #[must_use]
     pub fn get(&self, row: usize, col: usize) -> f64 {
         assert!(row < self.rows && col < self.cols, "Index out of bound");
         self.data[self.index(row, col)]
@@ -308,6 +327,9 @@ impl Matrix {
     /// * `column` - The index of the column of the data point to be changed
     /// * `new_point` - The new value to be added
     ///
+    /// # Panics
+    /// If index is out of bounds
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -320,6 +342,12 @@ impl Matrix {
         assert!(row < self.rows && col < self.cols, "Index out of bound");
         let i = self.index(row, col);
         self.data[i] = new_point;
+    }
+
+    /// Get a reference to the matrix's data.
+    #[must_use]
+    pub fn data(&self) -> &[f64] {
+        self.data.as_ref()
     }
 }
 
@@ -453,6 +481,7 @@ impl Matrix {
     /// let ident = Matrix::identity_matrix(4);
     /// let iter = ident.iter_by_point();
     /// ```
+    #[must_use]
     pub fn iter_by_point(&self) -> slice::ChunksExact<'_, f64> {
         self.data.chunks_exact(self.rows)
     }
@@ -539,6 +568,9 @@ impl Matrix {
     /// * `edge` - A vector with six floats representing two points
     /// to be added to the edge [Matrix]
     ///
+    /// # Panics
+    /// If the len of edge is not 6
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -546,9 +578,9 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut matrix = Matrix::new(0, 4, Vec::new());
     /// let vector = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
-    /// matrix.add_edge_vec(vector);
+    /// matrix.add_edge_vec(&vector);
     /// ```
-    pub fn add_edge_vec(&mut self, edge: Vec<f64>) {
+    pub fn add_edge_vec(&mut self, edge: &[f64]) {
         assert_eq!(6, edge.len());
         self.add_point(edge[0], edge[1], edge[2]);
         self.add_point(edge[3], edge[4], edge[5]);
@@ -559,6 +591,9 @@ impl Matrix {
     /// # Arguments
     ///
     /// * `point` - a mutable vector that has three floats, which will be append to the [Matrix]
+    ///
+    /// # Panics
+    /// If the length of Vector is not equal to the length of rows
     ///
     /// # Examples
     ///
@@ -584,6 +619,9 @@ impl Matrix {
     /// # Arguments
     ///
     /// * `other` - A reference to a Matrix with the new dataset
+    ///
+    /// # Panics
+    /// If the rows of both matrices are not equal
     ///
     /// # Examples
     ///
@@ -677,9 +715,9 @@ impl Matrix {
     ///
     ///
     /// * `p0` - a point (x, y) that represents the start of the curve
-    /// * `p1` - a point (x, y) that represents the start of the curve
-    /// * `r0` - the slope of p0
-    /// * `r1` - the slope of p1
+    /// * `p1` - a point (x, y) that represents the first control point of the curve
+    /// * `p2` - a point (x, y) that represents the second control point of the curve
+    /// * `p3` - a point (x, y) that represents the end of the curve
     ///
     pub fn add_bezier3(&mut self, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64), p3: (f64, f64)) {
         // (-P0 + 3P1 - 3P2 + P3)t^3 + (3P0 - 6P1 + 3P2)t^2 + (-3P0 + 3P1)t + P0
@@ -702,6 +740,45 @@ impl Matrix {
             0.001,
         );
     }
+    fn generate_n_degree_bezizer_polynomials_coeff(n_degree: u8, points: &[f64]) -> Vec<f64> {
+        // let points_matrix = Matrix::new(n_degree.into(), 1, points);
+        //
+        // let basis: Matrix;
+        todo!()
+        // let mut coeffs: Vec<f64> = Vec::new();
+
+        // for i in 0..=n_degree {
+        //     coeffs.push(binom(n_degree.into(), i.into()))
+        // }
+
+        // return (basis * points_matrix).data().to_vec();
+    }
+
+    // #[test]
+    // fn
+
+    fn generate_n_degree_bezizer_fun(n_degree: u8, coeffs: &[f64]) -> impl Fn(f64) -> f64 {
+        move |x| x
+    }
+
+    /// Adds an n-th degree bezier curve to Matrix
+    ///
+    /// # Arguments
+    ///
+    ///
+    /// * `n` - a u8 that represents the degree of the bezier curve
+    /// * `points` - a list that has the control, start, and end xy corrdinates
+    ///
+    pub fn add_beziern(&mut self, n_degree: u8, x_points: &[f64], y_points: &[f64]) {
+        todo!()
+        // let x_coeffs = generate_n_degree_bezizer_polynomials_coeff(n_degree, x_points);
+        // let y_coeffs = generate_n_degree_bezizer_polynomials_coeff(n_degree, y_points);
+        //
+        // let t_nth_bezier_x = generate_n_degree_bezizer_fun(n_degree, x_coeffs);
+        // let t_nth_bezier_y = generate_n_degree_bezizer_fun(n_degree, y_coeffs);
+
+        // self.add_parametric_curve(t_nth_bezier_x, t_nth_bezier_y, 0.0, 0.001);
+    }
 }
 
 impl Matrix {
@@ -712,6 +789,9 @@ impl Matrix {
     /// # Arguments
     ///
     /// * `other` - A reference to a Matrix to be multipled with self
+    ///
+    /// # Panics
+    /// If the length of cols of self is not equal to the rows of other
     ///
     /// # Examples
     ///
@@ -745,6 +825,9 @@ impl Matrix {
     ///
     /// * `other` - A reference to a Matrix to be multipled with self
     ///
+    /// # Panics
+    /// If the length of rows of self is not equal to the cols of other
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -775,6 +858,9 @@ impl Matrix {
     ///
     /// * `vector` - A mutable vector that will be mutliplied with self.
     ///
+    /// # Panics
+    /// Currenlty only supports identity matrices
+    ///
     /// # Examples
     ///
     /// Basic usage:
@@ -794,7 +880,7 @@ impl Matrix {
         let copy = vector;
         for (i, element) in vector.data.iter_mut().enumerate().take(3) {
             *element =
-                self.get(0, i) * copy[0] + self.get(1, i) * copy[1] + self.get(2, i) * copy[2]
+                self.get(0, i) * copy[0] + self.get(1, i) * copy[1] + self.get(2, i) * copy[2];
         }
     }
 }
@@ -822,7 +908,7 @@ impl AddAssign<Self> for Matrix {
             self.cols == other.cols && self.rows == other.rows,
             "To add Matices must be the same size"
         );
-        self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a += b)
+        self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a += b);
     }
 }
 
@@ -839,19 +925,19 @@ impl AddAssign<&Self> for Matrix {
 
 impl AddAssign<f64> for Matrix {
     fn add_assign(&mut self, other: f64) {
-        self.iter_mut().for_each(|e| *e += other)
+        self.iter_mut().for_each(|e| *e += other);
     }
 }
 
 impl AddAssign<[f64; 3]> for Matrix {
     fn add_assign(&mut self, other: [f64; 3]) {
-        self.add_point(other[0], other[1], other[2])
+        self.add_point(other[0], other[1], other[2]);
     }
 }
 
 impl AddAssign<Vec<f64>> for Matrix {
     fn add_assign(&mut self, other: Vec<f64>) {
-        self.add_edge_vec(other)
+        self.add_edge_vec(&other);
     }
 }
 
@@ -877,13 +963,13 @@ impl SubAssign for Matrix {
             self.cols == other.cols && self.rows == other.rows,
             "To subtract Matices must be the same size"
         );
-        self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a -= b)
+        self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a -= b);
     }
 }
 
 impl SubAssign<f64> for Matrix {
     fn sub_assign(&mut self, other: f64) {
-        self.iter_mut().for_each(|e| *e -= other)
+        self.iter_mut().for_each(|e| *e -= other);
     }
 }
 
@@ -923,7 +1009,7 @@ impl MulAssign<&Self> for Matrix {
 impl MulAssign<f64> for Matrix {
     fn mul_assign(&mut self, other: f64) {
         self.iter_by_point_mut()
-            .for_each(|row| row.iter_mut().for_each(|e| *e *= other))
+            .for_each(|row| row.iter_mut().for_each(|e| *e *= other));
     }
 }
 
@@ -938,20 +1024,21 @@ impl Div for Matrix {
 impl DivAssign<f64> for Matrix {
     fn div_assign(&mut self, other: f64) {
         self.iter_by_point_mut()
-            .for_each(|row| row.iter_mut().for_each(|e| *e /= other))
+            .for_each(|row| row.iter_mut().for_each(|e| *e /= other));
     }
 }
 
 // other operators
 impl Matrix {
     /// Returns the sum of a matrix data
+    #[must_use]
     pub fn sum(&self) -> f64 {
         self.iter().sum()
     }
 
     /// applies the absolute value to each point in matrix's data
     pub fn abs(&mut self) {
-        self.data = self.iter_mut().map(|x| x.abs()).collect()
+        self.data = self.iter_mut().map(|x| x.abs()).collect();
     }
 }
 
@@ -981,7 +1068,7 @@ mod tests {
         let bruh = edge.transpose();
         println!("{}", ident);
         println!("{:?}", ident);
-        assert!(ident != bruh, "Not Equal")
+        assert!(ident != bruh, "Not Equal");
         // assert_eq!(edge.data, bruh.data)
     }
 
@@ -993,7 +1080,7 @@ mod tests {
         let mut points = edge.iter_by_point();
         println!("{:?}", points.next());
         println!("{:?}", points.next());
-        assert_eq!(row_one, nums[3..6])
+        assert_eq!(row_one, nums[3..6]);
     }
 
     #[test]
@@ -1005,7 +1092,7 @@ mod tests {
         assert_eq!(
             ident,
             Matrix::new(3, 3, vec![0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0])
-        )
+        );
     }
 
     #[test]
@@ -1018,7 +1105,7 @@ mod tests {
         // let src: Vec<String> = ident.iter().map(|x| format!("{}", x)).collect();
         // println!("{:?}",src)
         // src.map(|x| println!("{}", x))
-        assert_eq!(5 / ident.rows, 5 % ident.cols)
+        assert_eq!(5 / ident.rows, 5 % ident.cols);
     }
 
     #[test]
@@ -1092,7 +1179,7 @@ mod tests {
         let m2_contents = vec![5.0, -3.0];
         let m2 = Matrix::new(2, 1, m2_contents);
 
-        assert_eq!(m1 * m2, Matrix::new(3, 1, vec![-2.0, 1.0, 71.0]))
+        assert_eq!(m1 * m2, Matrix::new(3, 1, vec![-2.0, 1.0, 71.0]));
     }
 
     #[test]
@@ -1119,7 +1206,7 @@ mod tests {
         let h = Matrix::new(4, 4, data.to_vec());
         let her = Matrix::hermite();
         println!("{}", her);
-        println!("{}", h)
+        println!("{}", h);
     }
 
     #[test]
@@ -1137,7 +1224,7 @@ mod tests {
         let a = Matrix::new(2, 2, vec![-15.0, 14.0, 70.0, 91.0]);
         println!("{}", a);
         let b = a.transpose();
-        println!("{}", b)
+        println!("{}", b);
     }
 
     #[test]
@@ -1149,6 +1236,6 @@ mod tests {
         let m2 = Matrix::new(2, 2, m2_contents);
 
         let correct = Matrix::new(2, 2, vec![-5.0, -35.0, 165.0, 189.0]);
-        assert_eq!(m1 * m2, correct)
+        assert_eq!(m1 * m2, correct);
     }
 }

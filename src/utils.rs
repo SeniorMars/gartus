@@ -11,6 +11,10 @@ use crate::graphics::{
 /// * `file_name_prefix` - The prefix of the name the animation belongs to
 /// * `output` - The final name of the animation
 ///
+/// # Panics
+/// * If there is no animation directory
+/// * If animation is not turned on
+///
 /// # Examples
 ///
 /// Basic usage:
@@ -31,15 +35,22 @@ where
     Rgb: From<C>,
 {
     println!("Making a new animation: {}", output);
+    let animation_prefix = if canvas.config().animation() {
+        canvas.config().file_prefix()
+    } else {
+        output.split('.').next().unwrap()
+    };
+
     Command::new("convert")
         .arg("-delay")
         .arg("1.2")
-        .arg(&format!("./anim/{}*", canvas.config().file_prefix()))
+        .arg(&format!("./anim/{}*", animation_prefix))
         .arg(output)
         .spawn()
         .unwrap()
         .wait()
         .expect("Could not make animation");
+    println!("Animation completed");
 }
 
 /// Open's a given animation

@@ -25,16 +25,19 @@ impl Ray {
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
     /// ```
+    #[must_use]
     pub fn new(origin: Vector, direction: Vector) -> Self {
         Self { origin, direction }
     }
 
     /// Get a reference to the ray's direction.
+    #[must_use]
     pub fn direction(&self) -> &Vector {
         &self.direction
     }
 
     /// Get a reference to the ray's orgin.
+    #[must_use]
     pub fn orgin(&self) -> &Vector {
         &self.origin
     }
@@ -55,6 +58,7 @@ impl Ray {
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
     /// let new_loc = ray.at(10.00);
+    #[must_use]
     pub fn at(&self, t: f64) -> Vector {
         self.origin + t * self.direction
     }

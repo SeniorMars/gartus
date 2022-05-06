@@ -1,5 +1,6 @@
 /// Provides a way to configure [Canvas]
 #[derive(Debug, Default, Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct CanvasConfig {
     /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
     pub upper_left_system: bool,
@@ -14,6 +15,7 @@ pub struct CanvasConfig {
 
 impl CanvasConfig {
     /// constructor for a new config
+    #[must_use]
     pub fn new(upper_left_system: bool, pos_glitch: bool, wrapped: bool) -> Self {
         Self {
             upper_left_system,
@@ -26,31 +28,39 @@ impl CanvasConfig {
     /// Sets an animation config to the current config
     pub fn set_animation(&mut self, animation_config: AnimationConfig) {
         self.animation_config = animation_config;
-        assert!(self.animation())
     }
 
     /// Get a reference to the animation config's name.
+    #[must_use]
     pub fn name(&self) -> &str {
         self.animation_config.file_prefix.as_ref()
     }
 
     /// Get a reference to the animation config's file prefix.
+    /// # Panics
+    /// If animation is not on
+    #[must_use]
     pub fn file_prefix(&self) -> &str {
+        assert!(self.animation());
         self.animation_config.file_prefix.as_ref()
     }
 
     /// Get the animation config's anim index.
+    #[must_use]
     pub fn anim_index(&self) -> usize {
         self.animation_config.anim_index
     }
 
     /// Increases the animation config's anim index.
+    /// # Panics
+    /// If animation is off
     pub fn increase_anim_index(&mut self) {
         assert!(self.animation());
-        self.animation_config.anim_index += 1
+        self.animation_config.anim_index += 1;
     }
 
     /// Get the animation config's animation.
+    #[must_use]
     pub fn animation(&self) -> bool {
         self.animation_config.animation
     }
@@ -63,10 +73,11 @@ impl CanvasConfig {
 
 /// Provides a way to animating on canvas [Canvas]
 /// Make sure to access via config.
-/// Construct one using Canvas.set_animation()
+/// Construct one using `Canvas.set_animation`()
 /// Works like this because technically you don't need the other options in config
 #[allow(dead_code)]
 #[derive(Debug, Default, Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct AnimationConfig {
     /// A boolean that will determine whether to create an animation
     animation: bool,
@@ -78,6 +89,7 @@ pub struct AnimationConfig {
 
 impl AnimationConfig {
     /// Sets up the configuration for animation
+    #[must_use]
     pub fn new(file_prefix: String) -> Self {
         Self {
             animation: true,

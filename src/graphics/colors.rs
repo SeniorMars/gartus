@@ -93,16 +93,19 @@ impl Rgb {
     /// use crate::gartus::graphics::colors::Rgb;
     /// let color = Rgb::new(0, 64, 255);
     /// ```
+    #[must_use]
     pub fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
 
     /// Returns the values of a pixel
+    #[must_use]
     pub fn values(&self) -> (u8, u8, u8) {
         (self.red, self.green, self.blue)
     }
 
     /// Returns the values of a pixel in an array to be bytes
+    #[must_use]
     pub fn to_be_bytes(&self) -> [u8; 3] {
         [self.red, self.green, self.blue]
     }
@@ -110,6 +113,7 @@ impl Rgb {
 
 impl ColorSpace for Rgb {}
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
         Self {
@@ -121,6 +125,11 @@ impl From<Vector> for Rgb {
 }
 
 #[allow(clippy::many_single_char_names)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
 impl From<Hsl> for Rgb {
     fn from(hsl: Hsl) -> Self {
         let (r, g, b);
@@ -135,10 +144,10 @@ impl From<Hsl> for Rgb {
         } else {
             let hue_conversion = |p: f32, q: f32, mut t: f32| {
                 if t < 0.0 {
-                    t += 1.0
+                    t += 1.0;
                 }
                 if t > 1.0 {
-                    t -= 1.0
+                    t -= 1.0;
                 }
                 if t < (1.0 / 6.0) {
                     return p + (q - p) * 6.0 * t;
@@ -199,6 +208,7 @@ impl Hsl {
     /// use crate::gartus::graphics::colors::Hsl;
     /// let color = Hsl::new(10, 50, 0);
     /// ```
+    #[must_use]
     pub fn new(hue: u16, saturation: u16, light: u16) -> Self {
         Self {
             hue: hue.clamp(0, 359),
@@ -209,6 +219,11 @@ impl Hsl {
 }
 
 #[allow(clippy::many_single_char_names)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
 impl From<Rgb> for Hsl {
     fn from(rgb: Rgb) -> Self {
         let (mut h, s, l);
@@ -293,6 +308,6 @@ mod test {
                 green: 4,
                 blue: 0
             }
-        )
+        );
     }
 }

@@ -30,6 +30,7 @@ impl Vector {
     /// use crate::gartus::gmath::vector::Vector;
     /// let vec3 = Vector::new(0.0, 0.0, 0.0);
     /// ```
+    #[must_use]
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self { data: [x, y, z] }
     }
@@ -75,6 +76,7 @@ impl Vector {
     /// let two = Vector::new(1.0, 2.0, 3.0);
     /// let dot = one.dot(two);
     /// ```
+    #[must_use]
     pub fn dot(&self, other: Vector) -> f64 {
         self[0] * other[0] + self[1] * other[1] + self[2] * other[2]
     }
@@ -89,6 +91,7 @@ impl Vector {
     /// let one = Vector::new(1.0, 1.0, 1.0);
     /// let length = one.length();
     /// ```
+    #[must_use]
     pub fn length(self) -> f64 {
         self.dot(self).sqrt()
     }
@@ -219,6 +222,6 @@ mod test {
         let two = Vector::new(1.0, 2.0, 3.0);
         let cross = one.cross(two);
         println!("{}", cross);
-        println!("{:.6}", cross.length())
+        println!("{:.6}", cross.length());
     }
 }

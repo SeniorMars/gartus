@@ -3,7 +3,7 @@
 
 /// Includes the [Pixel] and [HSL] struts, which are the basic foundation to color
 pub mod colors;
-/// Includes [CanvasConfig] and [AnimationConfig] to configure [Canvas]
+/// Includes [`CanvasConfig`] and [`AnimationConfig`] to configure [Canvas]
 pub mod config;
 /// Includes the [Canvas] strut, which represents your "drawing board".
 pub mod display;

@@ -103,11 +103,16 @@ where
         self.direction_angle = (self.direction_angle + direction_angle) % 360.0;
     }
 
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_lossless,
+        clippy::cast_sign_loss
+    )]
     /// Move the turtle forwards or backwards
     ///
     /// # Notes
     ///
-    /// If is_drawing is true, then it will also draw a line from the old corrdinates and the new
+    /// If `is_drawing` is true, then it will also draw a line from the old corrdinates and the new
     /// corrdinates.
     ///
     /// # Arguments
@@ -129,27 +134,36 @@ where
     /// ```
     pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: i32) {
         let (dx, dy) = polar_to_xy(step.into(), self.direction_angle);
-        let (new_x, new_y) = (self.x as f64 + dx, self.y as f64 + dy);
+        let (new_x, new_y) = (f64::from(self.x) + dx, f64::from(self.y) + dy);
         if self.pen_mode {
-            canvas.draw_line(self.color, self.x as f64, self.y as f64, new_x, new_y)
+            canvas.draw_line(
+                self.color,
+                f64::from(self.x),
+                f64::from(self.y),
+                new_x,
+                new_y,
+            );
         }
 
         self.x = new_x.round() as u32;
         self.y = new_y.round() as u32;
-        self.corrdinates.push((self.x, self.y))
+        self.corrdinates.push((self.x, self.y));
     }
 
     /// Set new corrdinate for turtle
     ///
     /// # Notes
     ///
-    /// If is_drawing is true, then it will also draw a line from the old corrdinates and the new
+    /// If `is_drawing` is true, then it will also draw a line from the old corrdinates and the new
     /// corrdinates
     ///
     /// # Arguments
     ///
     /// * `new_x` - A u32 that represents the new x corrdinate of the turtle
     /// * `new_y` - A u32 that represents the new y corrdinate of the turtle
+    ///
+    /// # Panics
+    /// * If the arguments are greater than the canvas dimensions
     ///
     /// # Examples
     ///
@@ -166,15 +180,14 @@ where
     pub fn goto(&mut self, canvas: &mut Canvas<C>, new_x: u32, new_y: u32) {
         assert!(new_x < canvas.width());
         assert!(new_y < canvas.height());
-        assert!(new_x * new_y < canvas.height() * canvas.width());
         if self.pen_mode {
             canvas.draw_line(
                 self.color,
-                self.x as f64,
-                self.y as f64,
-                new_x as f64,
-                new_y as f64,
-            )
+                f64::from(self.x),
+                f64::from(self.y),
+                f64::from(new_x),
+                f64::from(new_y),
+            );
         }
 
         self.corrdinates.push((new_x, new_y));

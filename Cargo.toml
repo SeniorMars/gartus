@@ -16,6 +16,7 @@ incremental = true
 lto = "off"
 
 [dependencies]
+rayon = "1.5.2"
 # num = "0.3.1"
 
 [dev-dependencies]

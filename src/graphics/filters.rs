@@ -2,6 +2,11 @@ use super::{colors::Rgb, display::Canvas};
 
 impl Canvas<Rgb> {
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless
+    )]
     /// Applies a grayscale filter to the current canvas and results in a new canvas
     ///
     /// # Examples
@@ -18,12 +23,17 @@ impl Canvas<Rgb> {
         filtered_image.iter_mut().for_each(|pixel| {
             let (r, g, b) = pixel.values();
             let average = ((r as f32 + g as f32 + b as f32) / 3.0).round() as u8;
-            *pixel = Rgb::new(average, average, average)
+            *pixel = Rgb::new(average, average, average);
         });
         filtered_image
     }
 
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless
+    )]
     /// Applies the sepia filter to the current canvas
     ///
     /// # Examples
@@ -43,7 +53,7 @@ impl Canvas<Rgb> {
             let sepia_green =
                 (0.349 * r as f32 + 0.686 * g as f32 + 0.168 * b as f32).round() as u8;
             let sepia_blue = (0.272 * r as f32 + 0.534 * g as f32 + 0.131 * b as f32).round() as u8;
-            *pixel = Rgb::new(sepia_red, sepia_green, sepia_blue)
+            *pixel = Rgb::new(sepia_red, sepia_green, sepia_blue);
         });
         filtered_image
     }
@@ -71,6 +81,7 @@ impl Canvas<Rgb> {
         filtered_image
     }
 
+    #[allow(clippy::cast_possible_wrap)]
     fn grid(i: usize, width: isize) -> [isize; 9] {
         // it could be that we get negative numbers, so we must be sure to
         // adjust for that. The algorithm would function differently if don't adjust for this,
@@ -95,6 +106,13 @@ impl Canvas<Rgb> {
     }
 
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless,
+        clippy::cast_possible_wrap,
+        clippy::similar_names
+    )]
     /// Applies a blur filter to the current canvas and results in a new canvas
     ///
     /// # Examples
@@ -115,7 +133,7 @@ impl Canvas<Rgb> {
             let mut counter = 0f32;
             let (mut red_sum, mut green_sum, mut blue_sum) = (0u16, 0u16, 0u16);
             let blur_grid = Canvas::grid(i, width);
-            blur_grid.iter().for_each(|element| {
+            for element in &blur_grid {
                 let index = *element;
                 if index >= 0 && index < size {
                     let pixel = self[index as usize];
@@ -124,7 +142,7 @@ impl Canvas<Rgb> {
                     blue_sum += pixel.blue as u16;
                     counter += 1.0;
                 }
-            });
+            }
             (
                 (red_sum as f32 / counter).round() as u8,
                 (green_sum as f32 / counter).round() as u8,
@@ -143,6 +161,13 @@ impl Canvas<Rgb> {
     }
 
     #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless,
+        clippy::cast_possible_wrap,
+        clippy::similar_names
+    )]
     /// Applies a sobel filter to the current canvas and results in a new canvas
     ///
     /// ```
@@ -221,5 +246,5 @@ fn blur_test() {
     ];
     let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
     canvas.fill_canvas(colors);
-    println!("{}", canvas.blur())
+    println!("{}", canvas.blur());
 }
