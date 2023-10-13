@@ -36,13 +36,13 @@ mod test {
         let cxmax = 1f32;
         let cymin = -1.5f32;
         let cymax = 1.5f32;
-        let scalex = (cxmax - cxmin) / HEIGHT as f32;
-        let scaley = (cymax - cymin) / WIDTH as f32;
+        let scalex = (cxmax - cxmin) / WIDTH as f32;
+        let scaley = (cymax - cymin) / HEIGHT as f32;
         let mut mandelcos = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
+            let cx = cxmin + x as f32 * scalex;
             (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
                 let cy = cymin + y as f32 * scaley;
 
                 let c = Complex::new(cx, cy);
@@ -63,9 +63,10 @@ mod test {
             });
         });
         mandelcos.fill_canvas(data);
-        let cos = mandelcos.sobel();
-        cos.display().expect("Could not render image");
-        cos.save_extension("./pics/sobel_cos.png")
+        // let cos = mandelcos.sobel();
+        mandelcos.display().expect("Could not render image");
+        mandelcos
+            .save_extension("./pics/sobel_cos.png")
             .expect("Could not save image");
     }
 
@@ -124,8 +125,8 @@ mod test {
         let mut mandel = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
+            let cx = cxmin + x as f32 * scalex;
             (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
                 let cy = cymin + y as f32 * scaley;
 
                 let c = Complex::new(cx, cy);
@@ -146,6 +147,7 @@ mod test {
             });
         });
         mandel.fill_canvas(data);
+        mandel.display().expect("Could not render image");
         let brot = mandel.sobel();
         brot.save_extension("./pics/mandel.png")
             .expect("Could not save image")

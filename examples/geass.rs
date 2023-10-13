@@ -63,7 +63,7 @@ fn geass() {
     // img.display().expect("Could not display image");
     let file_name = "./geass.gif";
     utils::animation(&img, file_name);
-    // utils::view_animation(file_name)
+    utils::view_animation(file_name)
 }
 
 pub fn main() {

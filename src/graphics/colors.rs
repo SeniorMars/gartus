@@ -117,9 +117,9 @@ impl ColorSpace for Rgb {}
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
         Self {
-            red: (255.999 * color[0] as f64) as u8,
-            green: (255.999 * color[1] as f64) as u8,
-            blue: (255.999 * color[2] as f64) as u8,
+            red: (255.999 * color[0]) as u8,
+            green: (255.999 * color[1]) as u8,
+            blue: (255.999 * color[2]) as u8,
         }
     }
 }

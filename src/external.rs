@@ -51,7 +51,7 @@ pub fn ppmify(
     let ext = path
         .extension()
         .and_then(OsStr::to_str)
-        .unwrap_or_else(|| panic!("Check your file input: {:?}", path));
+        .unwrap_or_else(|| panic!("Check your file input: {path:?}"));
     let correct_ext = path.with_extension("ppm");
     if ext != "ppm" {
         let converted = correct_ext.to_str().expect("Cannot get new file name");
@@ -64,7 +64,7 @@ pub fn ppmify(
     Ok(parse_ppm(&correct_ext, pos_glitch))
 }
 
-fn vec_to_int(vec: Vec<u8>) -> u32 {
+fn bytes_to_int(vec: Vec<u8>) -> u32 {
     #[allow(clippy::cast_possible_truncation)]
     let mut length = vec.len() as u32;
     let mut sum = 0u32;
@@ -88,6 +88,7 @@ fn byte_vec_fill(bytes: &mut VecDeque<u8>, vec: &mut Vec<u8>) {
 }
 
 fn ascii_to_num(byte: u8) -> u8 {
+    println!("{byte}");
     match byte {
         48 => 0,
         49 => 1,
@@ -129,14 +130,14 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Canvas<Rgb> {
         byte_vec_fill(&mut bytes, &mut height_vec);
     }
 
-    let width = vec_to_int(width_vec);
-    let height = vec_to_int(height_vec);
+    let width = bytes_to_int(width_vec);
+    let height = bytes_to_int(height_vec);
 
     let mut color_depth_vec = Vec::new();
     byte_vec_fill(&mut bytes, &mut color_depth_vec);
 
     // Note due to the spec, this will never overflow or other unspecified behavior
-    let color_depth: u16 = vec_to_int(color_depth_vec)
+    let color_depth: u16 = bytes_to_int(color_depth_vec)
         .try_into()
         .expect("File does not follow ppm spec");
 
@@ -154,13 +155,13 @@ fn parse_ppm(path: &Path, pos_glitch: bool) -> Canvas<Rgb> {
                 byte_vec_fill(&mut bytes, &mut green_vec);
                 byte_vec_fill(&mut bytes, &mut blue_vec);
                 let (red, green, blue) = (
-                    vec_to_int(red_vec)
+                    bytes_to_int(red_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
-                    vec_to_int(green_vec)
+                    bytes_to_int(green_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
-                    vec_to_int(blue_vec)
+                    bytes_to_int(blue_vec)
                         .try_into()
                         .expect("File does not follow ppm spec"),
                 );
@@ -187,6 +188,20 @@ fn external_fun() {
     use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
     let mut canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
+    canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
+    canvas.display().expect("Could not display image");
+    let sobel = canvas.sobel();
+    sobel.display().expect("Could not display image");
+    sobel
+        .save_extension("corro.png")
+        .expect("Could not save image");
+}
+
+#[test]
+fn command_block() {
+    use crate::graphics::config::CanvasConfig;
+    let pos_glitch = true;
+    let mut canvas = ppmify("./CAR.png", pos_glitch).expect("Implmentation is wrong");
     canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();

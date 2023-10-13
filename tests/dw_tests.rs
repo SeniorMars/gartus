@@ -89,7 +89,7 @@ fn dw_line_test() -> io::Result<()> {
 
     // saving
     // screen.animation("test")
-    screen.display()?;
+    // screen.display()?;
     screen.save_binary("./pics/binary2.ppm")?;
     screen.save_ascii("./pics/ascii2.ppm")?;
     screen.save_extension("./pics/img.png")

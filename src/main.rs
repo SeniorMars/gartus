@@ -1,4 +1,4 @@
-// use gartus::gmath::ray::Ray;
+// / use gartus::gmath::ray::Ray;
 // use gartus::gmath::vector::{Point, Vector};
 use gartus::graphics::colors::Rgb;
 use gartus::graphics::config::CanvasConfig;
@@ -50,8 +50,10 @@ pub fn main() {
     img.draw_lines(&off_center_transformation.mult_matrix(&geass));
     img.fill(406, 413, &white, &white);
     img.set_line_pixel(&Rgb::new(191, 70, 61));
+    img.display().unwrap();
+
     let back_translation = &Matrix::translate(400.0, 400.0, 0.0);
-    for i in 0..2 {
+    for i in 0..180 {
         let mut copy = img.clone();
         copy.draw_lines(
             &Matrix::rotate_y(i as f64)

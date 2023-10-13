@@ -6,10 +6,12 @@ use gartus::{
 pub fn make_pory() {
     let mut porygon = Canvas::new_with_bg(512, 512, 255, Rgb::new(17, 46, 81));
     let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
+
     porygon.set_config(CanvasConfig {
         upper_left_system: true,
         ..Default::default()
     });
+
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
         604, 621, 604, 621, 622, 654, 622, 654, 604, 621, 604, 621, 540, 607, 540, 607, 552, 661,
@@ -68,8 +70,10 @@ pub fn make_pory_anim() {
     let mut translate = Matrix::translate(0.0, 45.0, 0.0);
     let file_prefix = "porygon";
     let mut porygon = Canvas::new_with_bg(512, 512, 255, purplish);
-    porygon.set_config(CanvasConfig::new(true, false));
+
+    porygon.set_config(CanvasConfig::new(true, false, false));
     porygon.set_animation(AnimationConfig::new(file_prefix.to_string()));
+
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
         604, 621, 604, 621, 622, 654, 622, 654, 604, 621, 604, 621, 540, 607, 540, 607, 552, 661,
@@ -127,6 +131,7 @@ pub fn make_pory_anim() {
         porygon
             .save_binary(&binary_name)
             .expect("Could not save to file");
-    }
+    };
+    // utils::view_animation(&format!("{}{:08}.ppm", file_prefix, porygon.config().anim_index() - 1));
     utils::animation(&porygon, "porygon.gif");
 }

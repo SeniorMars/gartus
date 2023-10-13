@@ -1,6 +1,6 @@
 {
   "configurations": {
-    "rust - lldb": {
+    "rust-lldb": {
       "adapter": "CodeLLDB",
       "configuration": {
         "type": "lldb",
@@ -16,7 +16,7 @@
         }
       }
     },
-    "rust - gdb": {
+    "rust-gdb": {
       "adapter": "vscode-cpptools",
       "configuration": {
         "request": "launch",

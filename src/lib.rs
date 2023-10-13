@@ -26,9 +26,21 @@ pub mod graphics;
 /// This module hosts a [Parser] that allows an image to be created through
 /// a detailed specification. More information found in the module.
 pub mod parser;
-/// prelude with
+/// prelude
 pub mod prelude;
 /// This module provides utilities that might be needed to use more
 /// advance features that are not fully integrated into parser
 /// or graphics modules.
 pub mod utils;
+
+#[test]
+fn it_works() {
+
+    let x = 1 + 1 + 1;
+    // while true {
+    //     break
+    //     continue
+    // }
+
+    // let string = "Hello, world!".to_string();
+}

@@ -83,24 +83,21 @@ impl fmt::Display for ParserError {
         match self {
             ParserError::MatrixError(line_num, line, matrx_type) => write!(
                 f,
-                "There was a error creating the {} matrix with line: {}:{}",
-                matrx_type, line, line_num
+                "There was a error creating the {matrx_type} matrix with line: {line}:{line_num}"
             ),
             ParserError::CommandError(line_num, line) => {
-                write!(f, "There was an unknown command: {}:{}", line, line_num)
+                write!(f, "There was an unknown command: {line}:{line_num}")
             }
             ParserError::ArugmentError(line_num, line) => {
                 write!(
                     f,
-                    "Read spec. There was an error with parsing the arugments in line: {}:{}",
-                    line, line_num
+                    "Read spec. There was an error with parsing the arugments in line: {line}:{line_num}"
                 )
             }
             ParserError::FileError(line_num, line, mssg) => {
                 write!(
                     f,
-                    "There was an error with the file: {} with line {}:{}",
-                    mssg, line, line_num
+                    "There was an error with the file: {mssg} with line {line}:{line_num}"
                 )
             }
         }
@@ -223,12 +220,9 @@ impl Parser {
                 }
                 "scale" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
-                    let args = match Parser::parse_as::<f64>(line) {
-                        Ok(args) => args,
-                        Err(_) => {
+                    let Ok(args) = Parser::parse_as::<f64>(line) else {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
-                        }
-                    };
+                        };
                     if args.len() == 3 {
                         let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
                         self.trans_matrix = &dilate_matrix * &self.trans_matrix;
@@ -238,12 +232,9 @@ impl Parser {
                 }
                 "move" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
-                    let args = match Parser::parse_as::<f64>(line) {
-                        Ok(args) => args,
-                        Err(_) => {
+                    let Ok(args) = Parser::parse_as::<f64>(line) else {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
-                        }
-                    };
+                        };
                     if args.len() == 3 {
                         let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
                         self.trans_matrix = &translation_matrix * &self.trans_matrix;
@@ -311,12 +302,9 @@ impl Parser {
                 }
                 "color" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
-                    let args = match Parser::parse_as::<u8>(line) {
-                        Ok(args) => args,
-                        Err(_) => {
+                    let Ok(args) = Parser::parse_as::<u8>(line) else {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
-                        }
-                    };
+                        };
                     if args.len() == 3 {
                         let color = Rgb::new(args[0], args[1], args[0]);
                         self.set_color(&color);
@@ -338,12 +326,9 @@ impl Parser {
                 }
                 "circle" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
-                    let args = match Parser::parse_as::<f64>(line) {
-                        Ok(args) => args,
-                        Err(_) => {
+                    let Ok(args) = Parser::parse_as::<f64>(line) else {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
-                        }
-                    };
+                        };
                     if args.len() == 4 {
                         self.edge_matrix
                             .add_circle(args[0], args[1], args[2], args[3], 0.001);
@@ -353,12 +338,9 @@ impl Parser {
                 }
                 "hermite" => {
                     let (line_num, line) = iter.next().expect("Error reading line");
-                    let args = match Parser::parse_as::<f64>(line) {
-                        Ok(args) => args,
-                        Err(_) => {
+                    let Ok(args) = Parser::parse_as::<f64>(line) else {
                             return Err(ParserError::ArugmentError(line_num, line.to_string()))
-                        }
-                    };
+                        };
                     if args.len() == 8 {
                         let p0 = (args[0], args[1]);
                         let p1 = (args[2], args[3]);

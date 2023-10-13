@@ -56,6 +56,7 @@ impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
     /// # Arguments
     ///
     /// * `step` - A f64 in the range of [0, 1] that details the step of the iterator
+
     pub fn values_iter(&'plife self, step: f64) -> impl Iterator<Item = (f64, f64)> + 'plife {
         ParametricIter::new(self, step)
     }

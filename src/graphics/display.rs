@@ -558,8 +558,7 @@ where
             self.height, self.width, self.color_depth
         )?;
         self.iter().enumerate().for_each(|(i, pixel)| {
-            writeln!(f, "(index: {}, value: {:?})", i, pixel)
-                .expect("Could not print pixel values");
+            writeln!(f, "(index: {i}, value: {pixel:?})").expect("Could not print pixel values");
         });
         Ok(())
     }
@@ -611,7 +610,7 @@ where
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
@@ -627,15 +626,8 @@ where
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            file.write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            file.write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            file.write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
-
-            // let bytes = Rgb::from(*pixel).to_be_bytes();
-            // file.write_all(&bytes).expect("Could not write as binary")
+            let bytes = rgb.to_be_bytes();
+            file.write_all(&bytes).expect("Could not write as binary");
         });
 
         Ok(())
@@ -650,7 +642,7 @@ where
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.save_extension("pics/test.png").expect("Could not save file")
@@ -680,15 +672,7 @@ where
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            stdin
-                .write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
+            stdin.write_all(&rgb.to_be_bytes()).expect("Could not write as binary");
             // let bytes = Rgb::from(*pixel).to_be_bytes();
             // stdin.write_all(&bytes).expect("Could not write as binary")
         });
@@ -699,7 +683,7 @@ where
     /// # Examples
     ///
     /// Basic usage:
-    /// ```
+    /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, 255, Rgb::default());
     /// image.display().expect("Could not display image")
@@ -732,17 +716,8 @@ where
         }
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            stdin
-                .write_all(&rgb.red.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.green.to_be_bytes())
-                .expect("Could not write as binary");
-            stdin
-                .write_all(&rgb.blue.to_be_bytes())
-                .expect("Could not write as binary");
-            // let bytes = Rgb::from(*pixel).to_be_bytes();
-            // stdin.write_all(&bytes).expect("Could not write as binary")
+            let bytes = rgb.to_be_bytes();
+            stdin.write_all(&bytes).expect("Could not write as binary");
         });
         stdin.flush()
     }

@@ -9,13 +9,16 @@ use rand::Rng;
 
 fn owl() {
     let mut rng = rand::thread_rng();
+
     let mut owl = Canvas::new(500, 500, 255, Rgb::new(255, 255, 255));
+
     owl.set_config(CanvasConfig {
         upper_left_system: true,
         ..Default::default()
     });
 
     owl.set_animation(AnimationConfig::new("owl".to_string()));
+
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,
         170, 325, 203, 341, 208, 352, 249, 363, 188, 384, 243, 378, 257, 389, 250, 363, 378, 482,

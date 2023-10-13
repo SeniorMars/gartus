@@ -34,7 +34,7 @@ where
     C: ColorSpace,
     Rgb: From<C>,
 {
-    println!("Making a new animation: {}", output);
+    println!("Making a new animation: {output}");
     let animation_prefix = if canvas.config().animation() {
         canvas.config().file_prefix()
     } else {
@@ -44,7 +44,7 @@ where
     Command::new("convert")
         .arg("-delay")
         .arg("1.2")
-        .arg(&format!("./anim/{}*", animation_prefix))
+        .arg(&format!("./anim/{animation_prefix}*"))
         .arg(output)
         .spawn()
         .unwrap()
@@ -71,7 +71,7 @@ pub fn view_animation(file_name: &str) {
     println!("Playing animation: {}", &file_name);
     // Command::new("animate")
     Command::new("open")
-        .arg(&file_name)
+        .arg(file_name)
         .spawn()
         .expect("Could not view animation");
 }

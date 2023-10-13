@@ -221,7 +221,7 @@ mod test {
         let one = Vector::new(1.0, 1.0, 1.0);
         let two = Vector::new(1.0, 2.0, 3.0);
         let cross = one.cross(two);
-        println!("{}", cross);
+        println!("{cross}");
         println!("{:.6}", cross.length());
     }
 }
