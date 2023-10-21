@@ -1,8 +1,9 @@
 use crate::gmath::vector::Vector;
-use std::{
-    cmp::{max, min},
-    fmt::Debug,
-};
+use std::fmt::Debug;
+
+#[cfg(feature = "colors")]
+use std::cmp::{max, min};
+
 /// A trait that is meant to bound [Display]
 pub trait ColorSpace: Copy + Default + PartialEq + Debug
 where
@@ -107,7 +108,42 @@ impl Rgb {
     /// Returns the values of a pixel in an array to be bytes
     #[must_use]
     pub fn to_be_bytes(&self) -> [u8; 3] {
-        [self.red, self.green, self.blue]
+        [
+            self.red.to_be_bytes()[0], // Convert red to 1-byte array and take the first byte
+            self.green.to_be_bytes()[0], // Convert green to 1-byte array and take the first byte
+            self.blue.to_be_bytes()[0], // Convert blue to 1-byte array and take the first byte
+        ]
+    }
+
+    pub(crate) fn name_to_const(color: &str) -> Option<Rgb> {
+        match color {
+            "black" => Some(Rgb::BLACK),
+            "red" => Some(Rgb::RED),
+            "green" => Some(Rgb::GREEN),
+            "blue" => Some(Rgb::BLUE),
+            "magenta" => Some(Rgb::MAGENTA),
+            "white" => Some(Rgb::WHITE),
+            "yellow" => Some(Rgb::YELLOW),
+            "cyan" => Some(Rgb::CYAN),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless
+    )]
+    /// Returns the luminance of a pixel
+    ///
+    /// * `rgb`: A [Rgb] that represents the pixel
+    pub fn luminance(self) -> u8 {
+        let red = self.red as f32;
+        let green = self.green as f32;
+        let blue = self.blue as f32;
+
+        (0.299 * red + 0.587 * green + 0.114 * blue).round() as u8
     }
 }
 
@@ -124,6 +160,7 @@ impl From<Vector> for Rgb {
     }
 }
 
+#[cfg(feature = "colors")]
 #[allow(clippy::many_single_char_names)]
 #[allow(
     clippy::cast_possible_truncation,
@@ -178,6 +215,7 @@ impl From<Hsl> for Rgb {
     }
 }
 
+#[cfg(feature = "colors")]
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 /// A convention that represents a Pixel based on hue, saturation, and light
 pub struct Hsl {
@@ -189,8 +227,10 @@ pub struct Hsl {
     pub light: u16,
 }
 
+#[cfg(feature = "colors")]
 impl ColorSpace for Hsl {}
 
+#[cfg(feature = "colors")]
 #[allow(dead_code)]
 impl Hsl {
     /// Returns a HSL that can be used in [Canvas]
@@ -218,6 +258,7 @@ impl Hsl {
     }
 }
 
+#[cfg(feature = "colors")]
 #[allow(clippy::many_single_char_names)]
 #[allow(
     clippy::cast_possible_truncation,
@@ -265,6 +306,54 @@ impl From<Rgb> for Hsl {
     }
 }
 
+#[cfg(feature = "colors")]
+#[allow(clippy::many_single_char_names)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
+impl From<Cmy> for Rgb {
+    fn from(cmy: Cmy) -> Self {
+        let (r, g, b);
+        let cyan = cmy.cyan as f32 / 100.0;
+        let magenta = cmy.magenta as f32 / 100.0;
+        let yellow = cmy.yellow as f32 / 100.0;
+
+        r = (1.0 - cyan) * 255.999;
+        g = (1.0 - magenta) * 255.999;
+        b = (1.0 - yellow) * 255.999;
+
+        Rgb {
+            red: r as u8,
+            green: g as u8,
+            blue: b as u8,
+        }
+    }
+}
+
+#[cfg(feature = "colors")]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+/// A convention that represents a Pixel based on Cyan, Magenta, and Yellow
+pub struct Cmy {
+    /// Cyan
+    pub cyan: u16,
+    /// Magenta
+    pub magenta: u16,
+    /// Yellow
+    pub yellow: u16,
+}
+
+#[cfg(feature = "colors")]
+impl ColorSpace for Cmy {}
+
+#[allow(clippy::many_single_char_names)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
+#[cfg(feature = "colors")]
 #[cfg(test)]
 mod test {
     use super::*;

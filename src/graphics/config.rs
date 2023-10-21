@@ -1,5 +1,5 @@
 /// Provides a way to configure [Canvas]
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct CanvasConfig {
     /// A boolean that will determine where "(0, 0)" - the start of the canvas - is located
@@ -11,6 +11,20 @@ pub struct CanvasConfig {
     pub pos_glitch: bool,
     /// Provides a way to animating on canvas [Canvas]
     pub animation_config: AnimationConfig,
+    /// Line width
+    pub line_width: f64,
+}
+
+impl Default for CanvasConfig {
+    fn default() -> Self {
+        Self {
+            upper_left_system: false,
+            wrapped: true,
+            pos_glitch: false,
+            animation_config: AnimationConfig::default(),
+            line_width: 1.0,
+        }
+    }
 }
 
 impl CanvasConfig {
@@ -22,6 +36,7 @@ impl CanvasConfig {
             wrapped,
             pos_glitch,
             animation_config: AnimationConfig::default(),
+            line_width: 1.0,
         }
     }
 
@@ -68,6 +83,16 @@ impl CanvasConfig {
     /// Set the canvas config's wrapped.
     pub fn set_wrapped(&mut self, wrapped: bool) {
         self.wrapped = wrapped;
+    }
+
+    /// Set the canvas config's line width.
+    pub fn set_line_width(&mut self, line_width: f64) {
+        self.line_width = line_width;
+    }
+
+    /// Get the canvas config's line width.
+    #[must_use] pub fn line_width(&self) -> f64 {
+        self.line_width
     }
 }
 

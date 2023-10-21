@@ -92,6 +92,8 @@ pub fn main() {
 //     const IMAGE_WIDTH: u64 = 256;
 //     const IMAGE_HEIGHT: u64 = (256_f64 / ASPECT_RATIO) as u64;
 //
+//     let test = Canvas::new(500, 500, 255, Rgb::default());
+//
 //     let viewport_height = 2.0;
 //     let viewport_width = ASPECT_RATIO * viewport_height;
 //     let focal_length = 1.0;

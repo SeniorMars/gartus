@@ -1,5 +1,9 @@
 use super::config::{AnimationConfig, CanvasConfig};
-use crate::graphics::colors::{ColorSpace, Hsl, Rgb};
+use crate::graphics::colors::{ColorSpace, Rgb};
+
+#[cfg(feature = "colors")]
+use crate::graphics::colors::Hsl;
+
 use core::{fmt, slice};
 use std::{
     fs::File,
@@ -273,6 +277,7 @@ where
     pub fn iter_row(&self) -> slice::ChunksExact<'_, C> {
         self.pixels.chunks_exact(self.width as usize)
     }
+
     /// Returns a mutable iterator that iterates over a specific row.
     ///
     /// # Examples
@@ -435,6 +440,7 @@ where
     }
 }
 
+#[cfg(feature = "colors")]
 impl Canvas<Hsl> {
     /// Sets the color of the drawing line to a different color given three ints.
     ///
@@ -585,18 +591,25 @@ where
     /// image.save_ascii("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
-        let mut file = BufWriter::new(File::create(file_name)?);
+        let mut file = File::create(file_name)?;
+        let mut buffer: Vec<u8> = Vec::new();
+
+        // Create the PPM header
         writeln!(
-            &mut file,
+            &mut buffer,
             "P3\n{} {}\n{}",
             self.width, self.height, self.color_depth
         )?;
 
-        self.iter().for_each(|pixel| {
+        // Convert pixels to ASCII format in memory
+        for pixel in self.iter() {
             let rgb = Rgb::from(*pixel);
-            write!(file, "{} {} {} ", rgb.red, rgb.green, rgb.blue)
-                .expect("File should always be written to");
-        });
+            write!(&mut buffer, "{} {} {} ", rgb.red, rgb.green, rgb.blue)?;
+        }
+
+        // Write the entire buffer to the file
+        file.write_all(&buffer)?;
+
         Ok(())
     }
 
@@ -616,19 +629,24 @@ where
     /// image.save_binary("pics/test.ppm").expect("Could not save file")
     /// ```
     pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
-        let mut file = BufWriter::new(File::create(file_name)?);
+        let mut file = File::create(file_name)?;
+        let mut buffer: Vec<u8> = Vec::new();
 
+        // Create the PPM header
         writeln!(
-            &mut file,
+            &mut buffer,
             "P6\n{} {}\n{}",
             self.width, self.height, self.color_depth
         )?;
 
-        self.iter().for_each(|pixel| {
+        // Convert pixels to bytes
+        for pixel in self.iter() {
             let rgb = Rgb::from(*pixel);
-            let bytes = rgb.to_be_bytes();
-            file.write_all(&bytes).expect("Could not write as binary");
-        });
+            buffer.extend_from_slice(&rgb.to_be_bytes());
+        }
+
+        // Write the entire buffer to the file
+        file.write_all(&buffer)?;
 
         Ok(())
     }
@@ -655,6 +673,7 @@ where
             .stdout(Stdio::piped())
             .spawn()?;
         let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
+        let mut buffer: Vec<u8> = Vec::new();
         // TODO: rewrite to be P6 implmentation
         if self.config.pos_glitch {
             writeln!(
@@ -672,12 +691,11 @@ where
 
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            stdin.write_all(&rgb.to_be_bytes()).expect("Could not write as binary");
-            // let bytes = Rgb::from(*pixel).to_be_bytes();
-            // stdin.write_all(&bytes).expect("Could not write as binary")
+            buffer.extend_from_slice(&rgb.to_be_bytes());
         });
-        stdin.flush()
+        stdin.write_all(&buffer)
     }
+
     /// Display the current state of the [Canvas].
     ///
     /// # Examples
@@ -689,36 +707,58 @@ where
     /// image.display().expect("Could not display image")
     /// ```
     pub fn display(&self) -> io::Result<()> {
-        // let command = if cfg!(target_os = "linux") {
-        //     "display"
-        // } else if cfg!(target_os = "windows") {
-        //     "windows"
-        // } else {
-        //     "display"
-        // };
-        let mut child = Command::new("display")
+        // Determine the correct display command for your OS
+        // Replace "display_command" with the actual command for your system
+        let display_command = if cfg!(target_os = "linux") {
+            "display"
+        } else if cfg!(target_os = "windows") {
+            "windows_command"
+        } else {
+            "display"
+        };
+
+        // Spawn the display command as a child process
+        // let mut child = Command::new(display_command)
+        //     .stdin(Stdio::piped())
+        //     .stdout(Stdio::piped())
+        //     .spawn()?;
+        let mut child = Command::new(display_command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
-        let mut stdin = BufWriter::new(child.stdin.as_mut().unwrap());
+
+        // Create a buffered writer for stdin
+        let stdin = child.stdin.take().expect("Could not get stdin");
+        let mut stdin = BufWriter::new(stdin);
+
+        let mut buffer: Vec<u8> = Vec::new();
+        // let mut captured: Vec<u8> = Vec::new();
+
+        // Write the PPM header information
         if self.config.pos_glitch {
             writeln!(
                 stdin,
-                "P6\n{} {}\n{}",
+                "P6\n{} {} {}",
                 self.height, self.width, self.color_depth
             )?;
         } else {
             writeln!(
                 stdin,
-                "P6\n{} {}\n{}",
+                "P6\n{} {} {}",
                 self.width, self.height, self.color_depth
             )?;
         }
+
+        // Write the image pixel data
         self.iter().for_each(|pixel| {
             let rgb = Rgb::from(*pixel);
-            let bytes = rgb.to_be_bytes();
-            stdin.write_all(&bytes).expect("Could not write as binary");
+            buffer.extend_from_slice(&rgb.to_be_bytes());
         });
-        stdin.flush()
+
+        stdin.write_all(&buffer).expect("Could not write to stdin");
+        let _ = stdin.flush();
+        // drop(stdin);
+        // dbg!(child.wait_with_output());
+        Ok(())
     }
 }

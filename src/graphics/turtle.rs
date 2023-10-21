@@ -19,6 +19,20 @@ where
     x: u32,
     /// Y corrdinate of where the Turtle is located
     y: u32,
+    state_stack: Vec<TurtleState<C>>,
+}
+
+/// Define a struct for `TurtleState`
+#[derive(Debug, Clone, Default)]
+pub struct TurtleState<C: ColorSpace>
+where
+    Rgb: From<C>,
+{
+    x: u32,
+    y: u32,
+    direction_angle: f64,
+    pen_mode: bool,
+    color: C,
 }
 
 #[allow(dead_code)]
@@ -59,6 +73,7 @@ where
             y,
             pen_mode: false,
             corrdinates,
+            state_stack: Vec::new(),
         }
     }
 
@@ -132,8 +147,8 @@ where
     /// let mut turle = Turtle::new(red, 0.0, 25, 25);
     /// turle.move_turtle(&mut drawing, -3);
     /// ```
-    pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: i32) {
-        let (dx, dy) = polar_to_xy(step.into(), self.direction_angle);
+    pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: f64) {
+        let (dx, dy) = polar_to_xy(step, self.direction_angle);
         let (new_x, new_y) = (f64::from(self.x) + dx, f64::from(self.y) + dy);
         if self.pen_mode {
             canvas.draw_line(
@@ -215,7 +230,54 @@ where
     pub fn corrdinates_mut(&mut self) -> &mut Vec<(u32, u32)> {
         &mut self.corrdinates
     }
+
+    /// Set the turtle's position.
+    pub fn set_position(&mut self, x: u32, y: u32) {
+        self.x = x;
+        self.y = y;
+        self.corrdinates.push((x, y));
+    }
+
+    /// Push the current state of the turtle onto the stack.
+    pub fn push_state(&mut self) {
+        // Save the current state of the turtle
+        let state = TurtleState {
+            x: self.x,
+            y: self.y,
+            color: self.color,
+            direction_angle: self.direction_angle,
+            pen_mode: self.pen_mode,
+        };
+        self.state_stack.push(state);
+    }
+
+    /// Pop the last state of the turtle from the stack.
+    pub fn pop_state(&mut self) {
+        if let Some(state) = self.state_stack.pop() {
+            self.x = state.x;
+            self.y = state.y;
+            self.color = state.color;
+            self.direction_angle = state.direction_angle;
+            self.pen_mode = state.pen_mode;
+        }
+    }
+
+    /// Get a reference to the turtle's state stack.
+    pub fn state_stack(&self) -> &Vec<TurtleState<C>> {
+        &self.state_stack
+    }
+
+    /// Rotate the turtle to the right.
+    pub fn rotate_right(&mut self, angle: f64) {
+        self.direction_angle -= angle;
+    }
+
+    /// Rotate the turtle to the left.
+    pub fn rotate_left(&mut self, angle: f64) {
+        self.direction_angle += angle;
+    }
 }
+
 #[cfg(test)]
 mod test {
     use crate::graphics::colors::Rgb;
@@ -231,7 +293,7 @@ mod test {
         turtle.set_draw_mode(true);
         for _ in 0..4 {
             turtle.set_heading(90.0);
-            turtle.move_turtle(&mut canvas, 10);
+            turtle.move_turtle(&mut canvas, 10.0);
         }
         // println!("{:?}", turtle.corrdinates());
         // canvas.display().expect("Could not render image")
@@ -249,13 +311,13 @@ mod test {
         );
         let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
         turtle.set_draw_mode(true);
-        let mut distance = 1;
+        let mut distance = 1.0;
         let mut flag = 175;
         while flag > 0 {
             turtle.move_turtle(&mut canvas, distance);
             turtle.set_heading(120.0);
             turtle.set_heading(1.0);
-            distance += 1;
+            distance += 1.0;
             flag -= 1;
         }
         canvas

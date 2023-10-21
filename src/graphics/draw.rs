@@ -127,6 +127,7 @@ where
     /// let color = Rgb::new(0, 64, 255);
     /// image.draw_line(color, 0.0, 0.0, 24.0, 24.0)
     /// ```
+    #[allow(clippy::cast_possible_truncation)]
     pub fn draw_line(&mut self, color: C, x0: f64, y0: f64, x1: f64, y1: f64) {
         if self.config.animation() {
             {
@@ -134,18 +135,22 @@ where
                 this.increase_anim_index();
             }
         }
+
+        let line_width = self.config.line_width;
+
         let (x0, y0, x1, y1) = if x0 > x1 {
             (x1, y1, x0, y0)
         } else {
             (x0, y0, x1, y1)
         };
-        #[allow(clippy::cast_possible_truncation)]
+
         let (mut x0, mut y0, x1, y1) = (
             x0.round() as i64,
             y0.round() as i64,
             x1.round() as i64,
             y1.round() as i64,
         );
+
         let (delta_y, delta_x) = (2 * (y1 - y0), -2 * (x1 - x0));
 
         if (x1 - x0).abs() >= (y1 - y0).abs() {
@@ -153,7 +158,9 @@ where
                 // octant 1
                 let mut d = delta_y + delta_x / 2;
                 for x in x0..=x1 {
-                    self.plot(&color, x, y0);
+                    for dx in (-line_width as i64 / 2)..=(line_width as i64 / 2) {
+                        self.plot(&color, x, y0 + dx);
+                    }
                     if d > 0 {
                         y0 += 1;
                         d += delta_x;
@@ -164,7 +171,9 @@ where
                 // octant 8
                 let mut d = delta_y - delta_x / 2;
                 for x in x0..=x1 {
-                    self.plot(&color, x, y0);
+                    for dx in (-line_width as i64 / 2)..=(line_width as i64 / 2) {
+                        self.plot(&color, x, y0 + dx);
+                    }
                     if d < 0 {
                         y0 -= 1;
                         d -= delta_x;
@@ -176,7 +185,9 @@ where
             // octant 2
             let mut d = delta_y / 2 + delta_x;
             for y in y0..=y1 {
-                self.plot(&color, x0, y);
+                for dy in (-line_width as i64 / 2)..=(line_width as i64 / 2) {
+                    self.plot(&color, x0 + dy, y);
+                }
                 if d < 0 {
                     x0 += 1;
                     d += delta_y;
@@ -187,7 +198,9 @@ where
             // octant 7
             let mut d = delta_y / 2 - delta_x;
             for y in (y1..=y0).rev() {
-                self.plot(&color, x0, y);
+                for dy in (-line_width as i64 / 2)..=(line_width as i64 / 2) {
+                    self.plot(&color, x0 + dy, y);
+                }
                 if d > 0 {
                     x0 += 1;
                     d += delta_y;

@@ -16,6 +16,7 @@
 //! use gartus::prelude::*;
 //! ```
 
+#[cfg(feature = "external")]
 /// A module that includes method to read external PPM and allows them to be used with this system.
 pub mod external;
 /// This module hosts all the math needed for computer graphics
@@ -25,6 +26,7 @@ pub mod gmath;
 pub mod graphics;
 /// This module hosts a [Parser] that allows an image to be created through
 /// a detailed specification. More information found in the module.
+#[cfg(feature = "old_parser")]
 pub mod parser;
 /// prelude
 pub mod prelude;
@@ -32,15 +34,3 @@ pub mod prelude;
 /// advance features that are not fully integrated into parser
 /// or graphics modules.
 pub mod utils;
-
-#[test]
-fn it_works() {
-
-    let x = 1 + 1 + 1;
-    // while true {
-    //     break
-    //     continue
-    // }
-
-    // let string = "Hello, world!".to_string();
-}

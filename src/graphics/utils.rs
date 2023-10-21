@@ -4,7 +4,7 @@ use std::process::{Child, Command, Stdio};
 #[allow(dead_code)]
 pub fn view_animation(file_name: &str) -> io::Result<Child> {
     // animate doesn't play nicely
-    Command::new("sxiv")
+    Command::new("open")
         .arg(file_name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

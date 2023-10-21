@@ -2,11 +2,15 @@ use gartus::{
     gmath::helpers::polar_to_xy,
     gmath::matrix::Matrix,
     graphics::{
-        colors::{Hsl, Rgb},
+        colors::Rgb,
         display::Canvas,
     },
 };
 
+#[cfg(feature = "colors")]
+use gartus::graphics::colors::Hsl;
+
+#[cfg(feature = "colors")]
 #[test]
 fn circle() {
     let mut circle = Canvas::new_with_bg(500, 500, 255, Hsl::new(0, 100, 100));
@@ -88,6 +92,7 @@ fn spirograph() {
 }
 
 #[test]
+#[cfg(feature = "colors")]
 fn hermite_test() {
     let color = Hsl::new(5, 99, 26);
     let mut hermite = Canvas::new(500, 500, 255, color);

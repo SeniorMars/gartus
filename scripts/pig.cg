@@ -1,0 +1,477 @@
+apply
+reset
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+z 90
+apply
+ident
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+rotate
+y 45
+line
+-25 -75 0 25 -75 0
+line
+25 -75 0 75 -25 0
+line
+75 -25 0 75 25 0
+line
+75 25 0 25 75 0
+line
+25 75 0 -25 75 0
+line
+-25 75 0 -75 25 0
+line
+-75 25 0 -75 -25 0
+line
+-75 -25 0 -25 -75 0
+apply
+ident
+
+
+
+
+move
+200 200 0
+rotate
+x 10
+rotate
+y 10
+rotate
+z 10
+apply
+
+
+display
+quit
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+ident
+rotate
+z 60
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+ident
+rotate
+y 90
+apply
+ident
+reset
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+ident
+rotate
+z 60
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+apply
+line
+0 0 0 100 0 0
+line
+100 0 0 50 86.60254 0
+line
+0 0 50 100 0 0
+line
+0 0 -50 100 0 0
+ident
+rotate
+y 90
+apply
+ident
+move
+200 200 0
+apply
+display
+clear
+line
+200 200 200 100 200 200
+line
+100 200 200 100 100 200
+line
+100 100 200 200 100 200
+line
+200 100 200 200 200 200
+line
+200 200 100 100 200 100
+line
+100 200 100 100 100 100
+line
+100 100 100 200 100 100
+line
+200 100 100 200 200 100
+line
+200 200 200 200 200 100
+line
+200 100 200 200 100 100
+line
+100 100 200 100 100 100
+line
+100 200 200 100 200 100
+display
+ident
+scale
+2 2 2
+apply
+display
+ident
+move
+300 200 100
+apply
+display
+ident
+rotate
+z 60
+rotate
+x 60
+rotate
+y 60
+apply
+display
+ident
+rotate
+y 60
+apply
+display
+reset

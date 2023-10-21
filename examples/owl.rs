@@ -14,6 +14,7 @@ fn owl() {
 
     owl.set_config(CanvasConfig {
         upper_left_system: true,
+        line_width: 2.0,
         ..Default::default()
     });
 
