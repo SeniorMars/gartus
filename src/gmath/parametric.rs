@@ -9,7 +9,7 @@ pub struct Parametric<F: Fn(f64) -> f64, G: Fn(f64) -> f64> {
     y: G,
 }
 
-impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
+impl<F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
     /// Creates a new Parametric equation with functions that give x and y based on t
     ///
     /// # Arguments
@@ -56,14 +56,13 @@ impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> Parametric<F, G> {
     /// # Arguments
     ///
     /// * `step` - A f64 in the range of [0, 1] that details the step of the iterator
-
-    pub fn values_iter(&'plife self, step: f64) -> impl Iterator<Item = (f64, f64)> + 'plife {
+    pub fn values_iter(&self, step: f64) -> impl Iterator<Item = (f64, f64)> + '_ {
         ParametricIter::new(self, step)
     }
 }
 
-pub(crate) struct ParametricIter<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> {
-    parametric: &'plife Parametric<F, G>,
+pub(crate) struct ParametricIter<'a, F: Fn(f64) -> f64, G: Fn(f64) -> f64> {
+    parametric: &'a Parametric<F, G>,
     t: f64,
     step: f64,
 }
@@ -82,8 +81,8 @@ impl<F: Fn(f64) -> f64, G: Fn(f64) -> f64> Iterator for ParametricIter<'_, F, G>
     }
 }
 
-impl<'plife, F: Fn(f64) -> f64, G: Fn(f64) -> f64> ParametricIter<'plife, F, G> {
-    fn new(parametric: &'plife Parametric<F, G>, step: f64) -> Self {
+impl<'a, F: Fn(f64) -> f64, G: Fn(f64) -> f64> ParametricIter<'a, F, G> {
+    fn new(parametric: &'a Parametric<F, G>, step: f64) -> Self {
         assert!(step > 0.0);
         Self {
             parametric,

@@ -1,14 +1,11 @@
-use gartus::{
-    graphics::config::CanvasConfig,
-    prelude::{Canvas, Rgb},
-};
+use gartus::prelude::{Canvas, Rgb};
 
 #[allow(clippy::vec_init_then_push)]
 fn cat() {
-    let mut cat = Canvas::new(610, 610, 255, Rgb::default());
+    let mut cat = Canvas::new(610, 610, Rgb::default());
 
     let mut head: Vec<(i32, i32)> = Vec::new();
-    cat.set_config(CanvasConfig::new(true, false, true));
+    cat.upper_left_origin = true;
     cat.set_line_color_rgb(255, 255, 255);
 
     head.push((350 - 150, 222));

@@ -1,16 +1,9 @@
-use gartus::{
-    graphics::config::CanvasConfig,
-    prelude::{Canvas, Matrix, Rgb},
-};
+use gartus::prelude::{Canvas, EdgeMatrix, Matrix, Rgb};
 
 pub fn make_pory() {
-    let mut porygon = Canvas::new_with_bg(512, 512, 255, Rgb::new(17, 46, 81));
-    let mut matrix = Matrix::new(4, 0, Vec::with_capacity(396 * 2));
+    let mut porygon = Canvas::new_with_bg(512, 512, Rgb::new(17, 46, 81));
 
-    porygon.set_config(CanvasConfig {
-        upper_left_system: true,
-        ..Default::default()
-    });
+    porygon.upper_left_origin = true;
 
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
@@ -37,14 +30,11 @@ pub fn make_pory() {
         354, 611, 354, 611, 423, 607, 423, 607, 451, 575, 451, 575, 443, 560, 443, 560, 337, 470,
     ];
 
-    for corr in corrs.chunks_exact(2) {
-        matrix.add_point(corr[0] as f64, corr[1] as f64, 0.0);
-    }
+    let points = EdgeMatrix::from_xy_pairs(&corrs, 0.0);
 
-    porygon.set_line_pixel(&Rgb::new(235, 219, 178));
-    porygon.draw_lines(&matrix.mult_matrix(
-        &Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0)),
-    ));
+    let transform = Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0));
+    porygon.set_line_pixel(Rgb::new(235, 219, 178));
+    porygon.draw_transformed(&points, &transform);
     porygon.display().expect("could not display")
 }
 
@@ -56,8 +46,7 @@ fn main() {
 // BAD IDEA OVERALL
 #[test]
 pub fn make_pory_anim() {
-    use gartus::graphics::config::AnimationConfig;
-    use gartus::utils;
+    use gartus::prelude::FrameRecorder;
     let outline = Rgb::new(235, 219, 178);
     let white = Rgb::new(243, 244, 248);
     let purplish = Rgb::new(17, 46, 81);
@@ -65,14 +54,11 @@ pub fn make_pory_anim() {
     let dark_red = Rgb::new(191, 70, 61);
     let dark_blue = Rgb::new(69, 175, 214);
     let light_blue = Rgb::new(92, 216, 252);
-    let mut matrix = Matrix::new(4, 0, Vec::new());
-    let mut dilate = Matrix::scale(0.5, 0.5, 0.5);
-    let mut translate = Matrix::translate(0.0, 45.0, 0.0);
     let file_prefix = "porygon";
-    let mut porygon = Canvas::new_with_bg(512, 512, 255, purplish);
+    let mut porygon = Canvas::new_with_bg(512, 512, purplish);
 
-    porygon.set_config(CanvasConfig::new(true, false, false));
-    porygon.set_animation(AnimationConfig::new(file_prefix.to_string()));
+    porygon.upper_left_origin = true;
+    let mut recorder = FrameRecorder::new("anim", file_prefix).with_delay(2);
 
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
@@ -98,14 +84,15 @@ pub fn make_pory_anim() {
         423, 607, 280, 517, 280, 517, 221, 520, 221, 520, 241, 480, 241, 480, 221, 520, 221, 520,
         354, 611, 354, 611, 423, 607, 423, 607, 451, 575, 451, 575, 443, 560, 443, 560, 337, 470,
     ];
-    for corr in corrs.chunks(2) {
-        matrix.add_point(corr[0] as f64, corr[1] as f64, 0.0);
-    }
-    dilate *= matrix;
-    translate *= dilate;
+    let anim_points = EdgeMatrix::from_xy_pairs(&corrs, 0.0);
+    let anim_transform =
+        Matrix::scale(0.5, 0.5, 0.5).mult_matrix(&Matrix::translate(0.0, 45.0, 0.0));
+    let anim_transformed = anim_points.apply(&anim_transform);
     porygon.set_line_rgb(outline);
-    porygon.draw_lines(&translate);
+    porygon.draw_lines(&anim_transformed);
+    recorder.capture(&porygon).expect("Could not save frame");
     porygon.draw_line(dark_blue, 221.5, 325.0, 168.5, 280.0);
+    recorder.capture(&porygon).expect("Could not save frame");
     let fill_colors: Vec<Rgb> = vec![
         light_blue, dark_blue, light_blue, light_blue, light_blue, light_blue, dark_red, dark_blue,
         dark_blue, dark_blue, dark_blue, dark_blue, light_blue, light_blue, light_blue, light_blue,
@@ -118,20 +105,11 @@ pub fn make_pory_anim() {
         405, 194, 353, 237, 245, 214, 210, 183, 275, 153, 202, 156, 206, 227, 189, 207, 164, 214,
         150, 235, 259, 177, 242,
     ];
-    let mut binary_name = String::with_capacity(20);
     for (vector, color) in fill_points.chunks(2).zip(fill_colors) {
         porygon.fill(vector[0], vector[1], &color, &outline);
-        porygon.config_mut().increase_anim_index();
-        binary_name.clear();
-        binary_name.push_str(&format!(
-            "anim/{}{:08}.ppm",
-            file_prefix,
-            porygon.config().anim_index()
-        ));
-        porygon
-            .save_binary(&binary_name)
-            .expect("Could not save to file");
-    };
-    // utils::view_animation(&format!("{}{:08}.ppm", file_prefix, porygon.config().anim_index() - 1));
-    utils::animation(&porygon, "porygon.gif");
+        recorder.capture(&porygon).expect("Could not save frame");
+    }
+    recorder
+        .encode_gif("porygon.gif")
+        .expect("Could not make animation");
 }

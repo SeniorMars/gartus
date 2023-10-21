@@ -1,0 +1,97 @@
+#line
+#0 0 0 50 50 0
+#line
+#50 50 0 100 50 0
+#line
+#100 50 0 150 0 0
+#line
+#150 0 0 0 0 0
+#line
+#0 0 0 0 0 50
+#line
+#50 50 0 50 50 50
+#line
+#50 50 50 0 0 50
+#line
+#0 0 50 150 0 50
+#line
+#150 0 50 150 0 0
+#line
+#150 0 50 100 50 50
+#line
+#100 50 50 100 50 0
+#line
+#100 50 50 50 50 50
+#line
+#100 50 0 150 100 0
+#line
+#150 100 0 0 100 0
+#line
+#0 100 0 50 50 0
+#line
+#150 100 0 150 100 50
+#line
+#0 100 0 0 100 50
+#line
+#0 100 50 50 50 50
+#line
+#150 100 50 100 50 50
+#line
+#0 100 50 150 100 50
+#ident
+#move
+#75 60 0
+#apply
+#display
+#ident
+#scale
+#2 2 2
+#apply
+#display
+#ident
+#rotate
+#z 25
+#rotate
+#x 25
+#rotate
+#y 25
+#apply
+#display
+#save
+#pic.png
+line
+100 300 0 150 325 0
+line
+150 325 0 155 295 0
+line
+100 300 0 155 295 0
+line
+155 295 0 155 295 100
+line
+155 295 100 100 300 0
+line
+155 295 0 150 275 100
+line
+150 275 100 100 300 0
+display
+ident
+move
+-75 -225 0
+apply
+display
+ident
+scale
+4 4 4
+apply
+display
+ident
+rotate
+z -10
+rotate
+y 10
+rotate
+x 10
+apply
+display
+save
+pic.png

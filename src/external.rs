@@ -1,20 +1,19 @@
-use std::collections::VecDeque;
-use std::fs::OpenOptions;
-use std::{ffi::OsStr, io::Read, path::Path, process::Command};
+use std::error::Error;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use crate::graphics::{colors::Rgb, display::Canvas};
-/// ppmifizes an image so that it works with with this systems
+/// Converts an image to a [`Canvas`], converting non-PPM images to a sibling `.ppm` file first.
 ///
 /// # Arguments
-/// * `file_name` - The name, an &str, of the file to be ppmifizes
-/// * `pos_glitch` - A bool that turns potential glitch on.
+/// * `file_name` - The name of the file to load.
+/// * `pos_glitch` - Whether to swap the parsed canvas dimensions after loading.
 ///
 /// # Note
-/// Make sure to turn on [Canvas] with `pos_glitch` on
-/// with [`CanvasConfig`] if `pos_glitch` is turned on
-///
-/// # Panics
-/// If file does not exist, or it cannot be converted into a ppm file
+/// Non-PPM inputs are converted through a temporary `.ppm` file that is removed after parsing.
 ///
 /// # Errors
 /// todo!()
@@ -36,159 +35,259 @@ use crate::graphics::{colors::Rgb, display::Canvas};
 ///     Rgb::BLUE,
 ///     Rgb::RED,
 /// ];
-/// let mut canvas = Canvas::with_capacity(3, 3, 255, Rgb::BLACK);
-/// canvas.fill_canvas(colors);
+/// let mut canvas = Canvas::new(3, 3, Rgb::BLACK);
+/// canvas.fill_canvas(colors).expect("pixel data should match canvas size");
 /// canvas.save_binary("./works.ppm").expect("Works");
 /// let other = external::ppmify("./works.ppm", false).expect("Life is wrong");
 /// assert_eq!(canvas.pixels(), other.pixels());
 /// ```
-pub fn ppmify(
-    file_name: &str,
-    pos_glitch: bool,
-) -> Result<Canvas<Rgb>, Box<dyn std::error::Error>> {
+pub fn ppmify(file_name: &str, pos_glitch: bool) -> Result<Canvas, Box<dyn std::error::Error>> {
     let path = Path::new(file_name);
-    assert!(path.exists(), "File does not exit");
+    if !path.exists() {
+        return Err(format!("File does not exist: {file_name}").into());
+    }
+
     let ext = path
         .extension()
-        .and_then(OsStr::to_str)
-        .unwrap_or_else(|| panic!("Check your file input: {path:?}"));
-    let correct_ext = path.with_extension("ppm");
-    if ext != "ppm" {
-        let converted = correct_ext.to_str().expect("Cannot get new file name");
-        Command::new("convert")
-            .arg(file_name)
-            .arg(converted)
-            .spawn()?
-            .wait()?;
-    };
-    Ok(parse_ppm(&correct_ext, pos_glitch))
-}
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or("Invalid file extension")?;
 
-fn bytes_to_int(vec: Vec<u8>) -> u32 {
-    #[allow(clippy::cast_possible_truncation)]
-    let mut length = vec.len() as u32;
-    let mut sum = 0u32;
-    for i in vec {
-        let i_num = u32::from(ascii_to_num(i));
-        length -= 1;
-        sum += i_num * 10_u32.pow(length);
-    }
-    sum
-}
-
-fn byte_vec_fill(bytes: &mut VecDeque<u8>, vec: &mut Vec<u8>) {
-    loop {
-        let pot_num = bytes.pop_front();
-        if pot_num != Some(32) && pot_num != Some(10) {
-            vec.push(pot_num.unwrap());
-        } else {
-            break;
-        };
-    }
-}
-
-fn ascii_to_num(byte: u8) -> u8 {
-    println!("{byte}");
-    match byte {
-        48 => 0,
-        49 => 1,
-        50 => 2,
-        51 => 3,
-        52 => 4,
-        53 => 5,
-        54 => 6,
-        55 => 7,
-        56 => 8,
-        57 => 9,
-        _ => panic!("Not in the valid range to convert"),
-    }
-}
-
-fn parse_ppm(path: &Path, pos_glitch: bool) -> Canvas<Rgb> {
-    // this is a naive parser. Not 100% compatible with the spec
-    let file = OpenOptions::new().read(true).open(path).unwrap();
-
-    let mut bytes = file
-        .bytes()
-        .map(|pos_byte| pos_byte.expect("File Follows Spec"))
-        .collect::<VecDeque<u8>>();
-
-    let p_type = (bytes.pop_front().unwrap(), bytes.pop_front().unwrap());
-
-    // pop off newline
-    bytes.pop_front();
-
-    // We have to loop as a Canvas's width/height can be very large
-    let mut height_vec = Vec::new();
-    let mut width_vec = Vec::new();
-    // if pos_glitch is on, then inccorectly gathers width and height wrong. May look cool.
-    if pos_glitch {
-        byte_vec_fill(&mut bytes, &mut height_vec);
-        byte_vec_fill(&mut bytes, &mut width_vec);
+    let canvas = if ext == "ppm" {
+        parse_ppm(path)?
     } else {
-        byte_vec_fill(&mut bytes, &mut width_vec);
-        byte_vec_fill(&mut bytes, &mut height_vec);
+        let converted = temp_ppm_path(path)?;
+        let status = Command::new("magick").arg(path).arg(&converted).status()?;
+        if !status.success() {
+            let _ = fs::remove_file(&converted);
+            return Err("ImageMagick `magick` failed to convert image to ppm".into());
+        }
+
+        let parsed = parse_ppm(&converted);
+        let _ = fs::remove_file(&converted);
+        parsed?
+    };
+
+    Ok(if pos_glitch {
+        dimension_glitch(&canvas)
+    } else {
+        canvas
+    })
+}
+
+fn temp_ppm_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or("Invalid file name")?;
+    Ok(std::env::temp_dir().join(format!("gartus-ppmify-{stem}-{}.ppm", std::process::id())))
+}
+
+fn dimension_glitch(canvas: &Canvas) -> Canvas {
+    let mut glitched = Canvas::new(canvas.height(), canvas.width(), canvas.line);
+    glitched
+        .fill_canvas(canvas.pixels().to_vec())
+        .expect("pixel data should match canvas size");
+    glitched
+}
+
+fn next_token(buffer: &[u8], cursor: &mut usize) -> Option<String> {
+    loop {
+        while *cursor < buffer.len() && buffer[*cursor].is_ascii_whitespace() {
+            *cursor += 1;
+        }
+
+        if *cursor < buffer.len() && buffer[*cursor] == b'#' {
+            while *cursor < buffer.len() && buffer[*cursor] != b'\n' {
+                *cursor += 1;
+            }
+            continue;
+        }
+
+        break;
     }
 
-    let width = bytes_to_int(width_vec);
-    let height = bytes_to_int(height_vec);
+    if *cursor >= buffer.len() {
+        return None;
+    }
 
-    let mut color_depth_vec = Vec::new();
-    byte_vec_fill(&mut bytes, &mut color_depth_vec);
+    let start = *cursor;
+    while *cursor < buffer.len()
+        && !buffer[*cursor].is_ascii_whitespace()
+        && buffer[*cursor] != b'#'
+    {
+        *cursor += 1;
+    }
 
-    // Note due to the spec, this will never overflow or other unspecified behavior
-    let color_depth: u16 = bytes_to_int(color_depth_vec)
-        .try_into()
-        .expect("File does not follow ppm spec");
+    Some(String::from_utf8_lossy(&buffer[start..*cursor]).into_owned())
+}
 
-    let mut canvas = Canvas::with_capacity(width, height, color_depth, Rgb::default());
+fn scale_channel(value: u16, maxval: u16) -> Result<u8, Box<dyn Error>> {
+    if value > maxval {
+        return Err(format!("PPM channel value {value} exceeds maxval {maxval}").into());
+    }
 
-    let mut pixels = Vec::with_capacity(height as usize * width as usize);
-    match p_type {
-        // p3
-        (80, 51) => {
-            while !bytes.is_empty() {
-                let mut red_vec = Vec::with_capacity(3);
-                let mut green_vec = Vec::with_capacity(3);
-                let mut blue_vec = Vec::with_capacity(3);
-                byte_vec_fill(&mut bytes, &mut red_vec);
-                byte_vec_fill(&mut bytes, &mut green_vec);
-                byte_vec_fill(&mut bytes, &mut blue_vec);
-                let (red, green, blue) = (
-                    bytes_to_int(red_vec)
-                        .try_into()
-                        .expect("File does not follow ppm spec"),
-                    bytes_to_int(green_vec)
-                        .try_into()
-                        .expect("File does not follow ppm spec"),
-                    bytes_to_int(blue_vec)
-                        .try_into()
-                        .expect("File does not follow ppm spec"),
-                );
-                pixels.push(Rgb::new(red, green, blue));
+    Ok(u8::try_from((u32::from(value) * 255 + u32::from(maxval) / 2) / u32::from(maxval)).unwrap_or(255))
+}
+
+fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
+    let buffer = fs::read(path)?;
+    let mut cursor = 0;
+
+    let magic = next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing magic")?;
+    let width = next_token(&buffer, &mut cursor)
+        .ok_or("Invalid PPM file: missing width")?
+        .parse::<u32>()?;
+    let height = next_token(&buffer, &mut cursor)
+        .ok_or("Invalid PPM file: missing height")?
+        .parse::<u32>()?;
+    let maxval = next_token(&buffer, &mut cursor)
+        .ok_or("Invalid PPM file: missing maxval")?
+        .parse::<u16>()?;
+
+    if maxval == 0 || maxval > 255 {
+        return Err(format!("unsupported PPM maxval {maxval}; only 1..=255 is supported").into());
+    }
+
+    let pixel_count = u64::from(width) * u64::from(height);
+    let pixel_count = usize::try_from(pixel_count).map_err(|_| "PPM image too large")?;
+    let mut pixels = Vec::with_capacity(pixel_count);
+
+    match magic.as_str() {
+        "P3" => {
+            for _ in 0..pixel_count {
+                let red = next_token(&buffer, &mut cursor)
+                    .ok_or("Invalid PPM file: missing red channel")?
+                    .parse::<u16>()?;
+                let green = next_token(&buffer, &mut cursor)
+                    .ok_or("Invalid PPM file: missing green channel")?
+                    .parse::<u16>()?;
+                let blue = next_token(&buffer, &mut cursor)
+                    .ok_or("Invalid PPM file: missing blue channel")?
+                    .parse::<u16>()?;
+
+                pixels.push(Rgb::new(
+                    scale_channel(red, maxval)?,
+                    scale_channel(green, maxval)?,
+                    scale_channel(blue, maxval)?,
+                ));
             }
         }
-        // p6
-        (80, 54) => {
-            while !bytes.is_empty() {
-                let red = bytes.pop_front().expect("File does not follow ppm spec");
-                let green = bytes.pop_front().expect("File does not follow ppm spec");
-                let blue = bytes.pop_front().expect("File does not follow ppm spec");
-                pixels.push(Rgb::new(red, green, blue));
+        "P6" => {
+            if cursor >= buffer.len() || !buffer[cursor].is_ascii_whitespace() {
+                return Err("Invalid PPM file: missing binary data separator".into());
+            }
+            cursor += 1;
+
+            let needed = pixel_count
+                .checked_mul(3)
+                .ok_or("PPM image data is too large")?;
+            if buffer.len().saturating_sub(cursor) < needed {
+                return Err(format!(
+                    "Invalid PPM file: expected {needed} bytes of pixel data, found {}",
+                    buffer.len().saturating_sub(cursor)
+                )
+                .into());
+            }
+
+            for chunk in buffer[cursor..cursor + needed].chunks_exact(3) {
+                pixels.push(Rgb::new(
+                    scale_channel(u16::from(chunk[0]), maxval)?,
+                    scale_channel(u16::from(chunk[1]), maxval)?,
+                    scale_channel(u16::from(chunk[2]), maxval)?,
+                ));
             }
         }
-        _ => panic!("Unsupported spec"),
-    };
-    canvas.fill_canvas(pixels);
+        _ => return Err(format!("Invalid PPM file: unsupported magic {magic}").into()),
+    }
+
+    let mut canvas = Canvas::new(width, height, Rgb::default());
     canvas
+        .fill_canvas(pixels)
+        .expect("pixel data should match canvas size");
+    Ok(canvas)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ppmify;
+    use crate::graphics::colors::Rgb;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_file(name: &str, extension: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "gartus-external-{name}-{}.{}",
+            std::process::id(),
+            extension
+        ))
+    }
+
+    #[test]
+    fn parses_p3_comments_whitespace_and_scaled_maxval() {
+        let path = temp_file("comments", "ppm");
+        fs::write(
+            &path,
+            b"P3
+# exported in 2026
+2   1
+# max value
+100
+100 0 50   0 100 25
+",
+        )
+        .expect("write temp ppm");
+
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 1);
+        assert_eq!(canvas.pixels()[0], Rgb::new(255, 0, 128));
+        assert_eq!(canvas.pixels()[1], Rgb::new(0, 255, 64));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parses_uppercase_ppm_extension_without_conversion() {
+        let path = temp_file("uppercase", "PPM");
+        fs::write(&path, b"P6\n1 1\n255\n\x01\x02\x03").expect("write temp ppm");
+
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+
+        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3)]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn truncated_p6_returns_error() {
+        let path = temp_file("truncated", "ppm");
+        fs::write(&path, b"P6\n2 1\n255\n\x01\x02\x03").expect("write temp ppm");
+
+        let error = ppmify(path.to_str().expect("utf8 path"), false).expect_err("should fail");
+
+        assert!(error.to_string().contains("expected 6 bytes"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn pos_glitch_is_applied_after_parsing() {
+        let path = temp_file("glitch", "ppm");
+        fs::write(&path, b"P3\n2 1\n255\n1 2 3 4 5 6\n").expect("write temp ppm");
+
+        let canvas = ppmify(path.to_str().expect("utf8 path"), true).expect("parse ppm");
+
+        assert_eq!(canvas.width(), 1);
+        assert_eq!(canvas.height(), 2);
+        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
+        let _ = fs::remove_file(path);
+    }
 }
 
 #[test]
+#[ignore = "requires external files and a display"]
 fn external_fun() {
-    use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
-    let mut canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
+    let canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
@@ -198,15 +297,26 @@ fn external_fun() {
 }
 
 #[test]
+#[ignore = "requires external files and a display"]
 fn command_block() {
-    use crate::graphics::config::CanvasConfig;
     let pos_glitch = true;
-    let mut canvas = ppmify("./CAR.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.set_config(CanvasConfig::new(false, pos_glitch, false));
+    let canvas = ppmify("./CAR.png", pos_glitch).expect("Implmentation is wrong");
     canvas.display().expect("Could not display image");
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
     sobel
         .save_extension("corro.png")
         .expect("Could not save image");
+}
+
+#[test]
+#[ignore = "requires external files and a display"]
+fn parse_and_display() {
+    let canvas = ppmify("./stop_1.ppm", false).expect("Implmentation is wrong");
+    // let blur = canvas.blur();
+    // let sobel = canvas.sobel();
+    let edge = canvas.laplacian_edge_detection();
+    // blur.display().expect("Could not display image");
+    // sobel.display().expect("Could not display image");
+    edge.display().expect("Could not display image");
 }

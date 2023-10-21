@@ -1,16 +1,11 @@
 use gartus::{
-    graphics::config::CanvasConfig,
-    prelude::{Canvas, Matrix, Rgb},
+    prelude::{Canvas, EdgeMatrix, FrameRecorder, Matrix, Rgb},
     utils,
 };
 
 fn geass() {
-    let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));
-    let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
-    img.set_config(CanvasConfig {
-        upper_left_system: true,
-        ..Default::default()
-    });
+    let mut img = Canvas::new_with_bg(800, 800, Rgb::new(24, 26, 27));
+    img.upper_left_origin = true;
 
     let geass_corrs = [
         170, 216, 190, 249, 190, 249, 220, 274, 220, 274, 250, 295, 250, 295, 289, 318, 289, 318,
@@ -22,47 +17,40 @@ fn geass() {
         199, 285, 170, 216,
     ];
 
-    for corr in geass_corrs.chunks(2) {
-        geass.add_point(corr[0] as f64, corr[1] as f64, 0.0)
-    }
+    let geass = EdgeMatrix::from_xy_pairs(&geass_corrs, 0.0);
 
-    let mut base = Matrix::translate(-400.0, -400.0, 0.0);
-    let mut reflect = Matrix::reflect_xz();
-    let mut half = Matrix::reflect_45();
-    let mut last_half = Matrix::reflect_yz();
+    let center = Matrix::translate(-400.0, -400.0, 0.0);
+    let base = geass.apply(&center);
+    let reflect_pts = base.apply(&Matrix::reflect_xz());
+    let half_pts = base.apply(&Matrix::reflect_45());
+    let last_half_pts = half_pts.apply(&Matrix::reflect_yz());
 
-    base *= geass.clone();
-    reflect *= base.clone();
-    last_half *= half.clone();
-    last_half *= base.clone();
-    half *= base.clone();
-    base.add_dataset(&reflect);
-    base.add_dataset(&half);
-    base.add_dataset(&last_half);
+    let mut combined = base;
+    combined.extend(&reflect_pts);
+    combined.extend(&half_pts);
+    combined.extend(&last_half_pts);
 
     let white = Rgb::new(255, 255, 255);
-    img.set_line_pixel(&white);
+    img.set_line_pixel(white);
 
-    let off_center_transformation =
-        &Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
-    img.draw_lines(&off_center_transformation.mult_matrix(&geass));
+    let off_center =
+        Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
+    img.draw_transformed(&geass, &off_center);
     img.fill(406, 413, &white, &white);
-    img.set_line_pixel(&Rgb::new(191, 70, 61));
+    img.set_line_pixel(Rgb::new(191, 70, 61));
 
-    let back_translation = &Matrix::translate(400.0, 400.0, 0.0);
+    let back_translation = Matrix::translate(400.0, 400.0, 0.0);
+    let mut recorder = FrameRecorder::new("anim", "geass").with_delay(2);
     for i in 0..180 {
-        let mut copy = img.clone();
-        copy.draw_lines(
-            &Matrix::rotate_y(i as f64)
-                .mult_matrix(back_translation)
-                .mult_matrix(&base),
-        );
-        copy.save_extension(&format!("./anim/geass{:04}.png", i))
-            .expect("Could not save image")
+        let transform = Matrix::rotate_y(i as f64).mult_matrix(&back_translation);
+        recorder
+            .capture_drawn(&img, &combined, &transform)
+            .expect("Could not save frame");
     }
-    // img.display().expect("Could not display image");
     let file_name = "./geass.gif";
-    utils::animation(&img, file_name);
+    recorder
+        .encode_gif(file_name)
+        .expect("Could not make animation");
     utils::view_animation(file_name)
 }
 

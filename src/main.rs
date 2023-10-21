@@ -1,18 +1,13 @@
 // / use gartus::gmath::ray::Ray;
 // use gartus::gmath::vector::{Point, Vector};
 use gartus::graphics::colors::Rgb;
-use gartus::graphics::config::CanvasConfig;
 use gartus::graphics::display::Canvas;
-use gartus::prelude::Matrix;
+use gartus::prelude::{EdgeMatrix, FrameRecorder, Matrix};
 use gartus::utils;
 
 pub fn main() {
-    let mut img = Canvas::new_with_bg(800, 800, 255, Rgb::new(24, 26, 27));
-    let mut geass = Matrix::new(4, 0, Vec::with_capacity(112 * 2));
-    img.set_config(CanvasConfig {
-        upper_left_system: true,
-        ..Default::default()
-    });
+    let mut img = Canvas::new_with_bg(800, 800, Rgb::new(24, 26, 27));
+    img.upper_left_origin = true;
 
     let geass_corrs = [
         170, 216, 190, 249, 190, 249, 220, 274, 220, 274, 250, 295, 250, 295, 289, 318, 289, 318,
@@ -24,48 +19,47 @@ pub fn main() {
         199, 285, 170, 216,
     ];
 
-    for corr in geass_corrs.chunks(2) {
-        geass.add_point(corr[0] as f64, corr[1] as f64, 0.0)
-    }
+    let geass = EdgeMatrix::from_xy_pairs(&geass_corrs, 0.0);
 
-    let mut base = Matrix::translate(-400.0, -400.0, 0.0);
-    let mut reflect = Matrix::reflect_xz();
-    let mut half = Matrix::reflect_45();
-    let mut last_half = Matrix::reflect_yz();
+    // Build a combined edge set by applying various reflections to the geass points.
+    // All transforms produce plain Matrix results; we accumulate via EdgeMatrix::extend.
+    let translate = Matrix::translate(-400.0, -400.0, 0.0);
+    let base_points = geass.apply(&translate);
 
-    base *= geass.clone();
-    reflect *= base.clone();
-    last_half *= half.clone();
-    last_half *= base.clone();
-    half *= base.clone();
-    base.add_dataset(&reflect);
-    base.add_dataset(&half);
-    base.add_dataset(&last_half);
+    let reflect_xz = Matrix::reflect_xz();
+    let reflect_45 = Matrix::reflect_45();
+    let reflect_yz = Matrix::reflect_yz();
+
+    let reflect_points = base_points.apply(&reflect_xz);
+    let half_points = base_points.apply(&reflect_45);
+    let last_half_points = base_points.apply(&reflect_yz.mult_matrix(&reflect_45));
+
+    let mut base = base_points;
+    base.extend(&reflect_points);
+    base.extend(&half_points);
+    base.extend(&last_half_points);
 
     let white = Rgb::new(255, 255, 255);
-    img.set_line_pixel(&white);
+    img.set_line_pixel(white);
 
     let off_center_transformation =
-        &Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
-    img.draw_lines(&off_center_transformation.mult_matrix(&geass));
+        Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
+    img.draw_transformed(&geass, &off_center_transformation);
     img.fill(406, 413, &white, &white);
-    img.set_line_pixel(&Rgb::new(191, 70, 61));
+    img.set_line_pixel(Rgb::new(191, 70, 61));
     img.display().unwrap();
 
-    let back_translation = &Matrix::translate(400.0, 400.0, 0.0);
+    let back_translation = Matrix::translate(400.0, 400.0, 0.0);
+    let mut recorder = FrameRecorder::new("anim", "geass").with_delay(2);
     for i in 0..180 {
-        let mut copy = img.clone();
-        copy.draw_lines(
-            &Matrix::rotate_y(i as f64)
-                .mult_matrix(back_translation)
-                .mult_matrix(&base),
-        );
-        copy.save_extension(&format!("./anim/geass{:04}.png", i))
-            .expect("Could not save image")
+        let transform = Matrix::rotate_y(i as f64).mult_matrix(&back_translation);
+        recorder
+            .capture_drawn(&img, &base, &transform)
+            .expect("Could not save frame");
     }
     // img.display().expect("Could not display image");
     let file_name = "./geass.gif";
-    utils::animation(&img, file_name);
+    utils::animation(&recorder, file_name).expect("Could not make animation");
     // utils::view_animation(file_name)
 }
 
@@ -92,6 +86,8 @@ pub fn main() {
 //     const IMAGE_WIDTH: u64 = 256;
 //     const IMAGE_HEIGHT: u64 = (256_f64 / ASPECT_RATIO) as u64;
 //
+//     let test = Canvas::new(500, 500, Rgb::default());
+//
 //     let viewport_height = 2.0;
 //     let viewport_width = ASPECT_RATIO * viewport_height;
 //     let focal_length = 1.0;
@@ -103,7 +99,7 @@ pub fn main() {
 //         origin - horizontal / 2.0 - vertical / 2.0 - Vector::new(0.0, 0.0, focal_length);
 //
 //     let mut img =
-//         Canvas::with_capacity(IMAGE_WIDTH as u32, IMAGE_HEIGHT as u32, 255, Rgb::default());
+//         Canvas::new(IMAGE_WIDTH as u32, IMAGE_HEIGHT as u32, Rgb::default());
 //     let mut data: Vec<Rgb> = Vec::with_capacity((img.width() * img.height()) as usize);
 //
 //     (0..IMAGE_HEIGHT).rev().for_each(|j| {

@@ -1,45 +1,69 @@
 use crate::{gmath::helpers::polar_to_xy, graphics::display::Canvas};
 
-use super::colors::{ColorSpace, Rgb};
+use super::colors::Rgb;
 
 #[derive(Debug, Clone, Default)]
-/// A turle is an agent that can be controlled to draw on the [Canvas]
-pub struct Turtle<C: ColorSpace>
-where
-    Rgb: From<C>,
-{
+/// A turtle is an agent that can be controlled to draw on a [`Canvas`].
+pub struct Turtle {
     /// The color your agent will draw on
-    color: C,
-    corrdinates: Vec<(u32, u32)>,
-    /// The direction your agent will move forward or backwards. This is an angle in degrees
+    color: Rgb,
+    /// The direction your agent will move forward or backward. This is an angle in degrees.
     direction_angle: f64,
-    /// A boolean that dictacts weather the turtle will draw on the Canvas
+    /// A boolean that dictates whether the turtle will draw on the Canvas.
     pub pen_mode: bool,
-    /// X corrdinate of where the Turtle is located
-    x: u32,
-    /// Y corrdinate of where the Turtle is located
-    y: u32,
+    /// X coordinate of where the Turtle is located
+    x: f64,
+    /// Y coordinate of where the Turtle is located
+    y: f64,
+    state_stack: Vec<TurtleState>,
+}
+
+/// Define a struct for `TurtleState`
+#[derive(Debug, Clone, Default)]
+pub struct TurtleState {
+    x: f64,
+    y: f64,
+    direction_angle: f64,
+    pen_mode: bool,
+    color: Rgb,
+}
+
+impl TurtleState {
+    /// Returns the `(x, y)` position of this state.
+    #[must_use]
+    pub fn position(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
+
+    /// Returns the direction angle of this state in degrees.
+    #[must_use]
+    pub fn heading(&self) -> f64 {
+        self.direction_angle
+    }
+
+    /// Returns the draw color of this state.
+    #[must_use]
+    pub fn color(&self) -> Rgb {
+        self.color
+    }
+
+    /// Returns whether the pen was down in this state.
+    #[must_use]
+    pub fn pen_mode(&self) -> bool {
+        self.pen_mode
+    }
 }
 
 #[allow(dead_code)]
-impl<C: ColorSpace> Turtle<C>
-where
-    Rgb: From<C>,
-{
-    /// Returns a new turtle that will be can be used to draw in [Canvas]
-    ///
-    /// # Notes
-    ///
-    /// Due to the fact that the Turtle will modify your canvas, you cannot have more than one
-    /// Turtle per Canvas
+impl Turtle {
+    /// Returns a new turtle that can be used as a geometric cursor or to draw on a [`Canvas`].
     ///
     /// # Arguments
     ///
-    /// * `canvas` - Your drawing Canvas
     /// * `line_color` - A pixel that will be the color your Turtle will use to draw
-    /// * `direction_angle` - A f32 that represents that angle your turtle will move
-    /// * `x` - A u32 that represents that will be the x corrdinate of where the turtle spawns in
-    /// * `y` - A u32 that represents that will be the y corrdinate of where the turtle spawns in
+    /// * `direction_angle` - A f64 that represents the angle your turtle will move
+    /// * `x` - The x coordinate where the turtle starts
+    /// * `y` - The y coordinate where the turtle starts
     ///
     /// # Examples
     ///
@@ -48,17 +72,17 @@ where
     /// use crate::gartus::graphics::turtle::Turtle;
     /// use crate::gartus::graphics::colors::Rgb;
     /// let red = Rgb::new(255, 0, 0);
-    /// let turle = Turtle::new(red, 0.0, 25, 25);
+    /// let turtle = Turtle::new(red, 0.0, 25.0, 25.0);
     /// ```
-    pub fn new(color: C, direction_angle: f64, x: u32, y: u32) -> Self {
-        let corrdinates = vec![(x, y)];
+    #[must_use] 
+    pub fn new(color: Rgb, direction_angle: f64, x: f64, y: f64) -> Self {
         Self {
             color,
-            direction_angle,
+            direction_angle: Self::normalize_angle(direction_angle),
             x,
             y,
             pen_mode: false,
-            corrdinates,
+            state_stack: Vec::new(),
         }
     }
 
@@ -76,31 +100,43 @@ where
     /// use crate::gartus::graphics::colors::Rgb;
     /// let red = Rgb::new(255, 0, 0);
     /// let green = Rgb::new(0, 255, 0);
-    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
-    /// turle.set_color(green)
+    /// let mut turtle = Turtle::new(red, 0.0, 25.0, 25.0);
+    /// turtle.set_color(green)
     /// ```
-    pub fn set_color(&mut self, new_color: C) {
+    pub fn set_color(&mut self, new_color: Rgb) {
         self.color = new_color;
     }
 
-    /// Set the turtle's direction angle.
-    ///
-    /// # Arguments
-    ///
-    /// * `direction_angle` - A f32 that represents the new angle your turtle will move towards
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::graphics::turtle::Turtle;
-    /// use crate::gartus::graphics::colors::Rgb;
-    /// let red = Rgb::new(255, 0, 0);
-    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
-    /// turle.set_heading(90.0);
-    /// ```
+    fn normalize_angle(angle: f64) -> f64 {
+        angle.rem_euclid(360.0)
+    }
+
+    /// Set the turtle's direction angle absolutely.
     pub fn set_heading(&mut self, direction_angle: f64) {
-        self.direction_angle = (self.direction_angle + direction_angle) % 360.0;
+        self.direction_angle = Self::normalize_angle(direction_angle);
+    }
+
+    /// Rotate the turtle by adding to its current direction angle.
+    pub fn rotate(&mut self, delta: f64) {
+        self.direction_angle = Self::normalize_angle(self.direction_angle + delta);
+    }
+
+    /// Returns the current `(x, y)` position of the turtle.
+    #[must_use]
+    pub fn position(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
+
+    /// Returns the current direction angle of the turtle in degrees.
+    #[must_use]
+    pub fn heading(&self) -> f64 {
+        self.direction_angle
+    }
+
+    /// Returns the current draw color of the turtle.
+    #[must_use]
+    pub fn color(&self) -> Rgb {
+        self.color
     }
 
     #[allow(
@@ -108,17 +144,15 @@ where
         clippy::cast_lossless,
         clippy::cast_sign_loss
     )]
-    /// Move the turtle forwards or backwards
+    /// Move the turtle forward or backward without drawing.
     ///
     /// # Notes
     ///
-    /// If `is_drawing` is true, then it will also draw a line from the old corrdinates and the new
-    /// corrdinates.
+    /// Returns the old and new positions.
     ///
     /// # Arguments
     ///
-    /// * `step` - An i32 that represents direction and magnitude of where the turtle will move
-    /// towards
+    /// * `step` - Direction and magnitude of where the turtle will move
     ///
     /// # Examples
     ///
@@ -127,72 +161,74 @@ where
     /// use crate::gartus::graphics::turtle::Turtle;
     /// use crate::gartus::graphics::display::Canvas;
     /// use crate::gartus::graphics::colors::Rgb;
-    /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
     /// let red = Rgb::new(255, 0, 0);
-    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
-    /// turle.move_turtle(&mut drawing, -3);
+    /// let mut turtle = Turtle::new(red, 0.0, 25.0, 25.0);
+    /// turtle.forward(-3.0);
     /// ```
-    pub fn move_turtle(&mut self, canvas: &mut Canvas<C>, step: i32) {
-        let (dx, dy) = polar_to_xy(step.into(), self.direction_angle);
-        let (new_x, new_y) = (f64::from(self.x) + dx, f64::from(self.y) + dy);
-        if self.pen_mode {
-            canvas.draw_line(
-                self.color,
-                f64::from(self.x),
-                f64::from(self.y),
-                new_x,
-                new_y,
-            );
-        }
-
-        self.x = new_x.round() as u32;
-        self.y = new_y.round() as u32;
-        self.corrdinates.push((self.x, self.y));
-    }
-
-    /// Set new corrdinate for turtle
-    ///
-    /// # Notes
-    ///
-    /// If `is_drawing` is true, then it will also draw a line from the old corrdinates and the new
-    /// corrdinates
-    ///
-    /// # Arguments
-    ///
-    /// * `new_x` - A u32 that represents the new x corrdinate of the turtle
-    /// * `new_y` - A u32 that represents the new y corrdinate of the turtle
-    ///
-    /// # Panics
-    /// * If the arguments are greater than the canvas dimensions
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::graphics::turtle::Turtle;
-    /// use crate::gartus::graphics::display::Canvas;
-    /// use crate::gartus::graphics::colors::Rgb;
-    /// let mut drawing = Canvas::new(50, 50, 255, Rgb::default());
-    /// let red = Rgb::new(255, 0, 0);
-    /// let mut turle = Turtle::new(red, 0.0, 25, 25);
-    /// turle.goto(&mut drawing, 49, 49);
-    /// ```
-    pub fn goto(&mut self, canvas: &mut Canvas<C>, new_x: u32, new_y: u32) {
-        assert!(new_x < canvas.width());
-        assert!(new_y < canvas.height());
-        if self.pen_mode {
-            canvas.draw_line(
-                self.color,
-                f64::from(self.x),
-                f64::from(self.y),
-                f64::from(new_x),
-                f64::from(new_y),
-            );
-        }
-
-        self.corrdinates.push((new_x, new_y));
+    pub fn forward(&mut self, step: f64) -> ((f64, f64), (f64, f64)) {
+        let start = self.position();
+        let (dx, dy) = polar_to_xy(step, self.direction_angle);
+        let (new_x, new_y) = (self.x + dx, self.y + dy);
         self.x = new_x;
         self.y = new_y;
+        (start, self.position())
+    }
+
+    /// Move the turtle forward or backward and draw when the pen is down.
+    pub fn draw_forward(&mut self, canvas: &mut Canvas, step: f64) {
+        let (start, end) = self.forward(step);
+        if self.pen_mode {
+            canvas.draw_line(self.color, start.0, start.1, end.0, end.1);
+        }
+    }
+
+    /// Compatibility wrapper for [`Turtle::draw_forward`].
+    pub fn move_turtle(&mut self, canvas: &mut Canvas, step: f64) {
+        self.draw_forward(canvas, step);
+    }
+
+    /// Set a new coordinate for the turtle without drawing.
+    ///
+    /// # Notes
+    ///
+    /// Returns the old and new positions.
+    ///
+    /// # Arguments
+    ///
+    /// * `new_x` - The new x coordinate of the turtle
+    /// * `new_y` - The new y coordinate of the turtle
+    ///
+    /// # Panics
+    /// Panics if `new_x` or `new_y` is not finite.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::gartus::graphics::turtle::Turtle;
+    /// use crate::gartus::graphics::display::Canvas;
+    /// use crate::gartus::graphics::colors::Rgb;
+    /// let red = Rgb::new(255, 0, 0);
+    /// let mut turtle = Turtle::new(red, 0.0, 25.0, 25.0);
+    /// turtle.goto(49.0, 49.0);
+    /// ```
+    pub fn goto(&mut self, new_x: f64, new_y: f64) -> ((f64, f64), (f64, f64)) {
+        assert!(
+            new_x.is_finite() && new_y.is_finite(),
+            "turtle coordinates must be finite"
+        );
+        let start = self.position();
+        self.x = new_x;
+        self.y = new_y;
+        (start, self.position())
+    }
+
+    /// Set a new coordinate and draw when the pen is down.
+    pub fn draw_goto(&mut self, canvas: &mut Canvas, new_x: f64, new_y: f64) {
+        let (start, end) = self.goto(new_x, new_y);
+        if self.pen_mode {
+            canvas.draw_line(self.color, start.0, start.1, end.0, end.1);
+        }
     }
 
     // /// Get a reference to the turtle's canvas.
@@ -200,22 +236,62 @@ where
     //     self.canvas.as_ref()
     // }
 
-    /// Set the turtle's is drawing.
-    /// False is off, True is On
-    pub fn set_draw_mode(&mut self, bool: bool) {
-        self.pen_mode = bool;
+    /// Put the pen down so the turtle draws as it moves.
+    pub fn pen_down(&mut self) {
+        self.pen_mode = true;
     }
 
-    /// Get a reference to the turtle's corrdinates.
-    pub fn corrdinates(&self) -> &[(u32, u32)] {
-        self.corrdinates.as_ref()
+    /// Lift the pen so the turtle moves without drawing.
+    pub fn pen_up(&mut self) {
+        self.pen_mode = false;
     }
 
-    /// Get a mutable reference to the turtle's corrdinates.
-    pub fn corrdinates_mut(&mut self) -> &mut Vec<(u32, u32)> {
-        &mut self.corrdinates
+    /// Set the turtle's position.
+    pub fn set_position(&mut self, x: f64, y: f64) {
+        self.goto(x, y);
+    }
+
+    /// Push the current state of the turtle onto the stack.
+    pub fn push_state(&mut self) {
+        // Save the current state of the turtle
+        let state = TurtleState {
+            x: self.x,
+            y: self.y,
+            color: self.color,
+            direction_angle: self.direction_angle,
+            pen_mode: self.pen_mode,
+        };
+        self.state_stack.push(state);
+    }
+
+    /// Pop the last state of the turtle from the stack.
+    pub fn pop_state(&mut self) -> Option<TurtleState> {
+        let state = self.state_stack.pop()?;
+        self.x = state.x;
+        self.y = state.y;
+        self.color = state.color;
+        self.direction_angle = state.direction_angle;
+        self.pen_mode = state.pen_mode;
+        Some(state)
+    }
+
+    /// Get a reference to the turtle's state stack.
+    #[must_use] 
+    pub fn state_stack(&self) -> &[TurtleState] {
+        &self.state_stack
+    }
+
+    /// Rotate the turtle to the right.
+    pub fn rotate_right(&mut self, angle: f64) {
+        self.rotate(-angle);
+    }
+
+    /// Rotate the turtle to the left.
+    pub fn rotate_left(&mut self, angle: f64) {
+        self.rotate(angle);
     }
 }
+
 #[cfg(test)]
 mod test {
     use crate::graphics::colors::Rgb;
@@ -223,39 +299,105 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_turtle() {
-        let start_x = 50;
-        let start_y = 50;
-        let mut canvas = Canvas::new(100, 100, 255, Rgb::default());
-        let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
-        turtle.set_draw_mode(true);
-        for _ in 0..4 {
-            turtle.set_heading(90.0);
-            turtle.move_turtle(&mut canvas, 10);
-        }
-        // println!("{:?}", turtle.corrdinates());
-        // canvas.display().expect("Could not render image")
+    fn heading_is_normalized() {
+        let mut turtle = Turtle::new(Rgb::default(), -10.0, 0.0, 0.0);
+        assert!((turtle.heading() - 350.0).abs() < f64::EPSILON);
+
+        turtle.rotate_right(90.0);
+        assert!((turtle.heading() - 260.0).abs() < f64::EPSILON);
+
+        turtle.rotate_left(190.0);
+        assert!((turtle.heading() - 90.0).abs() < f64::EPSILON);
+
+        turtle.set_heading(-30.0);
+        assert!((turtle.heading() - 330.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn spiral() {
-        let start_x = 149;
-        let start_y = 149;
-        let mut canvas = Canvas::new_with_bg(
-            start_x * 2 + 1,
-            start_y * 2 + 1,
-            255,
-            Rgb::new(235, 235, 235),
-        );
+    fn forward_updates_position_without_canvas() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 10.0, 20.0);
+        let (start, end) = turtle.forward(5.0);
+
+        assert_eq!(start, (10.0, 20.0));
+        assert!((end.0 - 15.0).abs() < f64::EPSILON);
+        assert!((end.1 - 20.0).abs() < f64::EPSILON);
+        assert_eq!(turtle.position(), end);
+    }
+
+    #[test]
+    fn goto_updates_position_without_canvas() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 10.0, 20.0);
+        let (start, end) = turtle.goto(-5.0, 12.0);
+
+        assert_eq!(start, (10.0, 20.0));
+        assert_eq!(end, (-5.0, 12.0));
+        assert_eq!(turtle.position(), (-5.0, 12.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "turtle coordinates must be finite")]
+    fn goto_rejects_non_finite_coordinates() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 0.0, 0.0);
+        turtle.goto(f64::NAN, 0.0);
+    }
+
+    #[test]
+    fn push_pop_restores_state() {
+        let red = Rgb::new(255, 0, 0);
+        let blue = Rgb::new(0, 0, 255);
+        let mut turtle = Turtle::new(red, 45.0, 10.0, 20.0);
+        turtle.pen_down();
+        turtle.push_state();
+
+        turtle.set_color(blue);
+        turtle.set_heading(180.0);
+        turtle.set_position(50.0, 60.0);
+        turtle.pen_up();
+
+        let restored = turtle.pop_state().expect("state should be present");
+        let rpos = restored.position();
+        assert!((rpos.0 - 10.0).abs() < f64::EPSILON && (rpos.1 - 20.0).abs() < f64::EPSILON);
+        assert_eq!(turtle.color(), red);
+        assert!((turtle.heading() - 45.0).abs() < f64::EPSILON);
+        let tpos = turtle.position();
+        assert!((tpos.0 - 10.0).abs() < f64::EPSILON && (tpos.1 - 20.0).abs() < f64::EPSILON);
+        assert!(turtle.pen_mode);
+        assert!(turtle.state_stack().is_empty());
+    }
+
+    #[test]
+    fn pop_state_returns_none_when_empty() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 0.0, 0.0);
+        assert!(turtle.pop_state().is_none());
+    }
+
+    #[test]
+    fn draw_forward_draws_when_pen_is_down() {
+        let start_x = 50.0;
+        let start_y = 50.0;
+        let mut canvas = Canvas::new_with_bg(100, 100, Rgb::WHITE);
         let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
-        turtle.set_draw_mode(true);
-        let mut distance = 1;
+        turtle.pen_down();
+        turtle.draw_forward(&mut canvas, 10.0);
+
+        assert!(canvas.pixels().iter().any(|pixel| *pixel == turtle.color()));
+    }
+
+    #[test]
+    #[ignore = "writes an example image"]
+    fn spiral() {
+        let start_x = 149.0;
+        let start_y = 149.0;
+        let mut canvas = Canvas::new_with_bg(149 * 2 + 1, 149 * 2 + 1, Rgb::new(235, 235, 235));
+        let mut turtle = Turtle::new(Rgb::new(150, 50, 65), 90.0, start_x, start_y);
+        turtle.pen_down();
+        let mut distance = 1.0;
         let mut flag = 175;
         while flag > 0 {
             turtle.move_turtle(&mut canvas, distance);
-            turtle.set_heading(120.0);
-            turtle.set_heading(1.0);
-            distance += 1;
+            turtle.rotate(120.0);
+            turtle.rotate(1.0);
+            distance += 1.0;
             flag -= 1;
         }
         canvas

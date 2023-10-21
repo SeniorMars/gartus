@@ -1,23 +1,15 @@
-use gartus::graphics::config::AnimationConfig;
 // extern crate rand;
-use gartus::utils;
-use gartus::{
-    graphics::config::CanvasConfig,
-    prelude::{Canvas, Rgb},
-};
+use gartus::prelude::{Canvas, FrameRecorder, Rgb};
 use rand::Rng;
 
 fn owl() {
     let mut rng = rand::thread_rng();
 
-    let mut owl = Canvas::new(500, 500, 255, Rgb::new(255, 255, 255));
+    let mut owl = Canvas::new(500, 500, Rgb::new(255, 255, 255));
 
-    owl.set_config(CanvasConfig {
-        upper_left_system: true,
-        ..Default::default()
-    });
-
-    owl.set_animation(AnimationConfig::new("owl".to_string()));
+    owl.upper_left_origin = true;
+    owl.set_line_width(2.0);
+    let mut recorder = FrameRecorder::new("anim", "owl").with_delay(2);
 
     let corrs: [i32; 640] = [
         140, 39, 157, 77, 136, 103, 136, 153, 143, 174, 135, 201, 142, 215, 139, 244, 154, 279,
@@ -66,22 +58,20 @@ fn owl() {
                 rng.gen_range(0..=255),
                 rng.gen_range(0..=255),
             );
-            owl.save_binary(&format!("./anim/owl{:04}.ppm", i))
-                .expect("could not save image");
             owl.draw_line(
                 owl.line,
                 corrs[i] as f64,
                 corrs[i + 1] as f64,
                 corrs[i + 2] as f64,
                 corrs[i + 3] as f64,
-            )
+            );
+            recorder.capture(&owl).expect("could not save frame");
         }
     });
     owl.display().expect("Could not display image");
-    // owl.save_binary(&format!("./anim/owl{:04}.ppm", 319))
-    //     .expect("could not save image");
-    utils::animation(&owl, "./owl.gif");
-    // utils::view_animation("owl.gif");
+    recorder
+        .encode_gif("./owl.gif")
+        .expect("could not make animation");
 }
 
 fn main() {

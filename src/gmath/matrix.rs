@@ -1,9 +1,11 @@
-use super::{parametric::Parametric, vector::Vector};
+use super::vector::Vector;
 use std::{
     fmt,
-    ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
-    slice,
+    ops::{Add, AddAssign, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
+    slice::{self},
 };
+
+const EPS: f64 = 1e-10;
 
 #[derive(Default, Clone, Debug)]
 /// A type that represents a m x n Matrix
@@ -15,6 +17,41 @@ pub struct Matrix {
     /// The actual data the Matrix includes
     data: Vec<f64>,
 }
+
+// /// An iterator over the rows of a matrix for mutable access.
+// ///
+// /// * `matrix`: matrix to iterate over
+// /// * `current_row`: current row index
+// pub(crate) struct RowIterMut<'a> {
+//     matrix: &'a mut Matrix,
+//     current_row: usize,
+// }
+//
+// impl<'a> Iterator for RowIterMut<'a> {
+//     type Item = Vec<&'a mut f64>;
+//     // &'a mut [f64];
+//
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.current_row < self.matrix.rows {
+//             let rows = self.matrix.rows;
+//             let cols = self.matrix.cols;
+//
+//
+//             let data = &mut self.matrix.data;
+//
+//             let mut row = Vec::with_capacity(cols);
+//             for col in 0..cols {
+//                 let idx = col * rows + self.current_row;
+//                 row.push(&mut data[idx]);
+//             }
+//             self.current_row += 1;
+//
+//             Some(row)
+//         } else {
+//             None
+//         }
+//     }
+// }
 
 // #[derive(Debug)]
 // /// A matrix that has a constant size
@@ -30,9 +67,9 @@ impl Matrix {
     /// # Arguments
     ///
     /// * `rows` - An unsigned usize int that represents
-    /// the number of rows in the [Matrix]
+    ///   the number of rows in the [Matrix]
     /// * `cols` - An unsigned usize int that represents
-    /// the number of columns in the [Matrix]
+    ///   the number of columns in the [Matrix]
     /// * `data` - A vector comprised of floats that is the body of the [Matrix]
     ///
     /// # Panics
@@ -52,26 +89,44 @@ impl Matrix {
         Self { rows, cols, data }
     }
 
-    /// Returns a new row x column [Matrix] with a vector `with_capacity` of row * column
+    /// Returns a new row x column [Matrix] initialized to zero.
     ///
     /// # Arguments
     ///
     /// * `rows` - An unsigned usize int that represents
-    /// the number of rows in the [Matrix]
+    ///   the number of rows in the [Matrix]
     /// * `cols` - An unsigned usize int that represents
-    /// the number of columns in the [Matrix]
+    ///   the number of columns in the [Matrix]
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
     /// use crate::gartus::gmath::matrix::Matrix;
-    /// let matrix = Matrix::with_capacity(2, 2);
+    /// let matrix = Matrix::zeros(2, 2);
     /// ```
     #[must_use]
-    pub fn with_capacity(rows: usize, cols: usize) -> Self {
-        let data = Vec::with_capacity(rows * cols);
+    pub fn zeros(rows: usize, cols: usize) -> Self {
+        let data = vec![0.0; rows * cols];
         Self { rows, cols, data }
+    }
+
+    /// Fill the [Matrix] with a vector of floats.
+    ///
+    /// Ideally, should be used after `with_capacity` to fill the [Matrix] with data.
+    ///
+    /// * `data`: A vector comprised of floats that is the body of the [Matrix]
+    ///
+    /// # Panics
+    ///
+    /// * `data`: If the size of data isn't the same as rows * cols
+    pub fn fill_data(&mut self, data: Vec<f64>) {
+        assert_eq!(
+            self.rows * self.cols,
+            data.len(),
+            "Matrix must be filled completely"
+        );
+        self.data = data;
     }
 
     /// Returns the number of points (cols) currently in the [Matrix].
@@ -106,12 +161,24 @@ impl Matrix {
         self.rows
     }
 
+    /// Returns the number of elements currently in the [`Matrix`].
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns `true` if the [`Matrix`] contains no elements.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     /// Returns a new N by N identity [Matrix].
     ///
     /// # Arguments
     ///
     /// * `size` - An unsigned usize int that represents
-    /// the size of the identity [Matrix]
+    ///   the size of the identity [Matrix]
     ///
     /// # Examples
     ///
@@ -129,13 +196,13 @@ impl Matrix {
         matrix
     }
 
-    #[must_use]
-    /// Returns the inverse of a squared [Matrix].
+    /// Returns the inverse of a squared [`Matrix`].
     /// ```rust
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let matrix = Matrix::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     /// let inv = matrix.inverse();
     /// ```
+    #[must_use]
     pub fn inverse(&self) -> Option<Self> {
         let (rows, cols) = (self.rows, self.cols);
         if rows != cols {
@@ -144,7 +211,8 @@ impl Matrix {
 
         let len = rows;
 
-        let mut rref = Matrix::new(len, len * 2, vec![0.0; len * len * 2]);
+        let mut rref = Matrix::zeros(len, len * 2);
+        let mut inv = Matrix::zeros(len, len);
 
         for idx in 0..len {
             for jdx in 0..len {
@@ -153,9 +221,18 @@ impl Matrix {
             rref[(idx, idx + len)] = 1.0;
         }
 
-        Self::gauss_jordan_general(&mut rref).ok()?;
+        Self::gauss_jordan_general(&mut rref, EPS);
 
-        let mut inv = Matrix::new(len, len, vec![0.0; len * len]);
+        for idx in 0..len {
+            if (rref[(idx, idx)] - 1.0).abs() > EPS {
+                return None;
+            }
+            for jdx in 0..len {
+                if jdx != idx && rref[(idx, jdx)].abs() > EPS {
+                    return None;
+                }
+            }
+        }
 
         for idx in 0..len {
             for jdx in 0..len {
@@ -166,45 +243,39 @@ impl Matrix {
         Some(inv)
     }
 
-    pub(crate) fn gauss_jordan_general(matrix: &mut Matrix) -> Result<(), String> {
-        let mut lead = 0;
+    pub(crate) fn gauss_jordan_general(matrix: &mut Matrix, eps: f64) -> bool {
         let (rows, cols) = (matrix.rows, matrix.cols);
+        let mut lead = 0;
+
         for row in 0..rows {
-            if cols <= lead {
-                break;
-                // return Err("Inversion Impossible".to_string());
-            }
-
-            // pick a pivot
-            let mut idx = row;
-
-            // check if pivot is zero
-            if matrix[(idx, lead)] == 0.0 {
-                return Err("Inversion Impossible".to_string());
-            }
-            while matrix[(idx, lead)] == 0.0 {
-                idx += 1;
-                if rows == idx {
-                    idx = row;
-                    lead += 1;
-                    if cols == lead {
-                        break;
-                        // return Err("Inversion Impossible".to_string());
-                    }
+            let pivot = loop {
+                if lead >= cols {
+                    return false;
                 }
-            }
 
-            matrix.swap_rows(row, idx);
+                let pivot = (row..rows)
+                    .max_by(|&a, &b| {
+                        matrix[(a, lead)]
+                            .abs()
+                            .partial_cmp(&matrix[(b, lead)].abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .expect("row range is non-empty");
 
-            // set elments among the diagonal to one
+                if matrix[(pivot, lead)].abs() > eps {
+                    break pivot;
+                }
+
+                lead += 1;
+            };
+
+            matrix.swap_rows(pivot, row);
+
             let div = matrix[(row, lead)];
-            if div != 0.0 {
-                for jdx in 0..cols {
-                    matrix[(row, jdx)] /= div;
-                }
+            for j in 0..cols {
+                matrix[(row, j)] /= div;
             }
 
-            // eliminate among the diagonals
             for kdx in 0..rows {
                 if kdx != row {
                     let mult = matrix[(kdx, lead)];
@@ -213,10 +284,35 @@ impl Matrix {
                     }
                 }
             }
+
             lead += 1;
         }
-        Ok(())
+
+        true
     }
+
+    // LU decomposition
+    // fn lu(&self) -> (Matrix, Matrix, Matrix) {
+    //
+    // }
+
+    // fn pivotize(&self) -> Matrix {
+    //     let mut p = Matrix::identity_matrix(self.rows);
+    //
+    //     for j in 0..self.rows {
+    //         let mut row = j;
+    //         for i in j + 1..self.rows {
+    //             if self[(i, j)].abs() > self[(row, j)].abs() {
+    //                 row = i;
+    //             }
+    //         }
+    //
+    //         if j != row {
+    //             p.swap_rows(j, row);
+    //         }
+    //     }
+    //     p
+    // }
 
     /// Returns the determinant of a squared [Matrix] or None if the [Matrix] is not squared.
     ///
@@ -240,6 +336,7 @@ impl Matrix {
     /// Computes the determinant of a squared [Matrix]
     /// in O(n^3) time.
     fn determinant_helper(&self) -> f64 {
+        const EPS: f64 = 1e-12;
         let mut det = 1.0;
         let mut gauss = self.clone();
 
@@ -251,9 +348,8 @@ impl Matrix {
                 }
             }
 
-            if gauss[(k, idx)].abs() < f64::EPSILON {
-                det = 0.0;
-                break;
+            if gauss[(k, idx)].abs() < EPS {
+                return 0.0;
             }
 
             gauss.swap_rows(idx, k);
@@ -262,25 +358,24 @@ impl Matrix {
                 det = -det;
             }
 
-            det *= gauss[(idx, idx)];
+            let pivot = gauss[(idx, idx)];
+            det *= pivot;
 
-            for jdx in idx + 1..self.rows {
-                gauss[(idx, jdx)] /= gauss[(idx, idx)];
-            }
-
-            for jdx in 0..self.rows {
-                if jdx != idx && gauss[(jdx, idx)].abs() > f64::EPSILON {
-                    for kdx in idx + 1..self.rows {
-                        gauss[(jdx, kdx)] -= gauss[(idx, kdx)] * gauss[(jdx, idx)];
-                    }
+            for row in idx + 1..self.rows {
+                let factor = gauss[(row, idx)] / pivot;
+                gauss[(row, idx)] = 0.0;
+                if factor.abs() <= EPS {
+                    continue;
+                }
+                for col in idx + 1..self.rows {
+                    gauss[(row, col)] -= factor * gauss[(idx, col)];
                 }
             }
         }
         det
     }
 
-    #[must_use]
-    /// Returns the transpose [Matrix] of self.
+    /// Returns the transpose [`Matrix`] of self.
     ///
     /// # Examples
     ///
@@ -290,15 +385,15 @@ impl Matrix {
     /// let ident = Matrix::identity_matrix(4);
     /// let transpose = ident.transpose();
     /// ```
+    #[must_use]
     pub fn transpose(&self) -> Self {
         let mut new_data = vec![0.0; self.rows * self.cols];
-        (0..self.rows).for_each(|i| {
-            (0..self.cols).for_each(|j| {
-                new_data[self.index(i, j)] = self.get(j, i);
-            });
-        });
-
-        Matrix::new(self.rows, self.cols, new_data)
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                new_data[i * self.cols + j] = self[(i, j)];
+            }
+        }
+        Matrix::new(self.cols, self.rows, new_data)
     }
 
     /// Makes self an identity [Matrix] if the matrix is N by N.
@@ -327,7 +422,13 @@ impl Matrix {
         }
     }
 
-    pub(crate) fn index(&self, row: usize, col: usize) -> usize {
+    pub(crate) fn flat_index(&self, row: usize, col: usize) -> usize {
+        assert!(
+            row < self.rows && col < self.cols,
+            "matrix index ({row}, {col}) out of bounds for {}x{} matrix",
+            self.rows,
+            self.cols
+        );
         col * self.rows + row
     }
 
@@ -347,7 +448,7 @@ impl Matrix {
     /// matrix.fill(0.0);
     /// ```
     pub fn fill(&mut self, float: f64) {
-        self.data = vec![float; self.rows * self.cols];
+        self.data.fill(float);
     }
 
     /// Swaps two rows in self.data.
@@ -358,7 +459,7 @@ impl Matrix {
     /// * `row_two` - The index of the second row to be swapped.
     ///
     /// # Panics
-    /// Will not panic
+    /// Panics if either row is out of bounds.
     ///
     /// # Examples
     ///
@@ -366,22 +467,29 @@ impl Matrix {
     /// ```
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
-    /// ident.swap_cols(0, 1);
+    /// ident.swap_rows(0, 1);
     /// ```
     pub fn swap_rows(&mut self, row_one: usize, row_two: usize) {
         if row_one == row_two {
             return;
         }
 
-        if row_two < row_one {
-            return self.swap_rows(row_two, row_one);
-        }
+        assert!(
+            row_one < self.rows && row_two < self.rows,
+            "row index out of bounds for {}x{} matrix",
+            self.rows,
+            self.cols
+        );
 
-        let mut points = self.iter_by_point_mut();
-        points
-            .nth(row_one)
-            .unwrap()
-            .swap_with_slice(points.nth(row_two - row_one - 1).unwrap());
+        let rows = self.rows;
+        let cols = self.cols;
+        let data = &mut self.data;
+
+        for col in 0..cols {
+            let idx_one = col * rows + row_one;
+            let idx_two = col * rows + row_two;
+            data.swap(idx_one, idx_two);
+        }
     }
 
     /// Returns the corresponding self.data element
@@ -405,8 +513,7 @@ impl Matrix {
     /// ```
     #[must_use]
     pub fn get(&self, row: usize, col: usize) -> f64 {
-        assert!(row < self.rows && col < self.cols, "Index out of bound");
-        self.data[self.index(row, col)]
+        self.data[self.flat_index(row, col)]
     }
 
     /// Sets the corresponding self.data element a new value
@@ -430,8 +537,7 @@ impl Matrix {
     /// ident.set(0, 0, 100.0);
     /// ```
     pub fn set(&mut self, row: usize, col: usize, new_point: f64) {
-        assert!(row < self.rows && col < self.cols, "Index out of bound");
-        let i = self.index(row, col);
+        let i = self.flat_index(row, col);
         self.data[i] = new_point;
     }
 
@@ -439,6 +545,24 @@ impl Matrix {
     #[must_use]
     pub fn data(&self) -> &[f64] {
         self.data.as_ref()
+    }
+
+    pub(crate) fn append_column(&mut self, column: &[f64]) -> Result<(), &'static str> {
+        if self.rows != column.len() {
+            return Err("new column length must match matrix rows");
+        }
+        self.data.extend_from_slice(column);
+        self.cols += 1;
+        Ok(())
+    }
+
+    pub(crate) fn append_columns(&mut self, other: &Self) -> Result<(), &'static str> {
+        if self.rows != other.rows {
+            return Err("appended matrix must have the same number of rows");
+        }
+        self.data.extend_from_slice(&other.data);
+        self.cols += other.cols;
+        Ok(())
     }
 }
 
@@ -457,14 +581,15 @@ impl Index<(usize, usize)> for Matrix {
 
     fn index(&self, index: (usize, usize)) -> &f64 {
         let (row, col) = index;
-        &self.data[col * self.rows + row]
+        &self.data[self.flat_index(row, col)]
     }
 }
 
 impl IndexMut<(usize, usize)> for Matrix {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
         let (row, col) = index;
-        &mut self.data[col * self.rows + row]
+        let index = self.flat_index(row, col);
+        &mut self.data[index]
     }
 }
 
@@ -495,11 +620,13 @@ impl Matrix {
     // pub fn from_iter(&self) -> impl IntoIterator<Item = &[f64]> {
     //     self.data.chunks_exact(self.cols)
     // }
-    fn iter(&self) -> impl Iterator<Item = &f64> + '_ {
+    /// Returns a iterator that iterates over the [Matrix]'s points.
+    pub fn iter(&self) -> impl Iterator<Item = &f64> + '_ {
         self.data.iter()
     }
 
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut f64> + '_ {
+    /// Returns a mut iterator that iterates over the [Matrix]'s points.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut f64> + '_ {
         self.data.iter_mut()
     }
 
@@ -578,7 +705,7 @@ impl Matrix {
         self.data[start..self.rows + start].iter_mut()
     }
 
-    /// Returns a iterator that iterates over the [Matrix]'s points.
+    /// Returns a iterator that iterates over the [Matrix]'s columns
     ///
     /// # Examples
     ///
@@ -586,13 +713,13 @@ impl Matrix {
     /// ```
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_by_point();
+    /// let iter = ident.iter_cols();
     /// ```
-    pub fn iter_by_point(&self) -> slice::ChunksExact<'_, f64> {
+    pub fn iter_cols(&self) -> slice::ChunksExact<'_, f64> {
         self.data.chunks_exact(self.rows)
     }
 
-    /// Returns a mutable iterator that iterates over the [Matrix]'s points.
+    /// Returns a mutable iterator that iterates over the [Matrix]'s cols
     ///
     /// # Examples
     ///
@@ -600,10 +727,28 @@ impl Matrix {
     /// ```
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let mut ident = Matrix::identity_matrix(4);
-    /// let mut iter = ident.iter_by_point_mut();
+    /// let mut iter = ident.iter_cols_mut();
     /// ```
-    pub fn iter_by_point_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
+    pub fn iter_cols_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
         self.data.chunks_exact_mut(self.rows)
+    }
+
+    /// Returns a iterator that iterates over the [Matrix]'s points
+    pub fn iter_by_point(&self) -> impl Iterator<Item = &[f64]> + '_ {
+        self.data.chunks_exact(self.rows)
+    }
+
+    /// Returns a iterator that iterates over the [Matrix]'s rows
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::gartus::gmath::matrix::Matrix;
+    /// let ident = Matrix::identity_matrix(4);
+    /// let iter = ident.iter_rows();
+    /// ```
+    pub fn iter_rows(&self) -> impl Iterator<Item = impl Iterator<Item = &f64> + '_> + '_ {
+        (0..self.rows).map(move |row| self.data.iter().skip(row).step_by(self.rows))
     }
 }
 
@@ -616,286 +761,23 @@ impl PartialEq for Matrix {
     }
 }
 
-// add + append
-#[allow(dead_code)]
 impl Matrix {
-    /// Adds a new point (x, y, z) to a [Matrix].
-    ///
-    /// # Arguments
-    ///
-    /// * `x` - A f64 float representing the x corrdinate of a point
-    /// * `y` - A f64 float representing the y corrdinate of a point
-    /// * `z` - A f64 float representing the z corrdinate of a point
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut matrix = Matrix::new(0, 4, Vec::new());
-    /// matrix.add_point(0.0, 0.1, 0.2);
-    /// ```
-    pub fn add_point(&mut self, x: f64, y: f64, z: f64) {
-        self.data.push(x);
-        self.data.push(y);
-        self.data.push(z);
-        self.data.push(1.0);
-        self.cols += 1;
-    }
-
-    /// Adds a new edge to an edge [Matrix].
-    ///
-    /// # Arguments
-    ///
-    /// * `x0` - A f64 float representing the start x corrdinate of an edge
-    /// * `y0` - A f64 float representing the start y corrdinate of an edge
-    /// * `z0` - A f64 float representing the start z corrdinate of an edge
-    /// * `x1` - A f64 float representing the end x corrdinate of an edge
-    /// * `y1` - A f64 float representing the end y corrdinate of an edge
-    /// * `z1` - A f64 float representing the end z corrdinate of an edge
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut matrix = Matrix::new(0, 4, Vec::new());
-    /// matrix.add_edge(0.0, 0.1, 0.2, 0.3, 0.4, 0.5);
-    /// ```
-    pub fn add_edge(&mut self, x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) {
-        self.add_point(x0, y0, z0);
-        self.add_point(x1, y1, z1);
-    }
-
-    /// Adds a new edge in the form of a f64 vector to an edge [Matrix].
-    ///
-    /// # Arguments
-    ///
-    /// * `edge` - A vector with six floats representing two points
-    /// to be added to the edge [Matrix]
-    ///
-    /// # Panics
-    /// If the len of edge is not 6
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut matrix = Matrix::new(0, 4, Vec::new());
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
-    /// matrix.add_edge_vec(&vector);
-    /// ```
-    pub fn add_edge_vec(&mut self, edge: &[f64]) {
-        assert_eq!(6, edge.len());
-        self.add_point(edge[0], edge[1], edge[2]);
-        self.add_point(edge[3], edge[4], edge[5]);
-    }
-
-    /// Appends a vector to the edge [Matrix].
-    ///
-    /// # Arguments
-    ///
-    /// * `point` - a mutable vector that has three floats, which will be append to the [Matrix]
-    ///
-    /// # Panics
-    /// If the length of Vector is not equal to the length of rows
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// use crate::gartus::gmath::vector::Vector;
-    /// let mut matrix = Matrix::new(4, 0, Vec::new());
-    /// let vector = Vector::new(1.0, 2.0, 3.0);
-    /// matrix.append_point(&vector);
-    /// ```
-    pub fn append_point(&mut self, vector: &Vector) {
-        assert_eq!(
-            self.rows() - 1,
-            vector.data.len(),
-            "self.cols and new row's len are not equal"
-        );
-        self.add_point(vector[0], vector[1], vector[2]);
-    }
-
-    /// Adds other's data to Self
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - A reference to a Matrix with the new dataset
-    ///
-    /// # Panics
-    /// If the rows of both matrices are not equal
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident1 = Matrix::identity_matrix(4);
-    /// let result = ident1.add_dataset(&Matrix::identity_matrix(4));
-    /// ```
-    pub fn add_dataset(&mut self, other: &Self) {
-        assert!(
-            self.rows == other.rows,
-            "To add a dataset Matices must have the same number of rows"
-        );
-        self.data.extend(&other.data);
-        self.cols += other.cols;
-    }
-
-    /// Adds a parametric curve to Matrix
-    ///
-    /// # Arguments
-    ///
-    /// * `x_func` - A function that returns a f64 x value given t
-    /// * `y_func` - A function that returns a f64 y value given t
-    /// * `z` - The z value to be added to the matrix. TODO: perhaps, make h(z)?
-    /// * `step` - A value representing precision of the curve.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// use crate::gartus::gmath::parametric::Parametric;
-    /// let mut matrix = Matrix::new(4, 0, Vec::new());
-    /// ```
-    pub fn add_parametric_curve<F: Fn(f64) -> f64, G: Fn(f64) -> f64>(
-        &mut self,
-        x_func: F,
-        y_func: G,
-        z: f64,
-        step: f64,
-    ) {
-        let parametric = Parametric::new(x_func, y_func);
-        parametric
-            .values_iter(step)
-            .collect::<Vec<(f64, f64)>>()
-            .windows(2)
-            .for_each(|points| {
-                let (x0, y0) = points[0];
-                let (x1, y1) = points[1];
-                self.add_edge(x0, y0, z, x1, y1, z);
-            });
-    }
-
-    /// Adds a hermite curve to Matrix
-    ///
-    /// # Arguments
-    ///
-    ///
-    /// * `p0` - a point (x, y) that represents the start of the curve
-    /// * `p1` - a point (x, y) that represents the start of the curve
-    /// * `r0` - the slope of p0
-    /// * `r1` - the slope of p1
-    pub fn add_hermite(&mut self, p0: (f64, f64), p1: (f64, f64), r0: (f64, f64), r1: (f64, f64)) {
-        // These are the numbers you get when you multiply by the Inverse Hermite Matrix
-        fn hermite_curve_coeffs(p0: f64, p1: f64, r0: f64, r1: f64) -> (f64, f64, f64, f64) {
-            (
-                // Take advantage that p1 is greater than p0...so
-                // another way to write this is:
-                // 2.0 * p0 + -2 * p1 + ro + r1, but since the first temrs will cancel out
-                //   technically this is fine
-                2.0 * (p0 - p1) + r0 + r1,
-                3.0 * (-p0 + p1) - 2.0 * r0 - r1,
-                r0,
-                p0,
-            )
-        }
-        let (ax, bx, cx, dx) = hermite_curve_coeffs(p0.0, p1.0, r0.0, r1.0);
-        let (ay, by, cy, dy) = hermite_curve_coeffs(p0.1, p1.1, r0.1, r1.1);
-        self.add_parametric_curve(
-            |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
-            |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
-            0.0,
-            0.0001,
-        );
-    }
-
-    // (-P0 + 3P1 - 3P2 + P3)t^3 + (3P0 - 6P1 + 3P2)t^2 + (-3P0 + 3P1)t + P0
-    // These are the numbers you get when you multiply by the Inverse Hermite Matrix
-    fn bezier_curve_coeffs(p0: f64, p1: f64, p2: f64, p3: f64) -> (f64, f64, f64, f64) {
-        // simple optimization
-        (
-            -p0 + 3.0 * (p1 - p2) + p3,
-            3.0 * p0 - 6.0 * p1 + 3.0 * p2,
-            3.0 * (-p0 + p1),
-            p0,
-        )
-    }
-
-    /// Adds a third degree bezier curve to Matrix
-    ///
-    /// # Arguments
-    ///
-    ///
-    /// * `p0` - a point (x, y) that represents the start of the curve
-    /// * `p1` - a point (x, y) that represents the first control point of the curve
-    /// * `p2` - a point (x, y) that represents the second control point of the curve
-    /// * `p3` - a point (x, y) that represents the end of the curve
-    ///
-    pub fn add_bezier3(&mut self, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64), p3: (f64, f64)) {
-        // TODO: should handle both axis
-        let (ax, bx, cx, dx) = Self::bezier_curve_coeffs(p0.0, p1.0, p2.0, p3.0);
-        let (ay, by, cy, dy) = Self::bezier_curve_coeffs(p0.1, p1.1, p2.1, p3.1);
-
-        self.add_parametric_curve(
-            |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
-            |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
-            0.0,
-            0.001,
-        );
-    }
-
-    fn generate_n_degree_bezizer_polynomials_coeff(n_degree: u8, points: &[f64]) -> Vec<f64> {
-        // let points_matrix = Matrix::new(n_degree.into(), 1, points);
-        //
-        // let basis: Matrix;
-        todo!()
-        // let mut coeffs: Vec<f64> = Vec::new();
-
-        // for i in 0..=n_degree {
-        //     coeffs.push(binom(n_degree.into(), i.into()))
-        // }
-
-        // return (basis * points_matrix).data().to_vec();
-    }
-
-    // #[test]
-    // fn
-
-    fn generate_n_degree_bezizer_fun(n_degree: u8, coeffs: &[f64]) -> impl Fn(f64) -> f64 {
-        move |x| x
-    }
-
-    /// Adds an n-th degree bezier curve to Matrix
-    ///
-    /// # Arguments
-    ///
-    ///
-    /// * `n` - a u8 that represents the degree of the bezier curve
-    /// * `points` - a list that has the control, start, and end xy corrdinates
-    ///
-    pub fn add_beziern(&mut self, n_degree: u8, x_points: &[f64], y_points: &[f64]) {
-        todo!()
-        // let x_coeffs = generate_n_degree_bezizer_polynomials_coeff(n_degree, x_points);
-        // let y_coeffs = generate_n_degree_bezizer_polynomials_coeff(n_degree, y_points);
-        //
-        // let t_nth_bezier_x = generate_n_degree_bezizer_fun(n_degree, x_coeffs);
-        // let t_nth_bezier_y = generate_n_degree_bezizer_fun(n_degree, y_coeffs);
-
-        // self.add_parametric_curve(t_nth_bezier_x, t_nth_bezier_y, 0.0, 0.001);
+    /// Returns `true` if every element differs by at most `eps`.
+    #[must_use]
+    pub fn approx_eq(&self, other: &Self, eps: f64) -> bool {
+        self.rows == other.rows
+            && self.cols == other.cols
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|(a, b)| (a - b).abs() <= eps)
     }
 }
 
 // multiply two matrices
 impl Matrix {
-    #[must_use]
-    /// Returns the result of multiplying self by another [Matrix].
-    /// Self's rows must be the same size as the other's Matrix's cols.
+    /// Returns the result of multiplying self by another [`Matrix`].
+    /// Self's rows must be the same size as the other's [`Matrix`]'s cols.
     ///
     /// # Arguments
     ///
@@ -912,18 +794,19 @@ impl Matrix {
     /// let mut ident1 = Matrix::identity_matrix(4);
     /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
     /// ```
+    #[must_use]
     pub fn mult_matrix(&self, other: &Self) -> Self {
         assert_eq!(
             self.cols, other.rows,
             "cols of self must equal rows of other"
         );
 
-        let mut result = Matrix::new(self.rows, other.cols, vec![0.0; self.rows * other.cols]);
-        for i in 0..self.rows {
+        let mut result = Matrix::zeros(self.rows, other.cols);
+        for j in 0..other.cols {
             for k in 0..self.cols {
-                let r = self[(i, k)];
-                for j in 0..other.cols {
-                    result[(i, j)] += r * other[(k, j)];
+                let b = other[(k, j)];
+                for i in 0..self.rows {
+                    result[(i, j)] += self[(i, k)] * b;
                 }
             }
         }
@@ -944,9 +827,8 @@ impl Matrix {
         // }
     }
 
-    #[must_use]
-    /// Returns the result of multiplying the tranpose of self by another [Matrix].
-    /// Self's columns must be the same size as the other's Matrix's rwos.
+    /// Returns the result of multiplying the transpose of self by another [`Matrix`].
+    /// `self.rows` must equal `other.rows`.
     ///
     /// # Arguments
     ///
@@ -960,30 +842,33 @@ impl Matrix {
     /// Basic usage:
     /// ```
     /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident1 = Matrix::identity_matrix(4);
-    /// let result = ident1.mult_trans(&Matrix::identity_matrix(4));
+    /// let ident1 = Matrix::identity_matrix(4);
+    /// let result = ident1.mult_transpose_left(&Matrix::identity_matrix(4));
     /// ```
-    pub fn mult_trans(&self, other: &Self) -> Self {
+    ///
+    /// # Note
+    /// The way this algorithm is implemented is not the most efficient as I wanted to try
+    /// functional programming
+    #[must_use]
+    pub fn mult_transpose_left(&self, other: &Self) -> Self {
         assert_eq!(
-            self.rows, other.cols,
-            "cols of self must equal rows of other"
+            self.rows, other.rows,
+            "rows of self must equal rows of other for self^T * other"
         );
-        let data = (0..self.cols * other.rows)
-            .map(|index| {
-                self.iter_col(index % self.rows)
-                    .zip(other.iter_row(index / self.rows))
-                    .fold(0.0, |acc, (s, o)| acc + s * o)
-            })
-            .collect();
 
-        Matrix {
-            rows: self.cols,
-            cols: other.rows,
-            data,
+        let mut result = Matrix::zeros(self.cols, other.cols);
+        for j in 0..other.cols {
+            for k in 0..self.rows {
+                let b = other[(k, j)];
+                for i in 0..self.cols {
+                    result[(i, j)] += self[(k, i)] * b;
+                }
+            }
         }
+        result
     }
 
-    /// Returns the resulting [vector] when multiplying by self.
+    /// Returns the resulting [`Vector`] when multiplying by self.
     ///
     /// # Arguments
     ///
@@ -1002,16 +887,36 @@ impl Matrix {
     /// let mut vector = Vector::new(0.0, 0.1, 0.2);
     /// ident1.mult_vector(vector);
     /// ```
-    pub fn mult_vector(&self, mut vector: Vector) {
+    #[must_use]
+    pub fn mult_vector(&self, vector: Vector) -> Vector {
         assert_eq!(
-            self.rows(),
-            self.cols(),
-            "Multiply only with identity matrix transformation"
+            self.rows, 4,
+            "Matrix must have 4 rows for homogeneous multiply"
         );
-        let copy = vector;
-        for (i, element) in vector.data.iter_mut().enumerate().take(3) {
-            *element =
-                self.get(0, i) * copy[0] + self.get(1, i) * copy[1] + self.get(2, i) * copy[2];
+        assert_eq!(
+            self.cols, 4,
+            "Matrix must have 4 cols for homogeneous multiply"
+        );
+        let x = self[(0, 0)] * vector[0]
+            + self[(0, 1)] * vector[1]
+            + self[(0, 2)] * vector[2]
+            + self[(0, 3)];
+        let y = self[(1, 0)] * vector[0]
+            + self[(1, 1)] * vector[1]
+            + self[(1, 2)] * vector[2]
+            + self[(1, 3)];
+        let z = self[(2, 0)] * vector[0]
+            + self[(2, 1)] * vector[1]
+            + self[(2, 2)] * vector[2]
+            + self[(2, 3)];
+        let w = self[(3, 0)] * vector[0]
+            + self[(3, 1)] * vector[1]
+            + self[(3, 2)] * vector[2]
+            + self[(3, 3)];
+        if w != 0.0 && (w - 1.0).abs() > f64::EPSILON {
+            Vector::new(x / w, y / w, z / w)
+        } else {
+            Vector::new(x, y, z)
         }
     }
 }
@@ -1046,29 +951,16 @@ impl AddAssign<Self> for Matrix {
 impl AddAssign<&Self> for Matrix {
     fn add_assign(&mut self, other: &Self) {
         assert!(
-            self.cols == other.cols,
-            "To add Matices must be the same size"
+            self.cols == other.cols && self.rows == other.rows,
+            "To add Matrices must be the same size"
         );
-        self.data.extend(&other.data);
-        self.cols += other.cols;
+        self.iter_mut().zip(other.iter()).for_each(|(a, b)| *a += b);
     }
 }
 
 impl AddAssign<f64> for Matrix {
     fn add_assign(&mut self, other: f64) {
         self.iter_mut().for_each(|e| *e += other);
-    }
-}
-
-impl AddAssign<[f64; 3]> for Matrix {
-    fn add_assign(&mut self, other: [f64; 3]) {
-        self.add_point(other[0], other[1], other[2]);
-    }
-}
-
-impl AddAssign<Vec<f64>> for Matrix {
-    fn add_assign(&mut self, other: Vec<f64>) {
-        self.add_edge_vec(&other);
     }
 }
 
@@ -1113,7 +1005,7 @@ impl Mul for &Matrix {
 
 impl Mul<&Self> for Matrix {
     type Output = Matrix;
-    fn mul(self, other: &Matrix) -> Self::Output {
+    fn mul(self, other: &Self) -> Self::Output {
         self.mult_matrix(other)
     }
 }
@@ -1127,35 +1019,25 @@ impl Mul for Matrix {
 
 impl MulAssign for Matrix {
     fn mul_assign(&mut self, other: Self) {
-        *self = self.clone() * other;
+        *self = self.mult_matrix(&other);
     }
 }
 
 impl MulAssign<&Self> for Matrix {
     fn mul_assign(&mut self, other: &Matrix) {
-        *self = self.clone() * other;
+        *self = self.mult_matrix(other);
     }
 }
 
 impl MulAssign<f64> for Matrix {
     fn mul_assign(&mut self, other: f64) {
-        self.iter_by_point_mut()
-            .for_each(|row| row.iter_mut().for_each(|e| *e *= other));
-    }
-}
-
-impl Div for Matrix {
-    type Output = Self;
-
-    fn div(self, _other: Self) -> Self {
-        todo!()
+        self.iter_mut().for_each(|e| *e *= other);
     }
 }
 
 impl DivAssign<f64> for Matrix {
     fn div_assign(&mut self, other: f64) {
-        self.iter_by_point_mut()
-            .for_each(|row| row.iter_mut().for_each(|e| *e /= other));
+        self.iter_mut().for_each(|e| *e /= other);
     }
 }
 
@@ -1169,7 +1051,9 @@ impl Matrix {
 
     /// applies the absolute value to each point in matrix's data
     pub fn abs(&mut self) {
-        self.data = self.iter_mut().map(|x| x.abs()).collect();
+        for x in &mut self.data {
+            *x = x.abs();
+        }
     }
 }
 
@@ -1187,60 +1071,59 @@ impl fmt::Display for Matrix {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::Iterator;
+
     use super::*;
 
     #[test]
-    // #[should_panic]
     fn new_matrix() {
         let nums: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
         let edge: Matrix = Matrix::new(3, 3, nums);
-        // println!("{}", edge);
         let ident = Matrix::identity_matrix(3);
         let bruh = edge.transpose();
-        println!("{ident}");
-        println!("{ident:?}");
-        assert!(ident != bruh, "Not Equal");
-        // assert_eq!(edge.data, bruh.data)
+        assert_ne!(ident, bruh);
+        assert_eq!(
+            format!("{ident}"),
+            "1.000000\t0.000000\t0.000000\t\n0.000000\t1.000000\t0.000000\t\n0.000000\t0.000000\t1.000000\t\n"
+        );
+        assert!(format!("{ident:?}").contains("rows: 3"));
     }
 
     #[test]
     fn rows_and_cols() {
         let nums: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
-        let edge: Matrix = Matrix::new(3, 3, nums.clone());
+        let edge: Matrix = Matrix::new(3, 3, nums);
         let row_one: Vec<f64> = edge.iter_col(1).copied().collect();
-        let mut points = edge.iter_by_point();
-        println!("{:?}", points.next());
-        println!("{:?}", points.next());
-        assert_eq!(row_one, nums[3..6]);
+        assert_eq!(row_one, vec![0.4, 0.5, 0.6]);
     }
 
     #[test]
     fn swap() {
         let mut ident = Matrix::identity_matrix(3);
         ident.swap_rows(0, 2);
-        println!("ident:\n{ident}");
-        // println!("test:\n{}", test);
         assert_eq!(
             ident,
             Matrix::new(3, 3, vec![0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0])
         );
+
+        let mut random = Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -1.0, -2.0, -3.0]);
+        random.swap_rows(0, 2);
+
+        let expected = Matrix::new(3, 3, vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0, -3.0, -2.0, -1.0]);
+
+        assert_eq!(random, expected);
     }
 
     #[test]
-    // #[should_panic]
     fn iterators() {
         let ident = Matrix::identity_matrix(4);
-        let src: Vec<&[f64]> = ident.iter_by_point().collect();
-        // println!("{:?}", src);
-        println!("{src:?}");
-        // let src: Vec<String> = ident.iter().map(|x| format!("{}", x)).collect();
-        // println!("{:?}",src)
-        // src.map(|x| println!("{}", x))
-        assert_eq!(5 / ident.rows, 5 % ident.cols);
+        let points = ident.iter_by_point().collect::<Vec<_>>();
+        assert_eq!(points.len(), 4);
+        assert_eq!(points[0], &[1.0, 0.0, 0.0, 0.0]);
+        assert!((ident.iter().copied().sum::<f64>() - 4.0).abs() < 1e-10);
     }
 
     #[test]
-    // #[should_panic]
     fn operators() {
         let mut matrix = Matrix::identity_matrix(2);
         let bruh = Matrix {
@@ -1248,58 +1131,35 @@ mod tests {
             cols: 2,
             data: [2.0, 0.0, 0.0, 2.0].to_vec(),
         };
-        // let bruh = Matrix::identity_matrix(2);
-        println!("{matrix:?}");
         matrix -= bruh;
-        println!("{matrix:?}");
-        // let new_matrix = matrix + bruh;
-        // println!("{:?}", new_matrix);
-        let test = Matrix {
-            rows: 2,
-            cols: 2,
-            data: [2.0, 0.0, 0.0, 2.0].to_vec(),
-        };
-        assert_ne!(matrix, test);
+        assert_eq!(matrix, Matrix::new(2, 2, vec![-1.0, 0.0, 0.0, -1.0]));
     }
 
     #[test]
-    #[should_panic]
-    fn add_points() {
-        let mut matrix = Matrix::new(0, 4, Vec::with_capacity(8));
-        let x = [0.0, 0.1, 0.2];
-        let y = vec![0.3, 1.3, 2.3];
-        matrix += x;
-        matrix += y;
-        matrix += x;
-        matrix += x;
-        println!("{matrix}");
-        matrix.identifize();
-        println!("{matrix}");
+    #[should_panic(expected = "out of bounds")]
+    fn indexing_invalid_row_panics() {
+        let matrix = Matrix::identity_matrix(3);
+        let _ = matrix[(4, 0)];
     }
 
     #[test]
-    // #[should_panic]
+    #[should_panic(expected = "out of bounds")]
+    fn indexing_invalid_col_panics() {
+        let matrix = Matrix::identity_matrix(3);
+        let _ = matrix[(0, 4)];
+    }
+
+    #[test]
     #[allow(clippy::many_single_char_names)]
     fn mul_for_now() {
         let mut a = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
-        // let _b = Matrix::new(3, 1, vec![3.0, 4.0, 2.0]);
         let c = Matrix::new(
             3,
             4,
             vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
         );
-        // let _d: Matrix = Matrix::new(
-        //     4,
-        //     3,
-        //     vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
-        // );
-        println!("{a}");
-        println!("{c}");
         a *= c;
-        println!("{a}");
-        // let e = b * d;
-        // println!("{}", c);
-        // assert_eq!(c, e)
+        assert_eq!(a, Matrix::new(1, 4, vec![89.0, 91.0, 48.0, 18.0]));
     }
 
     #[test]
@@ -1315,9 +1175,13 @@ mod tests {
 
     #[test]
     fn iter_test() {
-        Matrix::identity_matrix(4).into_iter().for_each(|i| {
-            println!("{i}");
-        });
+        let values = Matrix::identity_matrix(4).into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            vec![
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0
+            ]
+        );
     }
 
     #[test]
@@ -1366,26 +1230,22 @@ mod tests {
         ];
         let h = Matrix::new(4, 4, data.to_vec());
         let her = Matrix::hermite();
-        println!("{her}");
-        println!("{h}");
+        assert_eq!(her, h);
     }
 
     #[test]
     fn add_matrix() {
-        let d = Matrix::new(2, 2, vec![5.0, 10.0, 14.0, 7.0]);
-        let e = Matrix::new(2, 2, vec![-3.0, 7.0, 1.0, 13.0]);
-        let f = d.clone() * e.clone();
-        let a = d.mult_trans(&e);
-        println!("{f}");
-        println!("{a}");
+        let d = Matrix::new(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let e = Matrix::new(3, 2, vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]);
+        let a = d.mult_transpose_left(&e);
+        assert_eq!(a, Matrix::new(2, 2, vec![50.0, 122.0, 68.0, 167.0]));
     }
 
     #[test]
     fn transpose_test() {
         let a = Matrix::new(2, 2, vec![-15.0, 14.0, 70.0, 91.0]);
-        println!("{a}");
         let b = a.transpose();
-        println!("{b}");
+        assert_eq!(b, Matrix::new(2, 2, vec![-15.0, 70.0, 14.0, 91.0]));
     }
 
     #[test]
@@ -1403,29 +1263,199 @@ mod tests {
     #[test]
     fn det_test() {
         let a = Matrix::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-        println!("{a}");
-
-        // det = ad - bc = 1 * 4 - 2 * 3 = -2
         let det = a.determinant().expect("not a squared matrix");
-
-        println!("{det}");
+        assert!((det - (-2.0)).abs() < 1e-10);
 
         let b = Matrix::new(2, 2, vec![3.0, 4.0, 8.0, 6.0]);
-        println!("{b}");
-
-        // det = ad - bc = 18 - 32 = -14
         let det = b.determinant().expect("not a squared matrix");
-
-        println!("{det}");
+        assert!((det - (-14.0)).abs() < 1e-10);
 
         let c = Matrix::new(3, 3, vec![1.0, 2.0, 0.0, -1.0, 3.0, 1.0, 0.0, 4.0, 2.0]);
-
-        println!("{c}");
-
-        // det = a(ei - fh) - b(di - fg) + c(dh - eg)
-        // 6
         let det = c.determinant().expect("not a squared matrix");
+        assert!((det - 6.0).abs() < 1e-10);
+    }
 
-        println!("{det}");
+    #[test]
+    fn determinant_handles_pivoting_without_stale_subdiagonal_values() {
+        let matrix = Matrix::new(
+            4,
+            4,
+            vec![
+                0.0, 2.0, 3.0, 1.0, 1.0, 0.0, 4.0, 2.0, 5.0, 6.0, 0.0, 3.0, 2.0, 1.0, 7.0, 0.0,
+            ],
+        );
+
+        assert!((matrix.determinant().unwrap() + 211.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_iter_row() {
+        let matrix = Matrix {
+            rows: 3,
+            cols: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], // column-major
+        };
+
+        let row0: Vec<_> = matrix.iter_row(0).collect();
+        let row1: Vec<_> = matrix.iter_row(1).collect();
+        let row2: Vec<_> = matrix.iter_row(2).collect();
+
+        assert_eq!(row0, vec![&1.0, &4.0, &7.0]);
+        assert_eq!(row1, vec![&2.0, &5.0, &8.0]);
+        assert_eq!(row2, vec![&3.0, &6.0, &9.0]);
+    }
+
+    #[test]
+    fn test_iter_col() {
+        let matrix = Matrix {
+            rows: 3,
+            cols: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+
+        let col0: Vec<_> = matrix.iter_col(0).collect();
+        let col1: Vec<_> = matrix.iter_col(1).collect();
+        let col2: Vec<_> = matrix.iter_col(2).collect();
+
+        assert_eq!(col0, vec![&1.0, &2.0, &3.0]);
+        assert_eq!(col1, vec![&4.0, &5.0, &6.0]);
+        assert_eq!(col2, vec![&7.0, &8.0, &9.0]);
+    }
+
+    #[test]
+    fn test_iter_col_mut() {
+        let mut matrix = Matrix {
+            rows: 3,
+            cols: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+
+        matrix.iter_col_mut(1).for_each(|x| *x *= 2.0);
+
+        assert_eq!(
+            matrix.data,
+            vec![1.0, 2.0, 3.0, 8.0, 10.0, 12.0, 7.0, 8.0, 9.0]
+        );
+    }
+
+    #[test]
+    fn test_iter_rows() {
+        let matrix = Matrix {
+            rows: 2,
+            cols: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        };
+
+        let rows = matrix
+            .iter_rows()
+            .map(std::iter::Iterator::collect::<Vec<_>>)
+            .collect::<Vec<_>>();
+
+        assert_eq!(rows, vec![vec![&1.0, &3.0, &5.0], vec![&2.0, &4.0, &6.0]]);
+
+        let matrix = Matrix {
+            rows: 3,
+            cols: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+
+        let rows = matrix
+            .iter_rows()
+            .map(std::iter::Iterator::collect::<Vec<_>>)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rows,
+            vec![
+                vec![&1.0, &4.0, &7.0],
+                vec![&2.0, &5.0, &8.0],
+                vec![&3.0, &6.0, &9.0]
+            ]
+        );
+
+        let matrix = Matrix {
+            rows: 3,
+            cols: 3,
+            data: vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
+        };
+
+        let rows = matrix
+            .iter_rows()
+            .map(std::iter::Iterator::collect::<Vec<_>>)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rows,
+            vec![
+                vec![&1.0, &2.0, &3.0],
+                vec![&4.0, &5.0, &6.0],
+                vec![&7.0, &8.0, &9.0]
+            ]
+        );
+
+        let large_i = Matrix::identity_matrix(20);
+
+        let rows = large_i
+            .iter_rows()
+            .map(Iterator::collect::<Vec<_>>)
+            .collect::<Vec<_>>();
+
+        let mut expected = vec![];
+
+        for i in 0..20 {
+            let mut row = vec![&0.0; 20];
+            row[i] = &1.0;
+            expected.push(row);
+        }
+
+        assert_eq!(rows, expected, "identity matrix rows are not as expected");
+    }
+
+    #[test]
+    fn test_gauss_jordan_square() {
+        let mut matrix = Matrix::new(3, 3, vec![2.0, 1.0, -1.0, -3.0, -1.0, 2.0, -2.0, 1.0, 2.0]);
+        assert!(Matrix::gauss_jordan_general(&mut matrix, EPS));
+
+        // Verify that the matrix is in reduced row-echelon form
+        let expected_matrix = Matrix::new(3, 3, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        assert!(matrix.approx_eq(&expected_matrix, EPS));
+    }
+
+    #[test]
+    fn test_matrix_inversion() {
+        let matrices = [
+            Matrix::new(2, 2, vec![2.0, 1.0, 1.0, 3.0]),
+            Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 0.0, 1.0, 4.0, 5.0, 6.0, 7.0]),
+            // (
+            //     Matrix::new(3, 3, vec![2.0, 1.0, 1.0, 3.0, 2.0, 1.0, 2.0, 3.0, 3.0]),
+            //     Matrix::new(3, 3, vec![3.0, -1.0, -1.0, 2.0, 1.0, -1.0, 0.0, 1.0, 1.0]),
+            // ),
+            // (
+            //     Matrix::new(4, 4, vec![1.0, 0.0, 2.0, -1.0, 3.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 1.0]),
+            //     Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.0, -1.5, 0.0, 0.0, 0.333333, 0.0, 0.0, -0.333333, 0.0]),
+            // ),
+            // (
+            //     Matrix::new(5, 5, vec![
+            //         1.0, 0.0, 0.0, 0.0, 0.0,
+            //         0.0, 1.0, 0.0, 0.0, 0.0,
+            //         0.0, 0.0, 1.0, 0.0, 0.0,
+            //         0.0, 0.0, 0.0, 1.0, 0.0,
+            //         0.0, 0.0, 0.0, 0.0, 1.0,
+            //     ]),
+            //     Matrix::new(5, 5, vec![
+            //         1.0, 0.0, 0.0, 0.0, 0.0,
+            //         0.0, 1.0, 0.0, 0.0, 0.0,
+            //         0.0, 0.0, 1.0, 0.0, 0.0,
+            //         0.0, 0.0, 0.0, 1.0, 0.0,
+            //         0.0, 0.0, 0.0, 0.0, 1.0,
+            //     ]),
+            // ),
+        ];
+
+        for matrix in matrices {
+            let inverse = matrix.inverse().expect("matrix should be invertible");
+            let identity = Matrix::identity_matrix(matrix.rows());
+            assert!((matrix * inverse).approx_eq(&identity, EPS));
+        }
     }
 }

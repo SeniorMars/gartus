@@ -217,11 +217,13 @@ impl Display for Vector {
 mod test {
     use super::*;
     #[test]
-    fn print_vector() {
+    fn cross_product_and_length() {
         let one = Vector::new(1.0, 1.0, 1.0);
         let two = Vector::new(1.0, 2.0, 3.0);
         let cross = one.cross(two);
-        println!("{cross}");
-        println!("{:.6}", cross.length());
+        assert!((cross.data[0] - 1.0_f64).abs() < f64::EPSILON);
+        assert!((cross.data[1] - (-2.0_f64)).abs() < f64::EPSILON);
+        assert!((cross.data[2] - 1.0_f64).abs() < f64::EPSILON);
+        assert!((cross.length() - 6.0_f64.sqrt()).abs() < f64::EPSILON);
     }
 }

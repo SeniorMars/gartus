@@ -1,7 +1,7 @@
 use gartus::prelude::{Canvas, Rgb};
 
 fn main() {
-    let mut img = Canvas::with_capacity(256, 256, 255, Rgb::default());
+    let mut img = Canvas::new(256, 256, Rgb::default());
     let (width, height) = (img.width(), img.height());
     let mut data: Vec<Rgb> = Vec::with_capacity((width * height) as usize);
     (0..height).rev().for_each(|j| {
@@ -15,7 +15,8 @@ fn main() {
         });
     });
     eprintln!("Done.");
-    img.fill_canvas(data);
+    img.fill_canvas(data)
+        .expect("pixel data should match canvas size");
     img.display().expect("Could not render image")
 }
 
@@ -23,7 +24,6 @@ fn main() {
 mod test {
     use super::*;
     use gartus::graphics::colors::Hsl;
-    use gartus::graphics::config::CanvasConfig;
     use num::complex::Complex;
     use std::f32::consts::PI;
 
@@ -38,7 +38,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / WIDTH as f32;
         let scaley = (cymax - cymin) / HEIGHT as f32;
-        let mut mandelcos = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
+        let mut mandelcos = Canvas::new(WIDTH, HEIGHT, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             let cx = cxmin + x as f32 * scalex;
@@ -62,7 +62,9 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        mandelcos.fill_canvas(data);
+        mandelcos
+            .fill_canvas(data)
+            .expect("pixel data should match canvas size");
         // let cos = mandelcos.sobel();
         mandelcos.display().expect("Could not render image");
         mandelcos
@@ -81,7 +83,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut nfam = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
+        let mut nfam = Canvas::new(WIDTH, HEIGHT, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -105,7 +107,8 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        nfam.fill_canvas(data);
+        nfam.fill_canvas(data)
+            .expect("pixel data should match canvas size");
         nfam.display().expect("Could not render image");
         nfam.save_extension("./pics/nfam.png")
             .expect("Could not save image");
@@ -122,7 +125,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut mandel = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
+        let mut mandel = Canvas::new(WIDTH, HEIGHT, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             let cx = cxmin + x as f32 * scalex;
@@ -146,7 +149,9 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        mandel.fill_canvas(data);
+        mandel
+            .fill_canvas(data)
+            .expect("pixel data should match canvas size");
         mandel.display().expect("Could not render image");
         let brot = mandel.sobel();
         brot.save_extension("./pics/mandel.png")
@@ -165,7 +170,7 @@ mod test {
         let cymax = 1.5f32;
         let scalex = (cxmax - cxmin) / HEIGHT as f32;
         let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut ship = Canvas::with_capacity(WIDTH, HEIGHT, 255, Rgb::default());
+        let mut ship = Canvas::new(WIDTH, HEIGHT, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
@@ -193,7 +198,8 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        ship.fill_canvas(data);
+        ship.fill_canvas(data)
+            .expect("pixel data should match canvas size");
         let ship = ship.sobel();
         ship.display().expect("Could not render image");
         ship.save_extension("./pics/red_ship.png")
@@ -213,9 +219,9 @@ mod test {
         let cymax = 1.8f32;
         let scalex = (cxmax - cxmin) / ZOOM as f32;
         let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut ship = Canvas::with_capacity(WIDTH, HEIGHT, 255, Hsl::default());
-        ship.set_config(CanvasConfig::new(true, false, true));
-        let mut data: Vec<Hsl> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
+        let mut ship = Canvas::new(WIDTH, HEIGHT, Rgb::default());
+        ship.upper_left_origin = true;
+        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         (0..WIDTH).for_each(|x| {
             (0..HEIGHT).for_each(|y| {
                 let cx = cxmin + x as f32 * scalex;
@@ -236,14 +242,15 @@ mod test {
                 let hue = i % 360;
                 let saturation = 100;
                 let light = 75;
-                data.push(Hsl {
+                data.push(Rgb::from(Hsl {
                     hue,
                     saturation,
                     light,
-                })
+                }))
             });
         });
-        ship.fill_canvas(data);
+        ship.fill_canvas(data)
+            .expect("pixel data should match canvas size");
         ship.display().expect("Could not render image")
     }
 
@@ -260,8 +267,8 @@ mod test {
         let cymax = 5f32;
         let scalex = (cxmax - cxmin) / ZOOM as f32;
         let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut color_domain = Canvas::with_capacity(WIDTH, HEIGHT, 255, Hsl::default());
-        let mut data: Vec<Hsl> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
+        let mut color_domain = Canvas::new(WIDTH, HEIGHT, Rgb::default());
+        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
         let unit = Complex::new(1.0, 0.0);
         let four = Complex::new(4.0, 0.0);
         let lattes = |z: Complex<f32>| ((z + unit).powi(2)) / ((four * z) * (z.powi(2) - unit));
@@ -276,14 +283,16 @@ mod test {
                 let hue = (z.arg() * 180.0 / PI).round() as u16;
                 let saturation = 100;
                 let light = 50;
-                data.push(Hsl {
+                data.push(Rgb::from(Hsl {
                     hue,
                     saturation,
                     light,
-                })
+                }))
             })
         });
-        color_domain.fill_canvas(data);
+        color_domain
+            .fill_canvas(data)
+            .expect("pixel data should match canvas size");
         color_domain.display().expect("Could not render image");
         color_domain
             .save_extension("./pics/failed_domain20.png")
@@ -294,7 +303,7 @@ mod test {
     fn julia() {
         let width = 800;
         let height = 600;
-        let mut julia = Canvas::with_capacity(height, width, 255, Rgb::default());
+        let mut julia = Canvas::new(height, width, Rgb::default());
         let mut data: Vec<Rgb> = Vec::with_capacity((width * height) as usize);
         let cx = -0.9;
         let cy = 0.27015;
@@ -318,7 +327,9 @@ mod test {
                 // write!(writer, "{} {} {} ", i as u8, i as u8, i as u8)?;
             }
         }
-        julia.fill_canvas(data);
+        julia
+            .fill_canvas(data)
+            .expect("pixel data should match canvas size");
         let julia = julia.sobel();
         julia.display().expect("Could not render image");
         julia

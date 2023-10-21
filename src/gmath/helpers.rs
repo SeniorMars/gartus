@@ -21,6 +21,10 @@ pub(crate) fn binom(n: usize, k: usize) -> usize {
     result
 }
 
+// pub(crate) fn factorial(n: usize) -> usize {
+//     (1..=n).product()
+// }
+
 // fn recbinom(n: usize, k: usize) -> usize {
 //     if n == k || k == 0 {
 //         1

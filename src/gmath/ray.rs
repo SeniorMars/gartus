@@ -36,10 +36,17 @@ impl Ray {
         &self.direction
     }
 
-    /// Get a reference to the ray's orgin.
+    /// Get a reference to the ray's origin.
+    #[must_use]
+    pub fn origin(&self) -> &Vector {
+        &self.origin
+    }
+
+    /// Get a reference to the ray's origin.
+    #[deprecated(note = "use origin instead")]
     #[must_use]
     pub fn orgin(&self) -> &Vector {
-        &self.origin
+        self.origin()
     }
 
     /// Returns the position a ray will be located given a real number
@@ -47,7 +54,7 @@ impl Ray {
     /// # Arguments
     ///
     /// * `t` - A real number that will determines where
-    /// the ray will be located
+    ///   the ray will be located
     ///
     /// # Examples
     ///
@@ -58,6 +65,7 @@ impl Ray {
     /// let two = Vector::new(1.0, 1.0, 1.0);
     /// let ray = Ray::new(one, two);
     /// let new_loc = ray.at(10.00);
+    /// ```
     #[must_use]
     pub fn at(&self, t: f64) -> Vector {
         self.origin + t * self.direction

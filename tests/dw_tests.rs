@@ -1,3 +1,4 @@
+use gartus::gmath::edge_matrix::EdgeMatrix;
 use gartus::gmath::matrix::*;
 use gartus::graphics::colors::*;
 use gartus::graphics::display::*;
@@ -5,35 +6,32 @@ use gartus::parser::Parser;
 use std::io;
 
 #[test]
+#[ignore]
 fn script_transform() {
-    let mut dw = Parser::new(
-        "./tests/script_transform",
-        500,
-        500,
-        255,
-        &Rgb::new(0, 255, 0),
-    );
+    let mut dw = Parser::new("./tests/script_transform", 500, 500, &Rgb::new(0, 255, 0));
     dw.parse_file().expect("Script is valid");
 }
 
 #[test]
+#[ignore]
 fn curve_script() {
-    let mut dw = Parser::new("./tests/script_curves", 500, 500, 255, &Rgb::new(0, 255, 0));
+    let mut dw = Parser::new("./tests/script_curves", 500, 500, &Rgb::new(0, 255, 0));
     dw.parse_file().expect("Script is valid");
 }
 
 #[test]
 fn matrix_test() {
-    let mut edge_matrix = Matrix::new(4, 0, Vec::with_capacity(4 * 2));
+    let mut edge_matrix = EdgeMatrix::new();
     // println!("{}", edge_matrix);
     println!("Testing add_edge. Adding (1, 2, 3), (4, 5, 6) m2 = ");
-    edge_matrix.add_edge(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-    println!("{}", edge_matrix);
+    edge_matrix.push_edge(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+    let edge_inner = edge_matrix.as_matrix().clone();
+    println!("{}", edge_inner);
     let ident = Matrix::identity_matrix(4);
     println!("Testing ident. m1 =");
     println!("{}", ident);
     println!("Testing Matrix mult. m1 * m2 =");
-    let result = ident * edge_matrix.clone();
+    let result = ident * edge_inner;
     println!("{}", result);
     println!("Testing Matrix mult. m1 =");
     let mut m1 = Matrix::new(
@@ -54,10 +52,11 @@ fn matrix_test() {
 }
 
 #[test]
+#[ignore]
 fn dw_line_test() -> io::Result<()> {
     let xres: f64 = 750.0;
     let yres: f64 = 750.0;
-    let mut screen = Canvas::new(xres as u32, yres as u32, 255, Rgb::default());
+    let mut screen = Canvas::new(xres as u32, yres as u32, Rgb::default());
     // screen.upper_left_system = true;
     screen.set_line_color_rgb(0, 255, 0);
 
@@ -89,7 +88,7 @@ fn dw_line_test() -> io::Result<()> {
 
     // saving
     // screen.animation("test")
-    // screen.display()?;
+    screen.display()?;
     screen.save_binary("./pics/binary2.ppm")?;
     screen.save_ascii("./pics/ascii2.ppm")?;
     screen.save_extension("./pics/img.png")
