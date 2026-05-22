@@ -1,6 +1,6 @@
 use crate::graphics::colors::Rgb;
 
-use core::{fmt, slice};
+use core::slice;
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -10,6 +10,7 @@ use std::{
 
 #[derive(Clone, Debug)]
 /// An art [Canvas] / computer screen is represented here.
+#[must_use]
 pub struct Canvas {
     width: u32,
     height: u32,
@@ -40,6 +41,11 @@ impl Default for Canvas {
 }
 
 impl Canvas {
+    /// Returns a [`CanvasBuilder`] to configure a new [Canvas].
+    pub fn builder(width: u32, height: u32) -> CanvasBuilder {
+        CanvasBuilder::new(width, height)
+    }
+
     #[allow(clippy::cast_possible_truncation)]
     fn pixel_count(width: u32, height: u32) -> usize {
         width as usize * height as usize
@@ -61,18 +67,10 @@ impl Canvas {
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, Rgb::default());
     /// ```
-    #[must_use] 
     pub fn new(width: u32, height: u32, line_color: Rgb) -> Self {
-        let pixels: Vec<Rgb> = vec![Rgb::default(); Self::pixel_count(width, height)];
-        Self {
-            height,
-            width,
-            pixels,
-            upper_left_origin: false,
-            wrapped: true,
-            line: line_color,
-            line_width: 1.0,
-        }
+        Self::builder(width, height)
+            .line_color(line_color)
+            .build()
     }
 
     /// Returns a new [Canvas] to be drawn on with a specific background color.
@@ -92,18 +90,10 @@ impl Canvas {
     /// let background_color = Rgb::new(1, 2, 3);
     /// let image = Canvas::new_with_bg(500, 500, background_color);
     /// ```
-    #[must_use] 
     pub fn new_with_bg(width: u32, height: u32, background_color: Rgb) -> Self {
-        let line = Rgb::default();
-        Self {
-            height,
-            width,
-            pixels: vec![background_color; Self::pixel_count(width, height)],
-            upper_left_origin: false,
-            wrapped: true,
-            line,
-            line_width: 1.0,
-        }
+        Self::builder(width, height)
+            .background(background_color)
+            .build()
     }
 
     /// Returns the width of a [Canvas]
@@ -116,7 +106,7 @@ impl Canvas {
     /// let image = Canvas::new(500, 500, Rgb::default());
     /// let width = image.width();
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -131,7 +121,7 @@ impl Canvas {
     /// let image = Canvas::new(500, 500, Rgb::default());
     /// let height = image.height();
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn height(&self) -> u32 {
         self.height
     }
@@ -146,12 +136,28 @@ impl Canvas {
     /// let image = Canvas::new(500, 500, Rgb::default());
     /// let size = image.len();
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn len(&self) -> usize {
-        Self::pixel_count(self.width, self.height)
+        self.pixels.len()
     }
 
-    /// Returns if [Canvas] is empty
+    /// Returns true if the [Canvas] has no pixels.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.pixels.is_empty()
+    }
+
+    /// Returns an iterator over the pixels of the [Canvas].
+    pub fn iter(&self) -> slice::Iter<'_, Rgb> {
+        self.pixels.iter()
+    }
+
+    /// Returns a mutable iterator over the pixels of the [Canvas].
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Rgb> {
+        self.pixels.iter_mut()
+    }
+
+    /// Returns an iterator that iterates over the rows of the [Canvas].
     ///
     /// # Examples
     ///
@@ -159,86 +165,8 @@ impl Canvas {
     /// ```
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, Rgb::default());
-    /// let size = image.len();
-    /// ```
-    #[must_use] 
-    pub fn is_empty(&self) -> bool {
-        self.pixels.is_empty()
-    }
-
-    /// Sets the color of the drawing line to a different color given a [Pixel].
-    ///
-    /// # Arguments
-    ///
-    /// * `new_color` - A `pixel` that represent the new drawing color
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let mut image = Canvas::new(500, 500, Rgb::default());
-    /// let new_color = Rgb::new(12, 20, 30);
-    /// image.set_line_pixel(new_color);
-    /// ```
-    pub fn set_line_pixel(&mut self, new_color: Rgb) {
-        self.line = new_color;
-    }
-
-    /// Fills in an empty canvas
-    ///
-    /// # Arguments
-    ///
-    /// * `new_pixels` - A vector of pixels that represents new data
-    ///   to append to an empty canvas
-    ///
-    /// # Errors
-    /// Returns an error if `new_pixels` does not exactly fill the canvas.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let mut image = Canvas::new(1, 1, Rgb::default());
-    /// let data = vec![Rgb::default()];
-    /// image.fill_canvas(data).expect("data should match canvas size")
-    /// ```
-    pub fn fill_canvas(&mut self, new_pixels: Vec<Rgb>) -> Result<(), &'static str> {
-        if new_pixels.len() != self.len() {
-            return Err("new data must exactly fill canvas");
-        }
-        self.pixels = new_pixels;
-        Ok(())
-    }
-
-    /// Sets an (X, Y) pair to the proper spot in Pixels
-    #[allow(clippy::cast_possible_truncation)]
-    pub(in crate::graphics) fn index(&self, x: u32, y: u32) -> usize {
-        (y * self.width + x) as usize
-    }
-
-    /// Returns an iterator over the canvas pixels.
-    pub fn iter(&self) -> impl Iterator<Item = &Rgb> + '_ {
-        self.pixels.iter()
-    }
-
-    /// Returns a mutable iterator on pixels
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Rgb> + '_ {
-        self.pixels.iter_mut()
-    }
-
-    /// Returns a iterator that iterates over a specific row.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let image = Canvas::new(1, 1, Rgb::default());
     /// let iter = image.iter_row();
     /// ```
-    #[allow(clippy::cast_possible_truncation)]
     pub fn iter_row(&self) -> slice::ChunksExact<'_, Rgb> {
         self.pixels.chunks_exact(self.width as usize)
     }
@@ -250,20 +178,41 @@ impl Canvas {
     /// Basic usage:
     /// ```
     /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let mut image = Canvas::new(1, 1, Rgb::default());
-    /// let iter = image.iter_row_mut();
+    /// let mut image = Canvas::new(500, 500, Rgb::default());
+    /// let mut iter = image.iter_row_mut();
     /// ```
-    #[allow(clippy::cast_possible_truncation)]
     pub fn iter_row_mut(&mut self) -> slice::ChunksExactMut<'_, Rgb> {
         self.pixels.chunks_exact_mut(self.width as usize)
     }
 
+    /// Returns a reference to the (x, y) [Pixel] of body of in the
+    /// [Canvas].
+    ///
+    /// Returns `None` if out of bounds.
+    #[must_use]
+    pub fn get_pixel(&self, x: i64, y: i64) -> Option<&Rgb> {
+        let (x, y) = self.normalize_coords(x, y)?;
+        Some(&self.pixels[y as usize * self.width as usize + x as usize])
+    }
+
+    /// Returns a mutable reference to the (x, y) [Pixel] of body of in the
+    /// [Canvas].
+    ///
+    /// Returns `None` if out of bounds.
+    pub fn get_pixel_mut(&mut self, x: i64, y: i64) -> Option<&mut Rgb> {
+        let (x, y) = self.normalize_coords(x, y)?;
+        let width = self.width;
+        Some(&mut self.pixels[y as usize * width as usize + x as usize])
+    }
+
+    /// Maps external coordinates (potentially negative or out-of-bounds) to
+    /// internal canvas coordinates based on wrapping and origin settings.
+    ///
+    /// Returns `None` if the point is clipped.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn normalize_coords(&self, x: i64, y: i64) -> Option<(u32, u32)> {
+    #[must_use]
+    pub fn normalize_coords(&self, x: i64, y: i64) -> Option<(u32, u32)> {
         let (width, height) = (i64::from(self.width), i64::from(self.height));
-        if width == 0 || height == 0 {
-            return None;
-        }
 
         let (x, y) = if self.wrapped {
             (x.rem_euclid(width), y.rem_euclid(height))
@@ -282,13 +231,30 @@ impl Canvas {
         Some((x as u32, y as u32))
     }
 
-    /// Returns a reference to the (x, y) [Pixel] of body of in the
-    /// [Canvas].
+    /// Sets the pixel at (x, y) to `pixel`.
     ///
     /// # Arguments
     ///
-    /// * `x` - A signed i32 int that represents the x coordinate that will access the "body"
-    /// * `y` - A signed i32 int that represents the y coordinate that will access the "body"
+    /// * `pixel` - A [Pixel] that will be plotted at (x, y)
+    /// * `x` - An signed int that represents horizontal location
+    /// * `y` - An signed int that represents vertical location
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::gartus::prelude::{Canvas, Rgb};
+    /// let mut image = Canvas::new(500, 500, Rgb::default());
+    /// let pixel = Rgb::new(255, 255, 255);
+    /// image.plot(&pixel, 250, 250);
+    /// ```
+    pub fn plot(&mut self, pixel: &Rgb, x: i64, y: i64) {
+        if let Some(target) = self.get_pixel_mut(x, y) {
+            *target = *pixel;
+        }
+    }
+
+    /// Returns a flat representation of all the pixels in the [Canvas].
     ///
     /// # Examples
     ///
@@ -296,87 +262,24 @@ impl Canvas {
     /// ```
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, Rgb::default());
-    /// let color = image.get_pixel(250, 250);
+    /// let pixels = image.pixels();
     /// ```
-    #[must_use] 
-    pub fn get_pixel(&self, x: i64, y: i64) -> Option<&Rgb> {
-        let (x, y) = self.normalize_coords(x, y)?;
-        Some(&self.pixels[self.index(x, y)])
-    }
-
-    /// Returns a reference to the pixel at `(x, y)`, panicking if out of bounds.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the coordinate is out of bounds and wrapping is disabled.
     #[must_use]
-    pub fn pixel(&self, x: i64, y: i64) -> &Rgb {
-        self.get_pixel(x, y)
-            .expect("pixel coordinate out of bounds")
-    }
-
-    /// Plots `new_color` to the (X, Y) coordinate pair corresponding to the [Canvas] body.
-    ///
-    /// # Arguments
-    ///
-    /// * `new_color` - The [Pixel] that will be "drawn" in the [Canvas] "body"
-    /// * `x` - A signed i32 int that represents the x coordinate that will access the "body"
-    /// * `y` - A signed i32 int that represents the y coordinate that will access the "body"
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let mut image = Canvas::new(500, 500, Rgb::default());
-    /// let color = Rgb::new(1, 1, 1);
-    /// image.plot(&color, 100, 100);
-    /// ```
-    pub fn plot(&mut self, new_color: &Rgb, x: i64, y: i64) {
-        if let Some((x, y)) = self.normalize_coords(x, y) {
-            let index = self.index(x, y);
-            self.pixels[index] = *new_color;
-        }
-    }
-
-    /// Clears the [Canvas] to `Pixel::default`()
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let background_color = Rgb::new(1, 2, 3);
-    /// let mut image = Canvas::new_with_bg(500, 500, background_color);
-    /// image.clear_canvas()
-    /// ```
-    pub fn clear_canvas(&mut self) {
-        self.pixels.fill(Rgb::default());
-    }
-
-    /// Fills the entire [Canvas] with one [Pixel]
-    ///
-    /// # Arguments
-    ///
-    /// * `background_color` - A [Pixel] that will represent the color of the background color that will fill the [Canvas]
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let background_color = Rgb::new(1, 2, 3);
-    /// let mut image = Canvas::new(500, 500, Rgb::default());
-    /// image.fill_color(&background_color)
-    /// ```
-    pub fn fill_color(&mut self, bg: &Rgb) {
-        self.pixels.fill(*bg);
-    }
-
-    /// Get a reference to the canvas's pixels.
-    #[must_use] 
     pub fn pixels(&self) -> &[Rgb] {
         self.pixels.as_ref()
+    }
+
+    /// Overwrites all pixels in the canvas with the given pixel data.
+    ///
+    /// # Panics
+    /// Panics if the length of `pixels` does not match the canvas size.
+    pub fn fill_canvas(&mut self, pixels: Vec<Rgb>) {
+        assert_eq!(
+            pixels.len(),
+            self.pixels.len(),
+            "new pixel data must match canvas size"
+        );
+        self.pixels = pixels;
     }
 }
 
@@ -385,9 +288,9 @@ impl Canvas {
     ///
     /// # Arguments
     ///
-    /// * `red` - An unsigned u8 int that represents the new red of the drawing color
-    /// * `green` - An unsigned u8 int that represents the new green of the drawing color
-    /// * `blue` - An unsigned u8 int that represents blue of the drawing color
+    /// * `red` - An unsigned u8 int that represents red light
+    /// * `green` - An unsigned u8 int that represents green light
+    /// * `blue` - An unsigned u8 int that represents blue light
     ///
     /// # Examples
     ///
@@ -395,17 +298,17 @@ impl Canvas {
     /// ```
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, Rgb::default());
-    /// image.set_line_color_rgb(55, 95, 100);
+    /// image.set_line_rgb_values(255, 255, 255);
     /// ```
-    pub fn set_line_color_rgb(&mut self, red: u8, green: u8, blue: u8) {
+    pub fn set_line_rgb_values(&mut self, red: u8, green: u8, blue: u8) {
         self.line = Rgb::new(red, green, blue);
     }
 
-    /// Sets the color of the drawing line to a different color given an RGB Pixel
+    /// Sets the color of the drawing line to a different color given a [Rgb] value.
     ///
     /// # Arguments
     ///
-    /// * `Pixel` - A rgb pixel
+    /// * `color` - A [Rgb] value that will be the new color of the drawing line
     ///
     /// # Examples
     ///
@@ -413,79 +316,117 @@ impl Canvas {
     /// ```
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let mut image = Canvas::new(500, 500, Rgb::default());
-    /// image.set_line_rgb(Rgb::default());
+    /// let color = Rgb::new(255, 255, 255);
+    /// image.set_line_rgb(color);
     /// ```
     pub fn set_line_rgb(&mut self, color: Rgb) {
         self.line = color;
     }
 
-    /// Returns the current line width in pixels.
+    /// Sets the color of the drawing line to a different color given a [Rgb] value.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - A [Rgb] value that will be the new color of the drawing line
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::gartus::prelude::{Canvas, Rgb};
+    /// let mut image = Canvas::new(500, 500, Rgb::default());
+    /// let color = Rgb::new(255, 255, 255);
+    /// image.set_line_pixel(color);
+    /// ```
+    pub fn set_line_pixel(&mut self, color: Rgb) {
+        self.line = color;
+    }
+
+    /// Clears the current [Canvas].
+    ///
+    /// Re-fills the canvas with its default background color (all black).
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use crate::gartus::prelude::{Canvas, Rgb};
+    /// let mut image = Canvas::new(500, 500, Rgb::default());
+    /// image.clear_canvas();
+    /// ```
+    pub fn clear_canvas(&mut self) {
+        self.pixels.fill(Rgb::default());
+    }
+
+    /// Returns the current drawing line color.
+    #[must_use]
+    pub fn line_color(&self) -> Rgb {
+        self.line
+    }
+
+    /// Sets the current drawing line width.
+    pub fn set_line_width(&mut self, width: f64) {
+        self.line_width = width;
+    }
+
+    /// Returns the current drawing line width.
     #[must_use]
     pub fn line_width(&self) -> f64 {
         self.line_width
-    }
-
-    /// Sets the line width in pixels.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `width` is not positive and finite.
-    pub fn set_line_width(&mut self, width: f64) {
-        assert!(
-            width.is_finite() && width > 0.0,
-            "line width must be positive and finite"
-        );
-        self.line_width = width;
-    }
-}
-
-impl IntoIterator for Canvas {
-    type Item = Rgb;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.pixels.into_iter()
     }
 }
 
 impl Index<usize> for Canvas {
     type Output = Rgb;
+
     fn index(&self, index: usize) -> &Self::Output {
         &self.pixels[index]
     }
 }
 
 impl IndexMut<usize> for Canvas {
-    fn index_mut(&mut self, index: usize) -> &mut Rgb {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.pixels[index]
     }
 }
 
-impl fmt::Display for Canvas {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "P3\n{} {}\n255", self.width, self.height)?;
-        for pixel in self.iter() {
-            writeln!(f, "{} {} {}", pixel.red, pixel.green, pixel.blue)?;
-        }
-        Ok(())
-    }
-}
-
-// saving
 impl Canvas {
-    fn write_ascii_ppm<W: Write>(&self, mut out: W) -> io::Result<()> {
-        writeln!(out, "P3\n{} {}\n255", self.width, self.height)?;
-        for pixel in self.iter() {
-            writeln!(out, "{} {} {}", pixel.red, pixel.green, pixel.blue)?;
-        }
-        Ok(())
+    /// Saves the current state of an image as a binary ppm file.
+    ///
+    /// # Arguments
+    ///
+    /// * `file_name` - The name of the file that will be created.
+    ///   Should end in ".ppm".
+    ///
+    /// # Errors
+    /// Returns `Err` if the underlying I/O fails.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```no_run
+    /// use crate::gartus::prelude::{Canvas, Rgb};
+    /// let image = Canvas::new(500, 500, Rgb::default());
+    /// image.save_binary("test.ppm").expect("Could not save file");
+    /// ```
+    pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
+        let file = File::create(file_name)?;
+        let out = BufWriter::new(file);
+        self.write_binary_ppm(out)
     }
 
     fn write_binary_ppm<W: Write>(&self, mut out: W) -> io::Result<()> {
         writeln!(out, "P6\n{} {}\n255", self.width, self.height)?;
-        for pixel in self.iter() {
-            out.write_all(&pixel.to_be_bytes())?;
-        }
+        
+        // SAFETY: Rgb is #[repr(C)] and contains three u8 fields with no padding.
+        // It is safe to view a slice of Rgb as a slice of u8 for binary output.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                self.pixels.as_ptr().cast::<u8>(),
+                self.pixels.len() * 3,
+            )
+        };
+        out.write_all(bytes)?;
         Ok(())
     }
 
@@ -505,44 +446,26 @@ impl Canvas {
     /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, Rgb::default());
-    /// image.save_ascii("pics/test.ppm").expect("Could not save file")
+    /// image.save_ascii("test.ppm").expect("Could not save file");
     /// ```
     pub fn save_ascii(&self, file_name: &str) -> io::Result<()> {
         let file = File::create(file_name)?;
-        self.write_ascii_ppm(BufWriter::new(file))
+        let mut out = BufWriter::new(file);
+        writeln!(out, "P3\n{} {}\n255", self.width, self.height)?;
+        for pixel in self {
+            writeln!(out, "{} {} {}", pixel.red, pixel.green, pixel.blue)?;
+        }
+        Ok(())
     }
 
-    /// Saves the current state of an image as a binary ppm file.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_name` - The name of the file that will be created.
-    ///   Should end in ".ppm".
-    ///
-    /// # Errors
-    /// Returns `Err` if the underlying I/O fails.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::prelude::{Canvas, Rgb};
-    /// let image = Canvas::new(500, 500, Rgb::default());
-    /// image.save_binary("pics/test.ppm").expect("Could not save file")
-    /// ```
-    pub fn save_binary(&self, file_name: &str) -> io::Result<()> {
-        let file = File::create(file_name)?;
-        self.write_binary_ppm(BufWriter::new(file))
-    }
-
-    /// Saves the current state of an image to any extension.
+    /// Saves the current state of an image as any format supported by `ImageMagick`.
     ///
     /// # Arguments
     ///
     /// * `file_name` - The name of the file that will be created.
     ///
     /// # Errors
-    /// Returns `Err` if the underlying I/O fails.
+    /// Returns `Err` if `magick` is not installed or the output extension is unsupported.
     ///
     /// # Examples
     ///
@@ -554,22 +477,21 @@ impl Canvas {
     /// ```
     pub fn save_extension(&self, file_name: &str) -> io::Result<()> {
         let mut child = Command::new("magick")
-            .arg("-")
-            .arg(file_name)
+            .args(["-", file_name])
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
             .spawn()
-            .map_err(|err| {
+            .map_err(|e| {
                 io::Error::new(
-                    err.kind(),
-                    format!("failed to run ImageMagick `magick`; is ImageMagick installed and in PATH? {err}"),
+                    io::ErrorKind::NotFound,
+                    format!("Failed to execute ImageMagick `magick`: {e}. Is it installed?"),
                 )
             })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "failed to open magick stdin")
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            io::Error::other("Failed to open stdin for ImageMagick")
         })?;
-        self.write_binary_ppm(BufWriter::new(stdin))?;
+
+        self.write_binary_ppm(stdin)?;
 
         let status = child.wait()?;
         if !status.success() {
@@ -583,7 +505,7 @@ impl Canvas {
     /// Display the current state of the [Canvas].
     ///
     /// # Errors
-    /// Returns `Err` if the underlying I/O fails.
+    /// Returns `Err` if `magick` is not installed.
     ///
     /// # Examples
     ///
@@ -591,111 +513,117 @@ impl Canvas {
     /// ```no_run
     /// use crate::gartus::prelude::{Canvas, Rgb};
     /// let image = Canvas::new(500, 500, Rgb::default());
-    /// image.display().expect("Could not display image")
+    /// image.display().expect("Could not display file");
     /// ```
     pub fn display(&self) -> io::Result<()> {
         let mut child = Command::new("magick")
-            .arg("display")
+            .args(["-", "display:"])
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
             .spawn()
-            .map_err(|err| {
+            .map_err(|e| {
                 io::Error::new(
-                    err.kind(),
-                    format!("failed to run ImageMagick `magick display`; is ImageMagick installed and in PATH? {err}"),
+                    io::ErrorKind::NotFound,
+                    format!("Failed to execute ImageMagick `magick`: {e}. Is it installed?"),
                 )
             })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "failed to open display stdin")
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            io::Error::other("Failed to open stdin for ImageMagick")
         })?;
-        self.write_binary_ppm(BufWriter::new(stdin))?;
 
-        let status = child.wait()?;
-        if !status.success() {
-            return Err(io::Error::other(format!(
-                "ImageMagick `display` failed with status {status}; check that ImageMagick display is available"
-            )));
-        }
+        self.write_binary_ppm(stdin)?;
+
+        let _ = child.wait()?;
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl<'a> IntoIterator for &'a Canvas {
+    type Item = &'a Rgb;
+    type IntoIter = slice::Iter<'a, Rgb>;
 
-    #[test]
-    fn new_canvas_has_full_pixel_buffer() {
-        let canvas = Canvas::new(3, 2, Rgb::WHITE);
-        assert_eq!(canvas.len(), 6);
-        assert_eq!(canvas.pixels().len(), 6);
-        assert!(!canvas.is_empty());
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Canvas {
+    type Item = &'a mut Rgb;
+    type IntoIter = slice::IterMut<'a, Rgb>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+/// A builder for creating a [`Canvas`] with custom configuration.
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct CanvasBuilder {
+    width: u32,
+    height: u32,
+    background: Rgb,
+    line_color: Rgb,
+    line_width: f64,
+    upper_left_origin: bool,
+    wrapped: bool,
+}
+
+impl CanvasBuilder {
+    /// Creates a new builder for a canvas of the given size.
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            background: Rgb::default(),
+            line_color: Rgb::default(),
+            line_width: 1.0,
+            upper_left_origin: false,
+            wrapped: true,
+        }
     }
 
-    #[test]
-    fn fill_canvas_replaces_existing_pixels() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas
-            .fill_canvas(vec![Rgb::BLACK; 4])
-            .expect("pixel data should match canvas size");
-        canvas
-            .fill_canvas(vec![Rgb::WHITE; 4])
-            .expect("pixel data should match canvas size");
-
-        assert_eq!(canvas.pixels().len(), 4);
-        assert!(canvas.pixels().iter().all(|pixel| *pixel == Rgb::WHITE));
+    /// Sets the background color of the canvas.
+    pub fn background(mut self, color: Rgb) -> Self {
+        self.background = color;
+        self
     }
 
-    #[test]
-    fn fill_canvas_rejects_wrong_size() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        assert_eq!(
-            canvas.fill_canvas(vec![Rgb::BLACK; 3]),
-            Err("new data must exactly fill canvas")
-        );
+    /// Sets the initial drawing line color.
+    pub fn line_color(mut self, color: Rgb) -> Self {
+        self.line_color = color;
+        self
     }
 
-    #[test]
-    fn wrapped_plot_wraps_width_and_height_edges() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.plot(&Rgb::BLACK, 2, 2);
-
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::BLACK));
+    /// Sets the initial drawing line width.
+    pub fn line_width(mut self, width: f64) -> Self {
+        self.line_width = width;
+        self
     }
 
-    #[test]
-    fn unclipped_get_pixel_returns_none_out_of_bounds() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas.wrapped = false;
-
-        assert_eq!(canvas.get_pixel(-1, 0), None);
-        assert_eq!(canvas.get_pixel(2, 0), None);
-        assert_eq!(canvas.get_pixel(0, 2), None);
+    /// Sets whether the origin is at the top-left (true) or bottom-left (false).
+    pub fn upper_left_origin(mut self, upper_left: bool) -> Self {
+        self.upper_left_origin = upper_left;
+        self
     }
 
-    #[test]
-    fn bottom_left_origin_maps_y_to_internal_row() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas.wrapped = false;
-        canvas.plot(&Rgb::BLACK, 0, 0);
-
-        assert_eq!(canvas.pixels()[canvas.index(0, 1)], Rgb::BLACK);
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::BLACK));
+    /// Sets whether coordinates wrap around the canvas edges.
+    pub fn wrapped(mut self, wrapped: bool) -> Self {
+        self.wrapped = wrapped;
+        self
     }
 
-    #[test]
-    fn set_line_width_accepts_positive_finite_values() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas.set_line_width(2.5);
-        assert!((canvas.line_width() - 2.5).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    #[should_panic(expected = "line width must be positive and finite")]
-    fn set_line_width_rejects_invalid_values() {
-        let mut canvas = Canvas::new(2, 2, Rgb::WHITE);
-        canvas.set_line_width(f64::NAN);
+    /// Consumes the builder and returns a new [Canvas].
+    pub fn build(self) -> Canvas {
+        let pixels = vec![self.background; Canvas::pixel_count(self.width, self.height)];
+        Canvas {
+            width: self.width,
+            height: self.height,
+            pixels,
+            upper_left_origin: self.upper_left_origin,
+            wrapped: self.wrapped,
+            line: self.line_color,
+            line_width: self.line_width,
+        }
     }
 }

@@ -36,7 +36,7 @@ use crate::graphics::{colors::Rgb, display::Canvas};
 ///     Rgb::RED,
 /// ];
 /// let mut canvas = Canvas::new(3, 3, Rgb::BLACK);
-/// canvas.fill_canvas(colors).expect("pixel data should match canvas size");
+/// canvas.fill_canvas(colors);
 /// canvas.save_binary("./works.ppm").expect("Works");
 /// let other = external::ppmify("./works.ppm", false).expect("Life is wrong");
 /// assert_eq!(canvas.pixels(), other.pixels());
@@ -85,9 +85,7 @@ fn temp_ppm_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 fn dimension_glitch(canvas: &Canvas) -> Canvas {
     let mut glitched = Canvas::new(canvas.height(), canvas.width(), canvas.line);
-    glitched
-        .fill_canvas(canvas.pixels().to_vec())
-        .expect("pixel data should match canvas size");
+    glitched.fill_canvas(canvas.pixels().to_vec());
     glitched
 }
 
@@ -202,9 +200,7 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
     }
 
     let mut canvas = Canvas::new(width, height, Rgb::default());
-    canvas
-        .fill_canvas(pixels)
-        .expect("pixel data should match canvas size");
+    canvas.fill_canvas(pixels);
     Ok(canvas)
 }
 
@@ -292,7 +288,7 @@ fn external_fun() {
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
     sobel
-        .save_extension("corro.png")
+        .save_extension("pics/corro.png")
         .expect("Could not save image");
 }
 
@@ -305,7 +301,7 @@ fn command_block() {
     let sobel = canvas.sobel();
     sobel.display().expect("Could not display image");
     sobel
-        .save_extension("corro.png")
+        .save_extension("pics/corro.png")
         .expect("Could not save image");
 }
 

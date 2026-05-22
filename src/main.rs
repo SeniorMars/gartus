@@ -45,7 +45,7 @@ pub fn main() {
     let off_center_transformation =
         Matrix::translate(360.0, 370.0, 0.0).mult_matrix(&Matrix::scale(0.1, 0.1, 0.1));
     img.draw_transformed(&geass, &off_center_transformation);
-    img.fill(406, 413, &white, &white);
+    img.fill(406, 413, white, white);
     img.set_line_pixel(Rgb::new(191, 70, 61));
     img.display().unwrap();
 

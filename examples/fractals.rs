@@ -15,8 +15,7 @@ fn main() {
         });
     });
     eprintln!("Done.");
-    img.fill_canvas(data)
-        .expect("pixel data should match canvas size");
+    img.fill_canvas(data);
     img.display().expect("Could not render image")
 }
 
@@ -62,9 +61,7 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        mandelcos
-            .fill_canvas(data)
-            .expect("pixel data should match canvas size");
+        mandelcos.fill_canvas(data);
         // let cos = mandelcos.sobel();
         mandelcos.display().expect("Could not render image");
         mandelcos
@@ -107,8 +104,7 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        nfam.fill_canvas(data)
-            .expect("pixel data should match canvas size");
+        nfam.fill_canvas(data);
         nfam.display().expect("Could not render image");
         nfam.save_extension("./pics/nfam.png")
             .expect("Could not save image");
@@ -150,8 +146,7 @@ mod test {
             });
         });
         mandel
-            .fill_canvas(data)
-            .expect("pixel data should match canvas size");
+            .fill_canvas(data);
         mandel.display().expect("Could not render image");
         let brot = mandel.sobel();
         brot.save_extension("./pics/mandel.png")
@@ -198,8 +193,7 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        ship.fill_canvas(data)
-            .expect("pixel data should match canvas size");
+        ship.fill_canvas(data);
         let ship = ship.sobel();
         ship.display().expect("Could not render image");
         ship.save_extension("./pics/red_ship.png")
@@ -249,8 +243,7 @@ mod test {
                 }))
             });
         });
-        ship.fill_canvas(data)
-            .expect("pixel data should match canvas size");
+        ship.fill_canvas(data);
         ship.display().expect("Could not render image")
     }
 
@@ -291,8 +284,7 @@ mod test {
             })
         });
         color_domain
-            .fill_canvas(data)
-            .expect("pixel data should match canvas size");
+            .fill_canvas(data);
         color_domain.display().expect("Could not render image");
         color_domain
             .save_extension("./pics/failed_domain20.png")
@@ -328,8 +320,7 @@ mod test {
             }
         }
         julia
-            .fill_canvas(data)
-            .expect("pixel data should match canvas size");
+            .fill_canvas(data);
         let julia = julia.sobel();
         julia.display().expect("Could not render image");
         julia

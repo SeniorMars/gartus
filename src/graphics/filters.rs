@@ -22,7 +22,6 @@ impl Canvas {
     }
 
     /// Generic convolution with a 3x3 kernel and additive bias.
-    #[must_use]
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
     pub fn convolve_3x3(&self, kernel: [f32; 9], bias: f32) -> Canvas {
         let width = self.width() as isize;
@@ -63,14 +62,12 @@ impl Canvas {
         filtered
     }
 
-    #[must_use]
     /// Applies a sharpen filter.
     pub fn sharpen(&self) -> Canvas {
         let kernel = [0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0];
         self.convolve_3x3(kernel, 0.0)
     }
 
-    #[must_use]
     #[allow(clippy::similar_names)]
     /// Prewitt edge detection.
     pub fn prewitt(&self) -> Canvas {
@@ -79,7 +76,6 @@ impl Canvas {
         self.apply_edge_kernels(gx_kernel, gy_kernel)
     }
 
-    #[must_use]
     #[allow(clippy::similar_names)]
     /// Scharr edge detection (more rotationally invariant than Sobel).
     pub fn scharr(&self) -> Canvas {
@@ -112,13 +108,12 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Gamma correction.
     pub fn gamma(&self, gamma: f32) -> Canvas {
         let mut result = self.clone();
         let inv_gamma = 1.0 / gamma;
-        for pixel in result.iter_mut() {
+        for pixel in &mut result {
             pixel.red = (255.0 * (f32::from(pixel.red) / 255.0).powf(inv_gamma)).min(255.0) as u8;
             pixel.green = (255.0 * (f32::from(pixel.green) / 255.0).powf(inv_gamma)).min(255.0) as u8;
             pixel.blue = (255.0 * (f32::from(pixel.blue) / 255.0).powf(inv_gamma)).min(255.0) as u8;
@@ -126,11 +121,10 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Adjust saturation.
     pub fn adjust_saturation(&self, factor: f32) -> Canvas {
         let mut result = self.clone();
-        for pixel in result.iter_mut() {
+        for pixel in &mut result {
             let gray = f32::from(pixel.luminance());
             pixel.red = Self::clamp_u8(gray + factor * (f32::from(pixel.red) - gray));
             pixel.green = Self::clamp_u8(gray + factor * (f32::from(pixel.green) - gray));
@@ -139,12 +133,11 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Rotates hue by given degrees.
     pub fn hue_rotate(&self, degrees: f32) -> Canvas {
         let mut result = self.clone();
-        for pixel in result.iter_mut() {
+        for pixel in &mut result {
             let mut hsv = Hsv::from(*pixel);
             let new_hue = (f32::from(hsv.hue) + degrees).round() as i32;
             hsv.hue = ((new_hue % 360 + 360) % 360) as u16;
@@ -153,18 +146,16 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Adjust color temperature (positive = warmer, negative = cooler).
     pub fn adjust_temperature(&self, amount: i16) -> Canvas {
         let mut result = self.clone();
-        for pixel in result.iter_mut() {
+        for pixel in &mut result {
             pixel.red = Self::clamp_u8(f32::from(pixel.red) + f32::from(amount));
             pixel.blue = Self::clamp_u8(f32::from(pixel.blue) - f32::from(amount));
         }
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Vignette effect.
     pub fn vignette(&self, strength: f32) -> Canvas {
@@ -192,7 +183,6 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     /// Pixelate / Mosaic effect.
     pub fn pixelate(&self, block_size: usize) -> Canvas {
@@ -233,7 +223,6 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_precision_loss)]
     /// Ordered dithering using a 4x4 Bayer matrix.
     pub fn ordered_dither(&self) -> Canvas {
@@ -253,7 +242,6 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Floyd-Steinberg error-diffusion dithering.
     pub fn floyd_steinberg_dither(&self) -> Canvas {
         let width = self.width() as usize;
@@ -286,14 +274,13 @@ impl Canvas {
         }
 
         let mut result = self.clone();
-        for (pixel, value) in result.iter_mut().zip(values) {
+        for (pixel, value) in (&mut result).into_iter().zip(values) {
             let value = Self::clamp_u8(value);
             *pixel = Rgb::new(value, value, value);
         }
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
     /// Median filter for noise reduction.
     pub fn median_filter(&self, radius: usize) -> Canvas {
@@ -329,13 +316,11 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Applies an Oil Painting Filter.
     pub fn oil_painting(&self) -> Canvas {
         self.oil_painting_custom(3, 32)
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Applies an oil-painting effect using local intensity buckets.
     ///
@@ -384,7 +369,6 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Applies a Watercolor Effect.
     pub fn watercolor(&self) -> Canvas {
@@ -423,7 +407,6 @@ impl Canvas {
 
     // --- REFACTORED EXISTING FILTERS ---
 
-    #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Converts the image to grayscale.
     pub fn grayscale(&self) -> Canvas {
@@ -436,7 +419,6 @@ impl Canvas {
         filtered_image
     }
 
-    #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Applies a sepia tone filter.
     pub fn sepia(&self) -> Canvas {
@@ -454,7 +436,6 @@ impl Canvas {
         filtered_image
     }
 
-    #[must_use]
     /// Reflects the image horizontally.
     pub fn reflect(&self) -> Canvas {
         let mut filtered_image = self.clone();
@@ -467,14 +448,12 @@ impl Canvas {
         filtered_image
     }
 
-    #[must_use]
     /// Applies a box blur filter.
     pub fn blur(&self) -> Canvas {
         let kernel = [1.0 / 9.0; 9];
         self.convolve_3x3(kernel, 0.0)
     }
 
-    #[must_use]
     #[allow(clippy::similar_names)]
     /// Sobel edge detection.
     pub fn sobel(&self) -> Canvas {
@@ -483,7 +462,6 @@ impl Canvas {
         self.apply_edge_kernels(gx_kernel, gy_kernel)
     }
 
-    #[must_use]
     /// Inverts all pixel colors.
     pub fn invert(&self) -> Canvas {
         let mut inverted_image = self.clone();
@@ -494,7 +472,6 @@ impl Canvas {
         inverted_image
     }
 
-    #[must_use]
     /// Converts to black and white using a luminance threshold.
     pub fn black_and_white(&self, threshold: u8) -> Canvas {
         let mut bw_image = self.clone();
@@ -508,7 +485,6 @@ impl Canvas {
         bw_image
     }
 
-    #[must_use]
     /// Adjusts brightness by adding a signed offset to each channel.
     pub fn adjust_brightness(&self, brightness: i16) -> Canvas {
         let mut adjusted_image = self.clone();
@@ -520,7 +496,6 @@ impl Canvas {
         adjusted_image
     }
 
-    #[must_use]
     /// Adjusts contrast by scaling each channel around the midpoint.
     pub fn adjust_contrast(&self, contrast: f32) -> Canvas {
         let mut adjusted_image = self.clone();
@@ -532,14 +507,12 @@ impl Canvas {
         adjusted_image
     }
 
-    #[must_use]
     /// Laplacian edge detection.
     pub fn laplacian_edge_detection(&self) -> Canvas {
         let kernel = [-1.0, -1.0, -1.0, -1.0, 8.0, -1.0, -1.0, -1.0, -1.0];
         self.convolve_3x3(kernel, 0.0)
     }
 
-    #[must_use]
     #[allow(
         clippy::cast_possible_wrap,
         clippy::cast_sign_loss,
@@ -616,7 +589,6 @@ impl Canvas {
         blurred_image
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_precision_loss)]
     /// Bilateral filter that smooths noise while preserving strong color edges.
     ///
@@ -679,7 +651,6 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Unsharp-mask sharpening: original + amount * (original - blurred).
     ///
     /// # Panics
@@ -714,12 +685,11 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     #[allow(clippy::cast_precision_loss)]
     /// Global luminance histogram equalization.
     pub fn histogram_equalization(&self) -> Canvas {
         let mut hist = [0usize; 256];
-        for pixel in self.iter() {
+        for pixel in self {
             hist[usize::from(pixel.luminance())] += 1;
         }
         let total = self.len();
@@ -740,7 +710,6 @@ impl Canvas {
         self.apply_luminance_lut(&lut)
     }
 
-    #[must_use]
     #[allow(clippy::similar_names)]
     /// Contrast-limited adaptive histogram equalization over square tiles.
     ///
@@ -833,7 +802,7 @@ impl Canvas {
 
     fn apply_luminance_lut(&self, lut: &[u8; 256]) -> Canvas {
         let mut result = self.clone();
-        for pixel in result.iter_mut() {
+        for pixel in &mut result {
             *pixel = Self::equalized_luminance_pixel(*pixel, lut);
         }
         result
@@ -850,7 +819,6 @@ impl Canvas {
         )
     }
 
-    #[must_use]
     /// Canny-style edge detector with Gaussian blur, non-maximum suppression, and hysteresis.
     ///
     /// # Panics
@@ -882,14 +850,12 @@ impl Canvas {
         result
     }
 
-    #[must_use]
     /// Emboss filter.
     pub fn emboss(&self) -> Canvas {
         let kernel = [-2.0, -1.0, 0.0, -1.0, 1.0, 1.0, 0.0, 1.0, 2.0];
         self.convolve_3x3(kernel, 128.0)
     }
 
-    #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Posterize to a given number of color levels.
     pub fn posterize(&self, levels: u8) -> Canvas {
@@ -903,7 +869,6 @@ impl Canvas {
         posterized_image
     }
 
-    #[must_use]
     /// Solarize channels above the given threshold.
     pub fn solarize(&self, threshold: u8) -> Canvas {
         let mut solarized_image = self.clone();
@@ -1051,9 +1016,7 @@ mod tests {
     #[test]
     fn solarize_inverts_channels_above_threshold() {
         let mut canvas = Canvas::new(1, 1, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![Rgb::new(100, 150, 200)])
-            .expect("pixel data should match canvas size");
+        canvas.fill_canvas(vec![Rgb::new(100, 150, 200)]);
 
         let solarized = canvas.solarize(128);
 
@@ -1063,9 +1026,7 @@ mod tests {
     #[test]
     fn ordered_dither_uses_lowest_bayer_cell_for_dark_pixels() {
         let mut canvas = Canvas::new(1, 1, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![Rgb::new(7, 8, 9)])
-            .expect("pixel data should match canvas size");
+        canvas.fill_canvas(vec![Rgb::new(7, 8, 9)]);
 
         let dithered = canvas.ordered_dither();
 
@@ -1081,9 +1042,7 @@ mod tests {
     #[test]
     fn histogram_equalization_stretches_luminance_range() {
         let mut canvas = Canvas::new(2, 1, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![Rgb::new(10, 10, 10), Rgb::new(20, 20, 20)])
-            .expect("pixel data should match canvas size");
+        canvas.fill_canvas(vec![Rgb::new(10, 10, 10), Rgb::new(20, 20, 20)]);
 
         let equalized = canvas.histogram_equalization();
 
@@ -1093,9 +1052,7 @@ mod tests {
     #[test]
     fn bilateral_filter_preserves_hard_edges_better_than_gaussian() {
         let mut canvas = Canvas::new(3, 1, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![Rgb::BLACK, Rgb::BLACK, Rgb::WHITE])
-            .expect("pixel data should match canvas size");
+        canvas.fill_canvas(vec![Rgb::BLACK, Rgb::BLACK, Rgb::WHITE]);
 
         let bilateral = canvas.bilateral_filter(1, 1.0, 8.0);
 
@@ -1105,9 +1062,7 @@ mod tests {
     #[test]
     fn unsharp_mask_preserves_flat_image() {
         let mut canvas = Canvas::new(3, 1, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![Rgb::new(120, 120, 120); 3])
-            .expect("pixel data should match canvas size");
+        canvas.fill_canvas(vec![Rgb::new(120, 120, 120); 3]);
 
         let sharpened = canvas.unsharp_mask(1.0, 1.0);
 
@@ -1117,8 +1072,7 @@ mod tests {
     #[test]
     fn canny_returns_binary_edges() {
         let mut canvas = Canvas::new(3, 3, Rgb::BLACK);
-        canvas
-            .fill_canvas(vec![
+        canvas.fill_canvas(vec![
                 Rgb::BLACK,
                 Rgb::WHITE,
                 Rgb::WHITE,
@@ -1128,8 +1082,7 @@ mod tests {
                 Rgb::BLACK,
                 Rgb::WHITE,
                 Rgb::WHITE,
-            ])
-            .expect("pixel data should match canvas size");
+            ]);
 
         let edges = canvas.canny(10, 20);
 

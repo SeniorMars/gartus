@@ -15,7 +15,7 @@ fn circle() {
     let mut matrix = EdgeMatrix::new();
     matrix.add_circle(249.0, 249.0, 249.0, 50.0, 0.0001);
     circle.draw_lines(&matrix);
-    circle.fill(249, 249, &color, &color);
+    circle.fill(249, 249, color, color);
     circle.display().expect("Could not draw circle")
 }
 
@@ -85,7 +85,7 @@ fn spirograph() {
     }
     circle.display().expect("Could not draw circle");
     circle
-        .save_extension("spiro.png")
+        .save_extension("pics/spiro.png")
         .expect("Could not save spiro")
 }
 

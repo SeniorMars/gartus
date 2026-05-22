@@ -12,12 +12,12 @@ The file follows the following format:
      Every command is a single character that takes up a line
      Any command that requires arguments must have those arguments
      in the second line. The commands are as follows:
-        sphere: add a sphere to the edge matrix -
-            takes 4 arguemnts (cx, cy, cz, r)
-        torus: add a torus to the edge matrix -
-            takes 5 arguemnts (cx, cy, cz, r1, r2)
-        box: add a rectangular prism to the edge matrix -
-            takes 6 arguemnts (x, y, z, width, height, depth)
+        sphere: add a sphere to the polygon matrix -
+            takes 4 arguments (cx, cy, cz, r)
+        torus: add a torus to the polygon matrix -
+            takes 5 arguments (cx, cy, cz, r1, r2)
+        box: add a rectangular prism to the polygon matrix -
+            takes 6 arguments (x, y, z, width, height, depth)
         circle: add a circle to the edge matrix -
             takes 4 arguments (cx, cy, cz, r)
         hermite: add a hermite curve to the edge matrix -
@@ -53,13 +53,14 @@ The file follows the following format:
                 "emboss", "oil", "watercolor", "solarize", "black_and_white",
                 "brightness", "posterize", "gaussian", "contrast", "bilateral",
                 "unsharp", "histogram", "clahe", "canny", "floyd_steinberg"
-        apply: apply the current transformation matrix to the edge matrix
-        reset: reset transformation matrix and edge matrix
+        apply: apply the current transformation matrix to the edge and polygon matrices
+        clear: clear the edge and polygon matrices and the canvas
+        reset: reset transformation matrix and clear matrices and canvas
         display: clear the screen, then
-            draw the lines of the edge matrix to the screen
+            draw the lines and polygons to the screen
             display the screen
         save: clear the screen, then
-            draw the lines of the edge matrix to the screen
+            draw the lines and polygons to the screen
             save the screen to a file -
             takes 1 argument (file name)
         quit: end parsing
@@ -70,6 +71,8 @@ pub struct Parser {
     file_name: String,
     /// The [`EdgeMatrix`] where points will be appended to draw onto the [Canvas]
     edge_matrix: EdgeMatrix,
+    /// The [`EdgeMatrix`] where triangles will be appended to draw onto the [Canvas]
+    polygon_matrix: EdgeMatrix,
     /// The [Matrix] that transformations will be applied to
     trans_matrix: Matrix,
     /// The [Canvas] where the image will be drawn in
@@ -140,6 +143,7 @@ impl Parser {
         Self {
             file_name: file_name.to_string(),
             edge_matrix: EdgeMatrix::new(),
+            polygon_matrix: EdgeMatrix::new(),
             trans_matrix: Matrix::identity_matrix(4),
             canvas: Canvas::new(width, height, *color),
             canvas_dirty: true,
@@ -173,6 +177,7 @@ impl Parser {
         Self {
             file_name: file_name.to_string(),
             edge_matrix: EdgeMatrix::new(),
+            polygon_matrix: EdgeMatrix::new(),
             trans_matrix: Matrix::identity_matrix(4),
             canvas,
             canvas_dirty: true,
@@ -245,10 +250,13 @@ impl Parser {
             "ident" => self.trans_matrix = Matrix::identity_matrix(4),
             "apply" => {
                 self.edge_matrix = self.edge_matrix.apply(&self.trans_matrix);
+                self.polygon_matrix = self.polygon_matrix.apply(&self.trans_matrix);
                 self.canvas_dirty = true;
             }
             "display" => self.display()?,
             "clear" => {
+                self.edge_matrix = EdgeMatrix::new();
+                self.polygon_matrix = EdgeMatrix::new();
                 self.canvas.clear_canvas();
                 self.canvas_dirty = false;
             }
@@ -257,6 +265,9 @@ impl Parser {
             "hermite" => self.parse_hermite(Self::next_arg_line(iter, cline_num, command)?)?,
             "bezier" => self.parse_bezier(Self::next_arg_line(iter, cline_num, command)?)?,
             "beziern" => self.parse_beziern(Self::next_arg_line(iter, cline_num, command)?)?,
+            "box" => self.parse_box(Self::next_arg_line(iter, cline_num, command)?)?,
+            "sphere" => self.parse_sphere(Self::next_arg_line(iter, cline_num, command)?)?,
+            "torus" => self.parse_torus(Self::next_arg_line(iter, cline_num, command)?)?,
             "save" => self.save(Self::next_arg_line(iter, cline_num, command)?)?,
             "filter" => self.parse_filter(Self::next_arg_line(iter, cline_num, command)?)?,
             _ => return Err(ParserError::CommandError(cline_num, command.to_string())),
@@ -500,6 +511,7 @@ impl Parser {
     fn render_scene(&mut self) {
         self.canvas.clear_canvas();
         self.canvas.try_draw_lines(&self.edge_matrix);
+        self.canvas.draw_polygons(&self.polygon_matrix);
         self.canvas_dirty = false;
     }
 
@@ -651,8 +663,51 @@ impl Parser {
     fn parse_reset(&mut self) {
         self.canvas.clear_canvas();
         self.edge_matrix = EdgeMatrix::new();
+        self.polygon_matrix = EdgeMatrix::new();
         self.trans_matrix = Matrix::identity_matrix(4);
         self.canvas_dirty = false;
+    }
+
+    fn parse_box(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, line) = line;
+        let args = Parser::parse_as::<f64>(line)
+            .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
+        if args.len() == 6 {
+            self.polygon_matrix
+                .add_box((args[0], args[1], args[2]), args[3], args[4], args[5]);
+            self.canvas_dirty = true;
+            Ok(())
+        } else {
+            Err(ParserError::ArgumentError(line_num, line.to_string()))
+        }
+    }
+
+    fn parse_sphere(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, line) = line;
+        let args = Parser::parse_as::<f64>(line)
+            .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
+        if args.len() == 4 {
+            self.polygon_matrix
+                .add_sphere((args[0], args[1], args[2]), args[3], 24);
+            self.canvas_dirty = true;
+            Ok(())
+        } else {
+            Err(ParserError::ArgumentError(line_num, line.to_string()))
+        }
+    }
+
+    fn parse_torus(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, line) = line;
+        let args = Parser::parse_as::<f64>(line)
+            .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
+        if args.len() == 5 {
+            self.polygon_matrix
+                .add_torus((args[0], args[1], args[2]), args[3], args[4], 24);
+            self.canvas_dirty = true;
+            Ok(())
+        } else {
+            Err(ParserError::ArgumentError(line_num, line.to_string()))
+        }
     }
 }
 

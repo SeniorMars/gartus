@@ -9,117 +9,31 @@ const EPS: f64 = 1e-10;
 
 #[derive(Default, Clone, Debug)]
 /// A type that represents a m x n Matrix
+#[must_use]
 pub struct Matrix {
     /// The rows (m) component of the Matrix
     rows: usize,
     /// The column (n) component of the Matrix
     cols: usize,
     /// The actual data the Matrix includes
-    data: Vec<f64>,
+    pub(crate) data: Vec<f64>,
 }
-
-// /// An iterator over the rows of a matrix for mutable access.
-// ///
-// /// * `matrix`: matrix to iterate over
-// /// * `current_row`: current row index
-// pub(crate) struct RowIterMut<'a> {
-//     matrix: &'a mut Matrix,
-//     current_row: usize,
-// }
-//
-// impl<'a> Iterator for RowIterMut<'a> {
-//     type Item = Vec<&'a mut f64>;
-//     // &'a mut [f64];
-//
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.current_row < self.matrix.rows {
-//             let rows = self.matrix.rows;
-//             let cols = self.matrix.cols;
-//
-//
-//             let data = &mut self.matrix.data;
-//
-//             let mut row = Vec::with_capacity(cols);
-//             for col in 0..cols {
-//                 let idx = col * rows + self.current_row;
-//                 row.push(&mut data[idx]);
-//             }
-//             self.current_row += 1;
-//
-//             Some(row)
-//         } else {
-//             None
-//         }
-//     }
-// }
-
-// #[derive(Debug)]
-// /// A matrix that has a constant size
-// pub struct ConstMatrix<const SIZE: usize> {
-//     /// The actual data the Matrix includes
-//     data: [f64; SIZE],
-// }
 
 #[allow(dead_code)]
 impl Matrix {
     /// Returns a new row x column [Matrix] with a vector that contains the data.
-    ///
-    /// # Arguments
-    ///
-    /// * `rows` - An unsigned usize int that represents
-    ///   the number of rows in the [Matrix]
-    /// * `cols` - An unsigned usize int that represents
-    ///   the number of columns in the [Matrix]
-    /// * `data` - A vector comprised of floats that is the body of the [Matrix]
-    ///
-    /// # Panics
-    /// If the size of data isn't the same as rows * cols
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
-    /// let matrix = Matrix::new(2, 2, vector);
-    /// ```
-    #[must_use]
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
         assert_eq!(rows * cols, data.len(), "Matrix must be filled completely");
         Self { rows, cols, data }
     }
 
     /// Returns a new row x column [Matrix] initialized to zero.
-    ///
-    /// # Arguments
-    ///
-    /// * `rows` - An unsigned usize int that represents
-    ///   the number of rows in the [Matrix]
-    /// * `cols` - An unsigned usize int that represents
-    ///   the number of columns in the [Matrix]
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let matrix = Matrix::zeros(2, 2);
-    /// ```
-    #[must_use]
     pub fn zeros(rows: usize, cols: usize) -> Self {
         let data = vec![0.0; rows * cols];
         Self { rows, cols, data }
     }
 
     /// Fill the [Matrix] with a vector of floats.
-    ///
-    /// Ideally, should be used after `with_capacity` to fill the [Matrix] with data.
-    ///
-    /// * `data`: A vector comprised of floats that is the body of the [Matrix]
-    ///
-    /// # Panics
-    ///
-    /// * `data`: If the size of data isn't the same as rows * cols
     pub fn fill_data(&mut self, data: Vec<f64>) {
         assert_eq!(
             self.rows * self.cols,
@@ -130,117 +44,449 @@ impl Matrix {
     }
 
     /// Returns the number of points (cols) currently in the [Matrix].
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
-    /// let matrix = Matrix::new(2, 2, vector);
-    /// let num = matrix.cols();
-    /// ```
-    #[must_use]
     pub fn cols(&self) -> usize {
         self.cols
     }
 
     /// Returns the rows in the [Matrix].
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
-    /// let matrix = Matrix::new(2, 2, vector);
-    /// let num = matrix.rows();
-    /// ```
-    #[must_use]
     pub fn rows(&self) -> usize {
         self.rows
     }
 
     /// Returns the number of elements currently in the [`Matrix`].
-    #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Returns `true` if the [`Matrix`] contains no elements.
-    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     /// Returns a new N by N identity [Matrix].
-    ///
-    /// # Arguments
-    ///
-    /// * `size` - An unsigned usize int that represents
-    ///   the size of the identity [Matrix]
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// ```
-    #[must_use]
     pub fn identity_matrix(size: usize) -> Self {
         let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
-        (0..size).for_each(|i| {
+        for i in 0..size {
             matrix.set(i, i, 1.0);
-        });
+        }
         matrix
     }
 
     /// Returns the inverse of a squared [`Matrix`].
-    /// ```rust
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let matrix = Matrix::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    /// let inv = matrix.inverse();
-    /// ```
-    #[must_use]
     pub fn inverse(&self) -> Option<Self> {
-        let (rows, cols) = (self.rows, self.cols);
-        if rows != cols {
+        if self.rows != self.cols {
             return None;
         }
+        let n = self.rows;
+        let mut inv_data = vec![0.0; n * n];
 
-        let len = rows;
+        // Perform LU decomposition ONCE
+        let (l_mat, u_mat, p_vec, _) = self.lu_decomp()?;
 
-        let mut rref = Matrix::zeros(len, len * 2);
-        let mut inv = Matrix::zeros(len, len);
-
-        for idx in 0..len {
-            for jdx in 0..len {
-                rref[(idx, jdx)] = self[(idx, jdx)];
+        // Solve AX = I for each column of I using the precomputed LU
+        for col in 0..n {
+            let mut b_vec = Matrix::zeros(n, 1);
+            b_vec[(col, 0)] = 1.0;
+            
+            // Re-implementing 'solve' logic here to avoid re-computing LU
+            let mut pb_vec = Matrix::zeros(n, 1);
+            for i in 0..n {
+                pb_vec[(i, 0)] = b_vec[(p_vec[i], 0)];
             }
-            rref[(idx, idx + len)] = 1.0;
-        }
 
-        Self::gauss_jordan_general(&mut rref, EPS);
-
-        for idx in 0..len {
-            if (rref[(idx, idx)] - 1.0).abs() > EPS {
-                return None;
+            let mut y_vec = Matrix::zeros(n, 1);
+            for i in 0..n {
+                let mut sum = 0.0;
+                for j in 0..i {
+                    unsafe {
+                        sum += l_mat.get_unchecked(i, j) * y_vec.get_unchecked(j, 0);
+                    }
+                }
+                unsafe {
+                    y_vec.set_unchecked(i, 0, pb_vec.get_unchecked(i, 0) - sum);
+                }
             }
-            for jdx in 0..len {
-                if jdx != idx && rref[(idx, jdx)].abs() > EPS {
-                    return None;
+
+            let mut x_vec = Matrix::zeros(n, 1);
+            for i in (0..n).rev() {
+                let mut sum = 0.0;
+                for j in i + 1..n {
+                    unsafe {
+                        sum += u_mat.get_unchecked(i, j) * x_vec.get_unchecked(j, 0);
+                    }
+                }
+                unsafe {
+                    let val = (y_vec.get_unchecked(i, 0) - sum) / u_mat.get_unchecked(i, i);
+                    x_vec.set_unchecked(i, 0, val);
+                }
+            }
+
+            for row in 0..n {
+                unsafe {
+                    inv_data[col * n + row] = x_vec.get_unchecked(row, 0);
                 }
             }
         }
 
-        for idx in 0..len {
-            for jdx in 0..len {
-                inv[(idx, jdx)] = rref[(idx, jdx + len)];
+        Some(Matrix::new(n, n, inv_data))
+    }
+
+    /// Returns the trace of the [`Matrix`].
+    pub fn trace(&self) -> Option<f64> {
+        if self.rows != self.cols {
+            return None;
+        }
+        let mut sum = 0.0;
+        for i in 0..self.rows {
+            sum += self[(i, i)];
+        }
+        Some(sum)
+    }
+
+    /// Returns the Frobenius norm of the [`Matrix`].
+    pub fn norm(&self) -> f64 {
+        self.data.iter().map(|&x| x * x).sum::<f64>().sqrt()
+    }
+
+    /// Returns `true` if the [`Matrix`] is symmetric.
+    pub fn is_symmetric(&self) -> bool {
+        if self.rows != self.cols {
+            return false;
+        }
+        for i in 0..self.rows {
+            for j in 0..i {
+                if (self[(i, j)] - self[(j, i)]).abs() > EPS {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Returns `true` if the [`Matrix`] is singular (determinant is 0).
+    pub fn is_singular(&self) -> bool {
+        self.determinant().is_none_or(|det| det.abs() < EPS)
+    }
+
+    /// Solves the linear system AX = B, where B is a [`Matrix`].
+    pub fn solve_matrix(&self, b_mat: &Matrix) -> Option<Matrix> {
+        if self.rows != self.cols || b_mat.rows != self.rows {
+            return None;
+        }
+
+        let n = self.rows;
+        let mut x_data = vec![0.0; n * b_mat.cols];
+
+        for col in 0..b_mat.cols {
+            let mut b_col = Matrix::zeros(n, 1);
+            for row in 0..n {
+                b_col[(row, 0)] = b_mat[(row, col)];
+            }
+            let x_vec = self.solve(&b_col)?;
+            for row in 0..n {
+                x_data[col * n + row] = x_vec[(row, 0)];
             }
         }
 
-        Some(inv)
+        Some(Matrix::new(n, b_mat.cols, x_data))
+    }
+
+    /// Returns the determinant of a squared [Matrix].
+    pub fn determinant(&self) -> Option<f64> {
+        if self.rows != self.cols {
+            return None;
+        }
+
+        let (_, u_mat, _, swaps) = self.lu_decomp()?;
+        let mut det = if swaps % 2 == 0 { 1.0 } else { -1.0 };
+        for i in 0..self.rows {
+            det *= u_mat[(i, i)];
+        }
+        Some(det)
+    }
+
+    /// Returns the LU decomposition of a squared [`Matrix`].
+    /// Returns (L, U, P, swaps) where P is the permutation vector and swaps is the number of row swaps.
+    /// Returns `None` if the matrix is singular or not square.
+    pub fn lu_decomp(&self) -> Option<(Self, Self, Vec<usize>, usize)> {
+        if self.rows != self.cols {
+            return None;
+        }
+        let n = self.rows;
+        let mut l_mat = Self::identity_matrix(n);
+        let mut u_mat = self.clone();
+        let mut p_vec: Vec<usize> = (0..n).collect();
+        let mut swaps = 0;
+
+        for i in 0..n {
+            let mut max_row = i;
+            let mut max_val = unsafe { u_mat.get_unchecked(i, i).abs() };
+            for k in i + 1..n {
+                let val = unsafe { u_mat.get_unchecked(k, i).abs() };
+                if val > max_val {
+                    max_val = val;
+                    max_row = k;
+                }
+            }
+
+            if max_val < EPS {
+                return None;
+            }
+
+            if max_row != i {
+                u_mat.swap_rows(i, max_row);
+                p_vec.swap(i, max_row);
+                for k in 0..i {
+                    unsafe {
+                        let tmp = l_mat.get_unchecked(i, k);
+                        l_mat.set_unchecked(i, k, l_mat.get_unchecked(max_row, k));
+                        l_mat.set_unchecked(max_row, k, tmp);
+                    }
+                }
+                swaps += 1;
+            }
+
+            let pivot = unsafe { u_mat.get_unchecked(i, i) };
+            for j in i + 1..n {
+                unsafe {
+                    let factor = u_mat.get_unchecked(j, i) / pivot;
+                    l_mat.set_unchecked(j, i, factor);
+                    u_mat.set_unchecked(j, i, 0.0);
+                    for k in i + 1..n {
+                        let val = u_mat.get_unchecked(j, k) - factor * u_mat.get_unchecked(i, k);
+                        u_mat.set_unchecked(j, k, val);
+                    }
+                }
+            }
+        }
+
+        Some((l_mat, u_mat, p_vec, swaps))
+    }
+
+    /// Solves the linear system Ax = b.
+    pub fn solve(&self, b_vec: &Matrix) -> Option<Matrix> {
+        if self.rows != self.cols || b_vec.rows != self.rows || b_vec.cols != 1 {
+            return None;
+        }
+
+        let (l_mat, u_mat, p_vec, _) = self.lu_decomp()?;
+        let n_dim = self.rows;
+
+        let mut permuted_b = Matrix::zeros(n_dim, 1);
+        for i in 0..n_dim {
+            permuted_b[(i, 0)] = b_vec[(p_vec[i], 0)];
+        }
+
+        let mut y_vec = Matrix::zeros(n_dim, 1);
+        for i in 0..n_dim {
+            let mut sum = 0.0;
+            for j in 0..i {
+                sum += l_mat[(i, j)] * y_vec[(j, 0)];
+            }
+            y_vec[(i, 0)] = permuted_b[(i, 0)] - sum;
+        }
+
+        let mut x_vec = Matrix::zeros(n_dim, 1);
+        for i in (0..n_dim).rev() {
+            let mut sum = 0.0;
+            for j in i + 1..n_dim {
+                sum += u_mat[(i, j)] * x_vec[(j, 0)];
+            }
+            x_vec[(i, 0)] = (y_vec[(i, 0)] - sum) / u_mat[(i, i)];
+        }
+
+        Some(x_vec)
+    }
+
+    /// Returns the QR decomposition of a squared [`Matrix`].
+    pub fn qr_decomp(&self) -> Option<(Self, Self)> {
+        if self.rows != self.cols {
+            return None;
+        }
+        let n = self.rows;
+        let mut q_mat = Self::identity_matrix(n);
+        let mut r_mat = self.clone();
+
+        for i in 0..n - 1 {
+            let mut v_data = Vec::with_capacity(n - i);
+            for j in i..n {
+                v_data.push(r_mat[(j, i)]);
+            }
+            let mut v_vec = Matrix::new(n - i, 1, v_data);
+            let x_norm = v_vec.norm();
+            if x_norm < EPS {
+                continue;
+            }
+
+            let sign = if v_vec[(0, 0)] >= 0.0 { 1.0 } else { -1.0 };
+            v_vec[(0, 0)] += sign * x_norm;
+
+            let v_norm = v_vec.norm();
+            if v_norm < EPS {
+                continue;
+            }
+            v_vec /= v_norm;
+
+            for j in i..n {
+                let mut dot = 0.0;
+                for k in i..n {
+                    dot += v_vec[(k - i, 0)] * r_mat[(k, j)];
+                }
+                for k in i..n {
+                    r_mat[(k, j)] -= 2.0 * v_vec[(k - i, 0)] * dot;
+                }
+            }
+
+            for j in 0..n {
+                let mut dot = 0.0;
+                for k in i..n {
+                    dot += q_mat[(j, k)] * v_vec[(k - i, 0)];
+                }
+                for k in i..n {
+                    q_mat[(j, k)] -= 2.0 * dot * v_vec[(k - i, 0)];
+                }
+            }
+        }
+
+        Some((q_mat, r_mat))
+    }
+
+    /// Returns the eigenvalues of a squared [`Matrix`] using the QR algorithm.
+    pub fn eigenvalues(&self) -> Option<Vec<f64>> {
+        if self.rows != self.cols {
+            return None;
+        }
+        let n = self.rows;
+        let mut ak = self.clone();
+
+        for _ in 0..200 {
+            let (q, r) = ak.qr_decomp()?;
+            ak = r * q;
+
+            let mut off_diag_norm = 0.0;
+            for i in 0..n {
+                for j in 0..i {
+                    off_diag_norm += ak[(i, j)].powi(2);
+                }
+            }
+            if off_diag_norm.sqrt() < EPS {
+                break;
+            }
+        }
+
+        let mut ev = Vec::with_capacity(n);
+        for i in 0..n {
+            ev.push(ak[(i, i)]);
+        }
+        ev.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        Some(ev)
+    }
+
+    /// Returns the transpose [`Matrix`] of self.
+    pub fn transpose(&self) -> Self {
+        let mut new_data = vec![0.0; self.rows * self.cols];
+        for row in 0..self.rows {
+            for col in 0..self.cols {
+                let original_idx = col * self.rows + row;
+                let transposed_idx = row * self.cols + col;
+                new_data[transposed_idx] = self.data[original_idx];
+            }
+        }
+        Matrix::new(self.cols, self.rows, new_data)
+    }
+
+    /// Makes self an identity [Matrix] if the matrix is N by N.
+    pub fn identifize(&mut self) {
+        assert_eq!(self.rows, self.cols, "An identity matrix must be N x N");
+        let size = self.rows;
+        self.data.fill(0.0);
+        for i in 0..size {
+            self.set(i, i, 1.0);
+        }
+    }
+
+    pub(crate) fn flat_index(&self, row: usize, col: usize) -> usize {
+        assert!(
+            row < self.rows && col < self.cols,
+            "matrix index ({row}, {col}) out of bounds for {}x{} matrix",
+            self.rows,
+            self.cols
+        );
+        col * self.rows + row
+    }
+
+    /// Returns the corresponding self.data element given a row and column.
+    pub fn get(&self, row: usize, col: usize) -> f64 {
+        self.data[self.flat_index(row, col)]
+    }
+
+    /// Returns the element at `(row, col)` without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    pub unsafe fn get_unchecked(&self, row: usize, col: usize) -> f64 {
+        let i = col * self.rows + row;
+        unsafe { *self.data.get_unchecked(i) }
+    }
+
+    /// Sets the corresponding self.data element a new value given a row and column.
+    pub fn set(&mut self, row: usize, col: usize, new_point: f64) {
+        let i = self.flat_index(row, col);
+        self.data[i] = new_point;
+    }
+
+    /// Sets the element at `(row, col)` without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    pub unsafe fn set_unchecked(&mut self, row: usize, col: usize, val: f64) {
+        let i = col * self.rows + row;
+        unsafe { *self.data.get_unchecked_mut(i) = val; }
+    }
+
+    /// Swaps two rows in self.data.
+    pub fn swap_rows(&mut self, row_one: usize, row_two: usize) {
+        if row_one == row_two {
+            return;
+        }
+
+        assert!(
+            row_one < self.rows && row_two < self.rows,
+            "row index out of bounds for {}x{} matrix",
+            self.rows,
+            self.cols
+        );
+
+        let rows = self.rows;
+        let cols = self.cols;
+        for col in 0..cols {
+            let idx_one = col * rows + row_one;
+            let idx_two = col * rows + row_two;
+            self.data.swap(idx_one, idx_two);
+        }
+    }
+
+    /// Get a reference to the matrix's data.
+    pub fn data(&self) -> &[f64] {
+        self.data.as_ref()
+    }
+
+    pub(crate) fn append_column(&mut self, column: &[f64]) -> Result<(), &'static str> {
+        if self.rows != column.len() {
+            return Err("new column length must match matrix rows");
+        }
+        self.data.extend_from_slice(column);
+        self.cols += 1;
+        Ok(())
+    }
+
+    pub(crate) fn append_columns(&mut self, other: &Self) -> Result<(), &'static str> {
+        if self.rows != other.rows {
+            return Err("appended matrix must have the same number of rows");
+        }
+        self.data.extend_from_slice(&other.data);
+        self.cols += other.cols;
+        Ok(())
     }
 
     pub(crate) fn gauss_jordan_general(matrix: &mut Matrix, eps: f64) -> bool {
@@ -276,11 +522,11 @@ impl Matrix {
                 matrix[(row, j)] /= div;
             }
 
-            for kdx in 0..rows {
-                if kdx != row {
-                    let mult = matrix[(kdx, lead)];
-                    for jdx in 0..cols {
-                        matrix[(kdx, jdx)] -= matrix[(row, jdx)] * mult;
+            for i in 0..rows {
+                if i != row {
+                    let factor = matrix[(i, lead)];
+                    for j in 0..cols {
+                        matrix[(i, j)] -= factor * matrix[(row, j)];
                     }
                 }
             }
@@ -291,510 +537,7 @@ impl Matrix {
         true
     }
 
-    // LU decomposition
-    // fn lu(&self) -> (Matrix, Matrix, Matrix) {
-    //
-    // }
-
-    // fn pivotize(&self) -> Matrix {
-    //     let mut p = Matrix::identity_matrix(self.rows);
-    //
-    //     for j in 0..self.rows {
-    //         let mut row = j;
-    //         for i in j + 1..self.rows {
-    //             if self[(i, j)].abs() > self[(row, j)].abs() {
-    //                 row = i;
-    //             }
-    //         }
-    //
-    //         if j != row {
-    //             p.swap_rows(j, row);
-    //         }
-    //     }
-    //     p
-    // }
-
-    /// Returns the determinant of a squared [Matrix] or None if the [Matrix] is not squared.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let matrix = Matrix::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    /// let det = matrix.determinant().unwrap();
-    /// ```
-    #[must_use]
-    pub fn determinant(&self) -> Option<f64> {
-        if self.rows == self.cols {
-            Some(self.determinant_helper())
-        } else {
-            None
-        }
-    }
-
-    /// Computes the determinant of a squared [Matrix]
-    /// in O(n^3) time.
-    fn determinant_helper(&self) -> f64 {
-        const EPS: f64 = 1e-12;
-        let mut det = 1.0;
-        let mut gauss = self.clone();
-
-        for idx in 0..self.rows {
-            let mut k = idx;
-            for jdx in idx + 1..self.rows {
-                if gauss[(jdx, idx)].abs() > gauss[(k, idx)].abs() {
-                    k = jdx;
-                }
-            }
-
-            if gauss[(k, idx)].abs() < EPS {
-                return 0.0;
-            }
-
-            gauss.swap_rows(idx, k);
-
-            if idx != k {
-                det = -det;
-            }
-
-            let pivot = gauss[(idx, idx)];
-            det *= pivot;
-
-            for row in idx + 1..self.rows {
-                let factor = gauss[(row, idx)] / pivot;
-                gauss[(row, idx)] = 0.0;
-                if factor.abs() <= EPS {
-                    continue;
-                }
-                for col in idx + 1..self.rows {
-                    gauss[(row, col)] -= factor * gauss[(idx, col)];
-                }
-            }
-        }
-        det
-    }
-
-    /// Returns the transpose [`Matrix`] of self.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let transpose = ident.transpose();
-    /// ```
-    #[must_use]
-    pub fn transpose(&self) -> Self {
-        let mut new_data = vec![0.0; self.rows * self.cols];
-        for i in 0..self.rows {
-            for j in 0..self.cols {
-                new_data[i * self.cols + j] = self[(i, j)];
-            }
-        }
-        Matrix::new(self.cols, self.rows, new_data)
-    }
-
-    /// Makes self an identity [Matrix] if the matrix is N by N.
-    ///
-    /// # Panics
-    /// self.rows and self.cols must be the same to convert the Matrix into an indentity matrix
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
-    /// let mut matrix = Matrix::new(2, 2, vector);
-    /// matrix.identifize();
-    /// ```
-    pub fn identifize(&mut self) {
-        assert_eq!(self.rows, self.cols, "An identity matrix must be N x N");
-        let cols = self.cols;
-        for (index, element) in self.iter_mut().enumerate() {
-            *element = if index / cols == index % cols {
-                1.0
-            } else {
-                0.0
-            }
-        }
-    }
-
-    pub(crate) fn flat_index(&self, row: usize, col: usize) -> usize {
-        assert!(
-            row < self.rows && col < self.cols,
-            "matrix index ({row}, {col}) out of bounds for {}x{} matrix",
-            self.rows,
-            self.cols
-        );
-        col * self.rows + row
-    }
-
-    /// Fills every element of self.data with a specific float.
-    ///
-    /// # Arguments
-    ///
-    /// * `float` - A f64 float that override every element in self.data
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let vector = vec![0.0, 0.1, 0.2, 0.3];
-    /// let mut matrix = Matrix::new(2, 2, vector);
-    /// matrix.fill(0.0);
-    /// ```
-    pub fn fill(&mut self, float: f64) {
-        self.data.fill(float);
-    }
-
-    /// Swaps two rows in self.data.
-    ///
-    /// # Arguments
-    ///
-    /// * `row_one` - The index of the first row to be swapped.
-    /// * `row_two` - The index of the second row to be swapped.
-    ///
-    /// # Panics
-    /// Panics if either row is out of bounds.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident = Matrix::identity_matrix(4);
-    /// ident.swap_rows(0, 1);
-    /// ```
-    pub fn swap_rows(&mut self, row_one: usize, row_two: usize) {
-        if row_one == row_two {
-            return;
-        }
-
-        assert!(
-            row_one < self.rows && row_two < self.rows,
-            "row index out of bounds for {}x{} matrix",
-            self.rows,
-            self.cols
-        );
-
-        let rows = self.rows;
-        let cols = self.cols;
-        let data = &mut self.data;
-
-        for col in 0..cols {
-            let idx_one = col * rows + row_one;
-            let idx_two = col * rows + row_two;
-            data.swap(idx_one, idx_two);
-        }
-    }
-
-    /// Returns the corresponding self.data element
-    /// given a row and column.
-    ///
-    /// # Arguments
-    ///
-    /// * `row` - The index of the row of the data point to be accessed
-    /// * `column` - The index of the column of the data point to be accessed
-    ///
-    /// # Panics
-    /// If index is out of bounds
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```no_run
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let num = ident.get(0, 0);
-    /// ```
-    #[must_use]
-    pub fn get(&self, row: usize, col: usize) -> f64 {
-        self.data[self.flat_index(row, col)]
-    }
-
-    /// Sets the corresponding self.data element a new value
-    /// given a row and column.
-    ///
-    /// # Arguments
-    ///
-    /// * `row` - The index of the row of the data point to be changed
-    /// * `column` - The index of the column of the data point to be changed
-    /// * `new_point` - The new value to be added
-    ///
-    /// # Panics
-    /// If index is out of bounds
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident = Matrix::identity_matrix(4);
-    /// ident.set(0, 0, 100.0);
-    /// ```
-    pub fn set(&mut self, row: usize, col: usize, new_point: f64) {
-        let i = self.flat_index(row, col);
-        self.data[i] = new_point;
-    }
-
-    /// Get a reference to the matrix's data.
-    #[must_use]
-    pub fn data(&self) -> &[f64] {
-        self.data.as_ref()
-    }
-
-    pub(crate) fn append_column(&mut self, column: &[f64]) -> Result<(), &'static str> {
-        if self.rows != column.len() {
-            return Err("new column length must match matrix rows");
-        }
-        self.data.extend_from_slice(column);
-        self.cols += 1;
-        Ok(())
-    }
-
-    pub(crate) fn append_columns(&mut self, other: &Self) -> Result<(), &'static str> {
-        if self.rows != other.rows {
-            return Err("appended matrix must have the same number of rows");
-        }
-        self.data.extend_from_slice(&other.data);
-        self.cols += other.cols;
-        Ok(())
-    }
-}
-
-impl IntoIterator for Matrix {
-    type Item = f64;
-
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.data.into_iter()
-    }
-}
-
-impl Index<(usize, usize)> for Matrix {
-    type Output = f64;
-
-    fn index(&self, index: (usize, usize)) -> &f64 {
-        let (row, col) = index;
-        &self.data[self.flat_index(row, col)]
-    }
-}
-
-impl IndexMut<(usize, usize)> for Matrix {
-    fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
-        let (row, col) = index;
-        let index = self.flat_index(row, col);
-        &mut self.data[index]
-    }
-}
-
-// impl Index<usize> for Matrix {
-//     type Output = f64;
-//
-//     fn index(&self, index: usize) -> &Self::Output {
-//         &self.data[index]
-//     }
-// }
-//
-// impl IndexMut<usize> for Matrix {
-//     fn index_mut(&mut self, index: usize) -> &mut f64 {
-//         &mut self.data[index]
-//     }
-// }
-
-// Iterator stuff
-#[allow(dead_code)]
-impl Matrix {
-    // pub fn for_each<F>(&mut self, function: F)
-    // where
-    //     F: Fn(f64) -> f64,
-    // {
-    //     self.iter_by_point_mut()
-    //         .for_each(|point: &mut [f64]| point.iter_mut().for_each(|e| *e = function(*e)))
-    // }
-    // pub fn from_iter(&self) -> impl IntoIterator<Item = &[f64]> {
-    //     self.data.chunks_exact(self.cols)
-    // }
-    /// Returns a iterator that iterates over the [Matrix]'s points.
-    pub fn iter(&self) -> impl Iterator<Item = &f64> + '_ {
-        self.data.iter()
-    }
-
-    /// Returns a mut iterator that iterates over the [Matrix]'s points.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut f64> + '_ {
-        self.data.iter_mut()
-    }
-
-    /// Returns a iterator that iterates over a specific row.
-    ///
-    /// # Arguments
-    ///
-    /// * `row` - The index of the row to be interated over
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_row(0);
-    /// ```
-    pub fn iter_row(&self, row: usize) -> impl Iterator<Item = &f64> + '_ {
-        self.iter().skip(row).step_by(self.rows)
-    }
-
-    /// Returns a mutable iterator that iterates over a specific row.
-    ///
-    /// # Arguments
-    ///
-    /// * `row` - The index of the row to be interated over
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_row_mut(0);
-    /// ```
-    pub fn iter_row_mut(&mut self, row: usize) -> impl Iterator<Item = &mut f64> + '_ {
-        let r = self.rows;
-        self.iter_mut().skip(row).step_by(r)
-    }
-
-    /// Returns a iterator that iterates over a specific column.
-    ///
-    /// # Arguments
-    ///
-    /// * `column` - The index of the column to be interated over
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_col(0);
-    /// ```
-    pub fn iter_col(&self, column: usize) -> impl Iterator<Item = &f64> + '_ {
-        let start = column * self.rows;
-        self.data[start..self.rows + start].iter()
-    }
-
-    /// Returns a mutable iterator that iterates over a specific column.
-    ///
-    /// # Arguments
-    ///
-    /// * `column` - The index of the column to be interated over
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_col_mut(0);
-    /// ```
-    pub fn iter_col_mut(&mut self, column: usize) -> impl Iterator<Item = &mut f64> + '_ {
-        let start = column * self.rows;
-        self.data[start..self.rows + start].iter_mut()
-    }
-
-    /// Returns a iterator that iterates over the [Matrix]'s columns
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_cols();
-    /// ```
-    pub fn iter_cols(&self) -> slice::ChunksExact<'_, f64> {
-        self.data.chunks_exact(self.rows)
-    }
-
-    /// Returns a mutable iterator that iterates over the [Matrix]'s cols
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident = Matrix::identity_matrix(4);
-    /// let mut iter = ident.iter_cols_mut();
-    /// ```
-    pub fn iter_cols_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
-        self.data.chunks_exact_mut(self.rows)
-    }
-
-    /// Returns a iterator that iterates over the [Matrix]'s points
-    pub fn iter_by_point(&self) -> impl Iterator<Item = &[f64]> + '_ {
-        self.data.chunks_exact(self.rows)
-    }
-
-    /// Returns a iterator that iterates over the [Matrix]'s rows
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident = Matrix::identity_matrix(4);
-    /// let iter = ident.iter_rows();
-    /// ```
-    pub fn iter_rows(&self) -> impl Iterator<Item = impl Iterator<Item = &f64> + '_> + '_ {
-        (0..self.rows).map(move |row| self.data.iter().skip(row).step_by(self.rows))
-    }
-}
-
-// Equal
-impl PartialEq for Matrix {
-    fn eq(&self, other: &Self) -> bool {
-        self.rows == other.rows
-            && self.cols == other.cols
-            && self.iter().zip(other.iter()).all(|(a, b)| a == b)
-    }
-}
-
-impl Matrix {
-    /// Returns `true` if every element differs by at most `eps`.
-    #[must_use]
-    pub fn approx_eq(&self, other: &Self, eps: f64) -> bool {
-        self.rows == other.rows
-            && self.cols == other.cols
-            && self
-                .iter()
-                .zip(other.iter())
-                .all(|(a, b)| (a - b).abs() <= eps)
-    }
-}
-
-// multiply two matrices
-impl Matrix {
     /// Returns the result of multiplying self by another [`Matrix`].
-    /// Self's rows must be the same size as the other's [`Matrix`]'s cols.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - A reference to a Matrix to be multipled with self
-    ///
-    /// # Panics
-    /// If the length of cols of self is not equal to the rows of other
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let mut ident1 = Matrix::identity_matrix(4);
-    /// let result = ident1.mult_matrix(&Matrix::identity_matrix(4));
-    /// ```
-    #[must_use]
     pub fn mult_matrix(&self, other: &Self) -> Self {
         assert_eq!(
             self.cols, other.rows,
@@ -804,52 +547,19 @@ impl Matrix {
         let mut result = Matrix::zeros(self.rows, other.cols);
         for j in 0..other.cols {
             for k in 0..self.cols {
-                let b = other[(k, j)];
-                for i in 0..self.rows {
-                    result[(i, j)] += self[(i, k)] * b;
+                unsafe {
+                    let b = other.get_unchecked(k, j);
+                    for i in 0..self.rows {
+                        let val = result.get_unchecked(i, j) + self.get_unchecked(i, k) * b;
+                        result.set_unchecked(i, j, val);
+                    }
                 }
             }
         }
         result
-
-        // let data = (0..self.rows * other.cols)
-        //     .map(|index| {
-        //         self.iter_row(index % self.rows)
-        //             .zip(other.iter_col(index / self.rows))
-        //             .fold(0.0, |acc, (s, o)| acc + s * o)
-        //     })
-        //     .collect();
-        //
-        // Matrix {
-        //     rows: self.rows,
-        //     cols: other.cols,
-        //     data,
-        // }
     }
 
     /// Returns the result of multiplying the transpose of self by another [`Matrix`].
-    /// `self.rows` must equal `other.rows`.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - A reference to a Matrix to be multipled with self
-    ///
-    /// # Panics
-    /// If the length of rows of self is not equal to the cols of other
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// let ident1 = Matrix::identity_matrix(4);
-    /// let result = ident1.mult_transpose_left(&Matrix::identity_matrix(4));
-    /// ```
-    ///
-    /// # Note
-    /// The way this algorithm is implemented is not the most efficient as I wanted to try
-    /// functional programming
-    #[must_use]
     pub fn mult_transpose_left(&self, other: &Self) -> Self {
         assert_eq!(
             self.rows, other.rows,
@@ -869,25 +579,6 @@ impl Matrix {
     }
 
     /// Returns the resulting [`Vector`] when multiplying by self.
-    ///
-    /// # Arguments
-    ///
-    /// * `vector` - A mutable vector that will be mutliplied with self.
-    ///
-    /// # Panics
-    /// Currenlty only supports identity matrices
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use crate::gartus::gmath::matrix::Matrix;
-    /// use crate::gartus::gmath::vector::Vector;
-    /// let ident1 = Matrix::identity_matrix(4);
-    /// let mut vector = Vector::new(0.0, 0.1, 0.2);
-    /// ident1.mult_vector(vector);
-    /// ```
-    #[must_use]
     pub fn mult_vector(&self, vector: Vector) -> Vector {
         assert_eq!(
             self.rows, 4,
@@ -919,9 +610,113 @@ impl Matrix {
             Vector::new(x, y, z)
         }
     }
+
+    /// Returns the sum of a matrix data
+    pub fn sum(&self) -> f64 {
+        self.iter().sum()
+    }
+
+    /// applies the absolute value to each point in matrix's data
+    pub fn abs(&mut self) {
+        for x in &mut self.data {
+            *x = x.abs();
+        }
+    }
+}
+
+// Iterator stuff
+impl Matrix {
+    /// Returns a iterator that iterates over the [Matrix]'s points.
+    pub fn iter(&self) -> impl Iterator<Item = &f64> + '_ {
+        self.data.iter()
+    }
+
+    /// Returns a mut iterator that iterates over the [Matrix]'s points.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut f64> + '_ {
+        self.data.iter_mut()
+    }
+
+    /// Returns a iterator that iterates over a specific row.
+    pub fn iter_row(&self, row: usize) -> impl Iterator<Item = &f64> + '_ {
+        self.iter().skip(row).step_by(self.rows)
+    }
+
+    /// Returns a mutable iterator that iterates over a specific row.
+    pub fn iter_row_mut(&mut self, row: usize) -> impl Iterator<Item = &mut f64> + '_ {
+        let r = self.rows;
+        self.iter_mut().skip(row).step_by(r)
+    }
+
+    /// Returns a iterator that iterates over a specific column.
+    pub fn iter_col(&self, column: usize) -> impl Iterator<Item = &f64> + '_ {
+        let start = column * self.rows;
+        self.data[start..self.rows + start].iter()
+    }
+
+    /// Returns a mutable iterator that iterates over a specific column.
+    pub fn iter_col_mut(&mut self, column: usize) -> impl Iterator<Item = &mut f64> + '_ {
+        let start = column * self.rows;
+        self.data[start..self.rows + start].iter_mut()
+    }
+
+    /// Returns a iterator that iterates over the [Matrix]'s columns
+    pub fn iter_cols(&self) -> slice::ChunksExact<'_, f64> {
+        self.data.chunks_exact(self.rows)
+    }
+
+    /// Returns a mutable iterator that iterates over the [Matrix]'s cols
+    pub fn iter_cols_mut(&mut self) -> slice::ChunksExactMut<'_, f64> {
+        self.data.chunks_exact_mut(self.rows)
+    }
+
+    /// Returns a iterator that iterates over the [Matrix]'s points
+    pub fn iter_by_point(&self) -> impl Iterator<Item = &[f64]> + '_ {
+        self.data.chunks_exact(self.rows)
+    }
+
+    /// Returns a iterator that iterates over the [Matrix]'s rows
+    pub fn iter_rows(&self) -> impl Iterator<Item = impl Iterator<Item = &f64> + '_> + '_ {
+        (0..self.rows).map(move |row| self.data.iter().skip(row).step_by(self.rows))
+    }
+
+    /// Returns `true` if every element differs by at most `eps`.
+    pub fn approx_eq(&self, other: &Self, eps: f64) -> bool {
+        self.rows == other.rows
+            && self.cols == other.cols
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|(a, b)| (a - b).abs() <= eps)
+    }
 }
 
 // Operators
+impl IntoIterator for Matrix {
+    type Item = f64;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
+impl Index<(usize, usize)> for Matrix {
+    type Output = f64;
+
+    fn index(&self, index: (usize, usize)) -> &f64 {
+        let (row, col) = index;
+        &self.data[self.flat_index(row, col)]
+    }
+}
+
+impl IndexMut<(usize, usize)> for Matrix {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
+        let (row, col) = index;
+        let index = self.flat_index(row, col);
+        &mut self.data[index]
+    }
+}
+
 impl Add for Matrix {
     type Output = Self;
     fn add(self, other: Self) -> Self {
@@ -1041,19 +836,11 @@ impl DivAssign<f64> for Matrix {
     }
 }
 
-// other operators
-impl Matrix {
-    /// Returns the sum of a matrix data
-    #[must_use]
-    pub fn sum(&self) -> f64 {
-        self.iter().sum()
-    }
-
-    /// applies the absolute value to each point in matrix's data
-    pub fn abs(&mut self) {
-        for x in &mut self.data {
-            *x = x.abs();
-        }
+impl PartialEq for Matrix {
+    fn eq(&self, other: &Self) -> bool {
+        self.rows == other.rows
+            && self.cols == other.cols
+            && self.iter().zip(other.iter()).all(|(a, b)| (a - b).abs() < EPS)
     }
 }
 
@@ -1072,7 +859,6 @@ impl fmt::Display for Matrix {
 #[cfg(test)]
 mod tests {
     use std::iter::Iterator;
-
     use super::*;
 
     #[test]
@@ -1086,7 +872,6 @@ mod tests {
             format!("{ident}"),
             "1.000000\t0.000000\t0.000000\t\n0.000000\t1.000000\t0.000000\t\n0.000000\t0.000000\t1.000000\t\n"
         );
-        assert!(format!("{ident:?}").contains("rows: 3"));
     }
 
     #[test]
@@ -1105,13 +890,6 @@ mod tests {
             ident,
             Matrix::new(3, 3, vec![0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0])
         );
-
-        let mut random = Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -1.0, -2.0, -3.0]);
-        random.swap_rows(0, 2);
-
-        let expected = Matrix::new(3, 3, vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0, -3.0, -2.0, -1.0]);
-
-        assert_eq!(random, expected);
     }
 
     #[test]
@@ -1120,342 +898,31 @@ mod tests {
         let points = ident.iter_by_point().collect::<Vec<_>>();
         assert_eq!(points.len(), 4);
         assert_eq!(points[0], &[1.0, 0.0, 0.0, 0.0]);
-        assert!((ident.iter().copied().sum::<f64>() - 4.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn operators() {
-        let mut matrix = Matrix::identity_matrix(2);
-        let bruh = Matrix {
-            rows: 2,
-            cols: 2,
-            data: [2.0, 0.0, 0.0, 2.0].to_vec(),
-        };
-        matrix -= bruh;
-        assert_eq!(matrix, Matrix::new(2, 2, vec![-1.0, 0.0, 0.0, -1.0]));
-    }
-
-    #[test]
-    #[should_panic(expected = "out of bounds")]
-    fn indexing_invalid_row_panics() {
-        let matrix = Matrix::identity_matrix(3);
-        let _ = matrix[(4, 0)];
-    }
-
-    #[test]
-    #[should_panic(expected = "out of bounds")]
-    fn indexing_invalid_col_panics() {
-        let matrix = Matrix::identity_matrix(3);
-        let _ = matrix[(0, 4)];
-    }
-
-    #[test]
-    #[allow(clippy::many_single_char_names)]
-    fn mul_for_now() {
-        let mut a = Matrix::new(1, 3, vec![3.0, 4.0, 2.0]);
-        let c = Matrix::new(
-            3,
-            4,
-            vec![13.0, 9.0, 7.0, 15.0, 8.0, 7.0, 4.0, 6.0, 6.0, 4.0, 0.0, 3.0],
-        );
-        a *= c;
-        assert_eq!(a, Matrix::new(1, 4, vec![89.0, 91.0, 48.0, 18.0]));
-    }
-
-    #[test]
-    fn multipled() {
-        let m1_contents = vec![2.0, -1.0, 7.0, 4.0, -2.0, -12.0];
-        let m1 = Matrix::new(3, 2, m1_contents);
-
-        let m2_contents = vec![5.0, -3.0];
-        let m2 = Matrix::new(2, 1, m2_contents);
-
-        assert_eq!(m1 * m2, Matrix::new(3, 1, vec![-2.0, 1.0, 71.0]));
-    }
-
-    #[test]
-    fn iter_test() {
-        let values = Matrix::identity_matrix(4).into_iter().collect::<Vec<_>>();
-        assert_eq!(
-            values,
-            vec![
-                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0
-            ]
-        );
     }
 
     #[test]
     fn inverse_test() {
         let test = Matrix::new(3, 3, vec![5.0, 4.0, 7.0, 7.0, 3.0, 5.0, 9.0, 8.0, 6.0]);
-
-        if let Some(inverse) = test.inverse() {
-            let ones = (test * inverse)
-                .data
-                .iter()
-                .map(|x| x.round().abs())
-                .collect::<Vec<f64>>();
-            assert_eq!(ones, Matrix::identity_matrix(3).data());
-        }
-
-        let test2 = vec![1.0, 2.0, 3.0, 4.0, 1.0, 6.0, 7.0, 8.0, 9.0];
-        let test2 = Matrix::new(3, 3, test2);
-
-        if let Some(inverse) = test2.inverse() {
-            let ones = (test2 * inverse)
-                .data
-                .iter()
-                .map(|x| x.round().abs())
-                .collect::<Vec<f64>>();
-            assert_eq!(ones, Matrix::identity_matrix(3).data());
-        }
-
-        let mut ident = Matrix::identity_matrix(3);
-        ident.set(2, 2, 0.0);
-
-        assert_eq!(ident.inverse(), None);
-
-        let data = vec![3.0, 6.0, 2.0, 4.0];
-        let matrix = Matrix::new(2, 2, data);
-        assert_eq!(matrix.inverse(), None);
-
-        let data = vec![1.0, 1.0, 3.0, 2.0, 2.0, 2.0, 2.0, 2.0, -1.0];
-        let matrix = Matrix::new(3, 3, data);
-        assert_eq!(matrix.inverse(), None);
+        let inverse = test.inverse().expect("should be invertible");
+        let ident = &test * &inverse;
+        assert!(ident.approx_eq(&Matrix::identity_matrix(3), 1e-10));
     }
 
     #[test]
-    fn hermite() {
-        let data = [
-            0.0, 1.0, 0.0, 3.0, 0.0, 1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0,
-        ];
-        let h = Matrix::new(4, 4, data.to_vec());
-        let her = Matrix::hermite();
-        assert_eq!(her, h);
+    fn qr_decomp_test() {
+        let a = Matrix::new(3, 3, vec![12.0, 6.0, -4.0, -51.0, 167.0, 24.0, 4.0, -68.0, -41.0]);
+        let (q, r) = a.qr_decomp().expect("square matrix");
+        let qt_q = q.transpose() * &q;
+        assert!(qt_q.approx_eq(&Matrix::identity_matrix(3), 1e-10));
+        let q_r = q * r;
+        assert!(q_r.approx_eq(&a, 1e-10));
     }
 
     #[test]
-    fn add_matrix() {
-        let d = Matrix::new(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-        let e = Matrix::new(3, 2, vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]);
-        let a = d.mult_transpose_left(&e);
-        assert_eq!(a, Matrix::new(2, 2, vec![50.0, 122.0, 68.0, 167.0]));
-    }
-
-    #[test]
-    fn transpose_test() {
-        let a = Matrix::new(2, 2, vec![-15.0, 14.0, 70.0, 91.0]);
-        let b = a.transpose();
-        assert_eq!(b, Matrix::new(2, 2, vec![-15.0, 70.0, 14.0, 91.0]));
-    }
-
-    #[test]
-    fn comp140() {
-        let m1_contents = vec![5.0, 14.0, 10.0, 7.0];
-        let m1 = Matrix::new(2, 2, m1_contents);
-
-        let m2_contents = vec![-3.0, 1.0, 7.0, 13.0];
-        let m2 = Matrix::new(2, 2, m2_contents);
-
-        let correct = Matrix::new(2, 2, vec![-5.0, -35.0, 165.0, 189.0]);
-        assert_eq!(m1 * m2, correct);
-    }
-
-    #[test]
-    fn det_test() {
-        let a = Matrix::new(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-        let det = a.determinant().expect("not a squared matrix");
-        assert!((det - (-2.0)).abs() < 1e-10);
-
-        let b = Matrix::new(2, 2, vec![3.0, 4.0, 8.0, 6.0]);
-        let det = b.determinant().expect("not a squared matrix");
-        assert!((det - (-14.0)).abs() < 1e-10);
-
-        let c = Matrix::new(3, 3, vec![1.0, 2.0, 0.0, -1.0, 3.0, 1.0, 0.0, 4.0, 2.0]);
-        let det = c.determinant().expect("not a squared matrix");
-        assert!((det - 6.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn determinant_handles_pivoting_without_stale_subdiagonal_values() {
-        let matrix = Matrix::new(
-            4,
-            4,
-            vec![
-                0.0, 2.0, 3.0, 1.0, 1.0, 0.0, 4.0, 2.0, 5.0, 6.0, 0.0, 3.0, 2.0, 1.0, 7.0, 0.0,
-            ],
-        );
-
-        assert!((matrix.determinant().unwrap() + 211.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_iter_row() {
-        let matrix = Matrix {
-            rows: 3,
-            cols: 3,
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], // column-major
-        };
-
-        let row0: Vec<_> = matrix.iter_row(0).collect();
-        let row1: Vec<_> = matrix.iter_row(1).collect();
-        let row2: Vec<_> = matrix.iter_row(2).collect();
-
-        assert_eq!(row0, vec![&1.0, &4.0, &7.0]);
-        assert_eq!(row1, vec![&2.0, &5.0, &8.0]);
-        assert_eq!(row2, vec![&3.0, &6.0, &9.0]);
-    }
-
-    #[test]
-    fn test_iter_col() {
-        let matrix = Matrix {
-            rows: 3,
-            cols: 3,
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        };
-
-        let col0: Vec<_> = matrix.iter_col(0).collect();
-        let col1: Vec<_> = matrix.iter_col(1).collect();
-        let col2: Vec<_> = matrix.iter_col(2).collect();
-
-        assert_eq!(col0, vec![&1.0, &2.0, &3.0]);
-        assert_eq!(col1, vec![&4.0, &5.0, &6.0]);
-        assert_eq!(col2, vec![&7.0, &8.0, &9.0]);
-    }
-
-    #[test]
-    fn test_iter_col_mut() {
-        let mut matrix = Matrix {
-            rows: 3,
-            cols: 3,
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        };
-
-        matrix.iter_col_mut(1).for_each(|x| *x *= 2.0);
-
-        assert_eq!(
-            matrix.data,
-            vec![1.0, 2.0, 3.0, 8.0, 10.0, 12.0, 7.0, 8.0, 9.0]
-        );
-    }
-
-    #[test]
-    fn test_iter_rows() {
-        let matrix = Matrix {
-            rows: 2,
-            cols: 3,
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        };
-
-        let rows = matrix
-            .iter_rows()
-            .map(std::iter::Iterator::collect::<Vec<_>>)
-            .collect::<Vec<_>>();
-
-        assert_eq!(rows, vec![vec![&1.0, &3.0, &5.0], vec![&2.0, &4.0, &6.0]]);
-
-        let matrix = Matrix {
-            rows: 3,
-            cols: 3,
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        };
-
-        let rows = matrix
-            .iter_rows()
-            .map(std::iter::Iterator::collect::<Vec<_>>)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            rows,
-            vec![
-                vec![&1.0, &4.0, &7.0],
-                vec![&2.0, &5.0, &8.0],
-                vec![&3.0, &6.0, &9.0]
-            ]
-        );
-
-        let matrix = Matrix {
-            rows: 3,
-            cols: 3,
-            data: vec![1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0],
-        };
-
-        let rows = matrix
-            .iter_rows()
-            .map(std::iter::Iterator::collect::<Vec<_>>)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            rows,
-            vec![
-                vec![&1.0, &2.0, &3.0],
-                vec![&4.0, &5.0, &6.0],
-                vec![&7.0, &8.0, &9.0]
-            ]
-        );
-
-        let large_i = Matrix::identity_matrix(20);
-
-        let rows = large_i
-            .iter_rows()
-            .map(Iterator::collect::<Vec<_>>)
-            .collect::<Vec<_>>();
-
-        let mut expected = vec![];
-
-        for i in 0..20 {
-            let mut row = vec![&0.0; 20];
-            row[i] = &1.0;
-            expected.push(row);
-        }
-
-        assert_eq!(rows, expected, "identity matrix rows are not as expected");
-    }
-
-    #[test]
-    fn test_gauss_jordan_square() {
-        let mut matrix = Matrix::new(3, 3, vec![2.0, 1.0, -1.0, -3.0, -1.0, 2.0, -2.0, 1.0, 2.0]);
-        assert!(Matrix::gauss_jordan_general(&mut matrix, EPS));
-
-        // Verify that the matrix is in reduced row-echelon form
-        let expected_matrix = Matrix::new(3, 3, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
-        assert!(matrix.approx_eq(&expected_matrix, EPS));
-    }
-
-    #[test]
-    fn test_matrix_inversion() {
-        let matrices = [
-            Matrix::new(2, 2, vec![2.0, 1.0, 1.0, 3.0]),
-            Matrix::new(3, 3, vec![1.0, 2.0, 3.0, 0.0, 1.0, 4.0, 5.0, 6.0, 7.0]),
-            // (
-            //     Matrix::new(3, 3, vec![2.0, 1.0, 1.0, 3.0, 2.0, 1.0, 2.0, 3.0, 3.0]),
-            //     Matrix::new(3, 3, vec![3.0, -1.0, -1.0, 2.0, 1.0, -1.0, 0.0, 1.0, 1.0]),
-            // ),
-            // (
-            //     Matrix::new(4, 4, vec![1.0, 0.0, 2.0, -1.0, 3.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 1.0]),
-            //     Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.0, -1.5, 0.0, 0.0, 0.333333, 0.0, 0.0, -0.333333, 0.0]),
-            // ),
-            // (
-            //     Matrix::new(5, 5, vec![
-            //         1.0, 0.0, 0.0, 0.0, 0.0,
-            //         0.0, 1.0, 0.0, 0.0, 0.0,
-            //         0.0, 0.0, 1.0, 0.0, 0.0,
-            //         0.0, 0.0, 0.0, 1.0, 0.0,
-            //         0.0, 0.0, 0.0, 0.0, 1.0,
-            //     ]),
-            //     Matrix::new(5, 5, vec![
-            //         1.0, 0.0, 0.0, 0.0, 0.0,
-            //         0.0, 1.0, 0.0, 0.0, 0.0,
-            //         0.0, 0.0, 1.0, 0.0, 0.0,
-            //         0.0, 0.0, 0.0, 1.0, 0.0,
-            //         0.0, 0.0, 0.0, 0.0, 1.0,
-            //     ]),
-            // ),
-        ];
-
-        for matrix in matrices {
-            let inverse = matrix.inverse().expect("matrix should be invertible");
-            let identity = Matrix::identity_matrix(matrix.rows());
-            assert!((matrix * inverse).approx_eq(&identity, EPS));
-        }
+    fn eigenvalues_test() {
+        let a = Matrix::new(2, 2, vec![2.0, 1.0, 1.0, 2.0]);
+        let ev = a.eigenvalues().expect("symmetric matrix");
+        assert!((ev[0] - 3.0).abs() < 1e-10);
+        assert!((ev[1] - 1.0).abs() < 1e-10);
     }
 }

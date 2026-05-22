@@ -5,6 +5,7 @@ use std::fmt::Debug;
 pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {}
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[repr(C)]
 /// A computer pixel struct is represented by its red, green, blue values
 pub struct Rgb {
     /// The first byte that represents red light

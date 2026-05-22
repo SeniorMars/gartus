@@ -7,6 +7,13 @@ use std::io;
 
 #[test]
 #[ignore]
+fn script_3d() {
+    let mut dw = Parser::new("./tests/script_3d", 500, 500, &Rgb::new(0, 255, 0));
+    dw.parse_file().expect("Script is valid");
+}
+
+#[test]
+#[ignore]
 fn script_transform() {
     let mut dw = Parser::new("./tests/script_transform", 500, 500, &Rgb::new(0, 255, 0));
     dw.parse_file().expect("Script is valid");
@@ -58,7 +65,7 @@ fn dw_line_test() -> io::Result<()> {
     let yres: f64 = 750.0;
     let mut screen = Canvas::new(xres as u32, yres as u32, Rgb::default());
     // screen.upper_left_system = true;
-    screen.set_line_color_rgb(0, 255, 0);
+    screen.set_line_rgb_values(0, 255, 0);
 
     // octants 1 and 5
     screen.draw_line(screen.line, 0.0, 0.0, xres - 1.0, yres - 1.0);
@@ -66,23 +73,23 @@ fn dw_line_test() -> io::Result<()> {
     screen.draw_line(screen.line, xres - 1.0, yres - 1.0, 0.0, yres / 2.0);
 
     // octants 8 and 4
-    screen.set_line_color_rgb(0, 255, 255);
+    screen.set_line_rgb_values(0, 255, 255);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres - 1.0, 0.0);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres - 1.0, yres / 2.0);
     screen.draw_line(screen.line, xres - 1.0, 0.0, 0.0, yres / 2.0);
 
     // octants 2 and 6
-    screen.set_line_color_rgb(255, 0, 0);
+    screen.set_line_rgb_values(255, 0, 0);
     screen.draw_line(screen.line, 0.0, 0.0, xres / 2.0, yres - 1.0);
     screen.draw_line(screen.line, xres - 1.0, yres - 1.0, xres / 2.0, 0.0);
 
     // octants 7 and 3
-    screen.set_line_color_rgb(255, 0, 255);
+    screen.set_line_rgb_values(255, 0, 255);
     screen.draw_line(screen.line, 0.0, yres - 1.0, xres / 2.0, 0.0);
     screen.draw_line(screen.line, xres - 1.0, 0.0, xres / 2.0, yres - 1.0);
 
     // horizontal and vertical
-    screen.set_line_color_rgb(255, 255, 0);
+    screen.set_line_rgb_values(255, 255, 0);
     screen.draw_line(screen.line, 0.0, yres / 2.0, xres - 1.0, yres / 2.0);
     screen.draw_line(screen.line, xres / 2.0, 0.0, xres / 2.0, yres - 1.0);
 

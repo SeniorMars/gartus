@@ -106,7 +106,7 @@ pub fn make_pory_anim() {
         150, 235, 259, 177, 242,
     ];
     for (vector, color) in fill_points.chunks(2).zip(fill_colors) {
-        porygon.fill(vector[0], vector[1], &color, &outline);
+        porygon.fill(vector[0], vector[1], color, outline);
         recorder.capture(&porygon).expect("Could not save frame");
     }
     recorder

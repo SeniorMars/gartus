@@ -35,58 +35,66 @@ fn main() {
 
     // 2. Build EdgeMatrix for the grid
     println!("Building grid...");
-    let mut edges = EdgeMatrix::new();
-    let scale = 500.0; // Horizontal extent
-    let h_scale = 300.0; // Vertical extent (peaks)
+    let mut polygons = EdgeMatrix::new();
+    let scale = 650.0; // Increased scale from 500.0
+    let h_scale = 350.0; // Increased height from 300.0
 
-    for y in 0..GRID_SIZE {
-        for x in 0..GRID_SIZE {
-            let px = (x as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-            let pz = (y as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-            let py = height_map[x][y] * h_scale;
+    for y in 0..GRID_SIZE - 1 {
+        for x in 0..GRID_SIZE - 1 {
+            let px0 = (x as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
+            let px1 = ((x + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
+            let pz0 = (y as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
+            let pz1 = ((y + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
 
-            if x + 1 < GRID_SIZE {
-                let nx = ((x + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-                let ny = height_map[x + 1][y] * h_scale;
-                edges.push_edge(px, py, pz, nx, ny, pz);
-            }
-            if y + 1 < GRID_SIZE {
-                let nz = ((y + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-                let ny = height_map[x][y + 1] * h_scale;
-                edges.push_edge(px, py, pz, px, ny, nz);
-            }
+            let py00 = height_map[x][y] * h_scale;
+            let py10 = height_map[x + 1][y] * h_scale;
+            let py01 = height_map[x][y + 1] * h_scale;
+            let py11 = height_map[x + 1][y + 1] * h_scale;
+
+            let p00 = (px0, py00, pz0);
+            let p10 = (px1, py10, pz0);
+            let p01 = (px0, py01, pz1);
+            let p11 = (px1, py11, pz1);
+
+            // Two triangles per grid square
+            polygons.add_polygon(p00, p01, p11);
+            polygons.add_polygon(p00, p11, p10);
         }
     }
 
     println!("Applying transformations and rendering...");
     // 3. Manual Projection and Rendering with Height-based Coloring
-    let mut iter = edges.iter_points();
-    while let Some(p0) = iter.next() {
-        let p1 = iter.next().unwrap();
+    let cos45 = std::f64::consts::FRAC_1_SQRT_2;
+    let sin45 = std::f64::consts::FRAC_1_SQRT_2;
+    let cabinet = Matrix::new(4, 4, vec![
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.5 * cos45, 0.5 * sin45, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    ]);
 
-        // Cabinet projection: x' = x + 0.5 * z * cos(45), y' = y + 0.5 * z * sin(45)
-        let project = |p: &[f64]| {
-            let x = p[0] + 0.5 * p[2] * 0.707;
-            let y = p[1] + 0.5 * p[2] * 0.707;
-            // Shift base further down (y=650) and center X
-            (x + 400.0, 650.0 - y)
-        };
+    let transformed = polygons.apply(&cabinet);
+
+    for (p0, p1, p2) in transformed.iter_triangles() {
+        // Center the larger terrain
+        let project = |p: &[f64]| (p[0] + 400.0, 700.0 - p[1]);
 
         let (x0, y0) = project(p0);
         let (x1, y1) = project(p1);
+        let (x2, y2) = project(p2);
 
-        // Calculate color based on height (p[1] is the vertical axis)
-        // Since we normalized height_map to [0, 1] and scaled by h_scale,
-        // we can just use the normalized height directly.
-        let avg_h = (p0[1] + p1[1]) / (2.0 * h_scale);
+        // Average height for coloring
+        let avg_h = (p0[1] + p1[1] + p2[1]) / (3.0 * h_scale);
         let color = determine_color(avg_h);
 
         canvas.draw_line(color, x0, y0, x1, y1);
+        canvas.draw_line(color, x1, y1, x2, y2);
+        canvas.draw_line(color, x2, y2, x0, y0);
     }
 
     println!("Rendering and saving...");
     canvas
-        .save_extension("terrain.png")
+        .save_extension("pics/terrain.png")
         .expect("Could not save to terrain.png");
     println!("Done! Saved to terrain.png");
 }

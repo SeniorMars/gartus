@@ -53,7 +53,7 @@ fn owl() {
     let chunks = 2;
     (0..corrs.len()).step_by(chunks).for_each(|i| {
         if i != corrs.len() - chunks {
-            owl.set_line_color_rgb(
+            owl.set_line_rgb_values(
                 rng.gen_range(0..=255),
                 rng.gen_range(0..=255),
                 rng.gen_range(0..=255),

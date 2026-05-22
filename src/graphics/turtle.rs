@@ -15,10 +15,11 @@ pub struct Turtle {
     x: f64,
     /// Y coordinate of where the Turtle is located
     y: f64,
+    /// A stack of saved states of the turtle. Each state includes the position, direction, pen mode, and color of the turtle at the time it was saved.
     state_stack: Vec<TurtleState>,
 }
 
-/// Define a struct for `TurtleState`
+/// A struct representing the state of a [`Turtle`] at a given point in time. This is used for saving and restoring the turtle's state with the push and pop operations.
 #[derive(Debug, Clone, Default)]
 pub struct TurtleState {
     x: f64,

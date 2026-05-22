@@ -6,7 +6,7 @@ fn cat() {
 
     let mut head: Vec<(i32, i32)> = Vec::new();
     cat.upper_left_origin = true;
-    cat.set_line_color_rgb(255, 255, 255);
+    cat.set_line_rgb_values(255, 255, 255);
 
     head.push((350 - 150, 222));
     head.push((358 - 150, 294));
@@ -61,7 +61,7 @@ fn cat() {
     eye_right.push((487 - 150, 345));
     eye_right.push((465 - 150, 322));
 
-    cat.set_line_color_rgb(255, 255, 255);
+    cat.set_line_rgb_values(255, 255, 255);
     for i in 0..eye_right.len() {
         if i + 1 != eye_right.len() {
             cat.draw_line(

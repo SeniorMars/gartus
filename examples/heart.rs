@@ -19,8 +19,8 @@ fn main() {
     heart.set_line_pixel(color);
     heart.draw_lines(&reflected);
     heart.draw_lines(&translated);
-    heart.fill(359, 237, &color, &color);
-    heart.fill(267, 224, &color, &color);
+    heart.fill(359, 237, color, color);
+    heart.fill(267, 224, color, color);
     heart
         .save_extension("./pics/amit_i_love_you.png")
         .expect("could not save image");

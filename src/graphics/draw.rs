@@ -41,9 +41,9 @@ impl Canvas {
     /// let background_color = Rgb::new(0, 0, 0);
     /// let mut image = Canvas::new(25, 25, background_color);
     /// let color = Rgb::new(0, 64, 255);
-    /// image.fill(10, 10, &color, &background_color)
+    /// image.fill(10, 10, color, background_color)
     /// ```
-    pub fn fill(&mut self, x: i64, y: i64, fill_color: &Rgb, boundary_color: &Rgb) {
+    pub fn fill(&mut self, x: i64, y: i64, fill_color: Rgb, boundary_color: Rgb) {
         let wrapped_ptr: *mut bool = std::ptr::addr_of_mut!(self.wrapped);
         let _wrapped_restore = WrappedRestore {
             original: self.wrapped,
@@ -58,10 +58,10 @@ impl Canvas {
             let Some(pixel) = self.get_pixel(x, y) else {
                 continue;
             };
-            if pixel == boundary_color || pixel == fill_color {
+            if *pixel == boundary_color || *pixel == fill_color {
                 continue;
             }
-            self.plot(fill_color, x, y);
+            self.plot(&fill_color, x, y);
             for (nx, ny) in [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)] {
                 if visited.insert((nx, ny)) {
                     points.push((nx, ny));
@@ -71,6 +71,89 @@ impl Canvas {
             // points.push((x - 1, y + 1));
             // points.push((x + 1, y - 1));
             // points.push((x + 1, y + 1));
+        }
+    }
+
+    /// Fills in the area of a 2D figure using a faster scanline-based algorithm.
+    ///
+    /// This is generally more efficient than the stack-based [`fill`] method.
+    pub fn scanline_fill(&mut self, x: i64, y: i64, fill_color: Rgb, boundary_color: Rgb) {
+        if let Some(pixel) = self.get_pixel(x, y) {
+            if *pixel == boundary_color || *pixel == fill_color {
+                return;
+            }
+        } else {
+            return;
+        }
+
+        // We use a similar guard as `fill` to disable wrapping during the operation
+        let wrapped_ptr: *mut bool = std::ptr::addr_of_mut!(self.wrapped);
+        let _wrapped_restore = WrappedRestore {
+            original: self.wrapped,
+            wrapped: wrapped_ptr,
+            _marker: std::marker::PhantomData,
+        };
+        self.wrapped = false;
+
+        let mut stack = vec![(x, y)];
+
+        while let Some((x, y)) = stack.pop() {
+            let mut lx = x;
+            while lx > 0 {
+                if let Some(p) = self.get_pixel(lx - 1, y) {
+                    if *p == boundary_color || *p == fill_color {
+                        break;
+                    }
+                    lx -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            let mut rx = x;
+            while rx < i64::from(self.width()) - 1 {
+                if let Some(p) = self.get_pixel(rx + 1, y) {
+                    if *p == boundary_color || *p == fill_color {
+                        break;
+                    }
+                    rx += 1;
+                } else {
+                    break;
+                }
+            }
+
+            for i in lx..=rx {
+                self.plot(&fill_color, i, y);
+            }
+
+            self.scanline_seed_helper(&mut stack, lx, rx, y + 1, fill_color, boundary_color);
+            self.scanline_seed_helper(&mut stack, lx, rx, y - 1, fill_color, boundary_color);
+        }
+    }
+
+    fn scanline_seed_helper(
+        &self,
+        stack: &mut Vec<(i64, i64)>,
+        lx: i64,
+        rx: i64,
+        y: i64,
+        fill_color: Rgb,
+        boundary_color: Rgb,
+    ) {
+        let mut added = false;
+        for i in lx..=rx {
+            if let Some(p) = self.get_pixel(i, y) {
+                if *p != boundary_color && *p != fill_color {
+                    if !added {
+                        stack.push((i, y));
+                        added = true;
+                    }
+                } else {
+                    added = false;
+                }
+            } else {
+                added = false;
+            }
         }
     }
 
@@ -143,6 +226,23 @@ impl Canvas {
                 continue;
             };
             self.draw_line(self.line, x0, y0, x1, y1);
+        }
+    }
+
+    /// Draws all triangles in `polygons` onto the [`Canvas`].
+    ///
+    /// # Panics
+    /// Panics if the polygon matrix does not contain a multiple of 3 points.
+    pub fn draw_polygons(&mut self, polygons: &EdgeMatrix) {
+        assert!(
+            polygons.cols().is_multiple_of(3),
+            "polygon matrix must contain multiples of 3 points"
+        );
+
+        for (p0, p1, p2) in polygons.iter_triangles() {
+            self.draw_line(self.line, p0[0], p0[1], p1[0], p1[1]);
+            self.draw_line(self.line, p1[0], p1[1], p2[0], p2[1]);
+            self.draw_line(self.line, p2[0], p2[1], p0[0], p0[1]);
         }
     }
 
@@ -383,7 +483,7 @@ mod tests {
         canvas.upper_left_origin = true;
         canvas.wrapped = true;
         canvas.plot(&Rgb::BLACK, 1, 0);
-        canvas.fill(2, 0, &Rgb::new(255, 0, 0), &Rgb::BLACK);
+        canvas.fill(2, 0, Rgb::new(255, 0, 0), Rgb::BLACK);
 
         assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::WHITE));
         assert_eq!(canvas.get_pixel(1, 0), Some(&Rgb::BLACK));
