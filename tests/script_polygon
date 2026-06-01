@@ -1,0 +1,88 @@
+#test box mesh
+box
+0 0 0 200 100 400
+ident
+rotate
+x 20
+rotate
+y 20
+move
+150 200 0
+apply
+display
+#clear the edge matrix, test the sphere
+clear
+sphere
+0 0 0 200
+display
+#rotate 90 degrees about y to check lines
+ident
+rotate
+y 90
+move
+250 250 0
+apply
+display
+#reset sphere, rotate 90 degrees about x to check lines
+ident
+move
+-250 -250 0
+rotate
+y -90
+rotate
+x 90
+move
+250 250 0
+apply
+display
+#reset sphere, rotate to make it look cool
+ident
+move
+-250 -250 0
+rotate
+x -60
+rotate
+y 20
+rotate
+z 70
+move
+250 250 0
+apply
+display
+#clear the edge matrix, test torus
+clear
+torus
+0 0 0 25 150
+display
+#rotate 90 degrees about y to check lines
+ident
+rotate
+y 90
+move
+250 250 0
+apply
+display
+#reset torus, rotate 90 degrees about x to check lines
+ident
+move
+-250 -250 0
+rotate
+y -90
+rotate
+x 90
+move
+250 250 0
+apply
+display
+#reset torus, rotate to make it look cool
+ident
+move
+-250 -250 0
+rotate
+x 70
+rotate
+y 20
+move
+250 250 0
+apply
+display

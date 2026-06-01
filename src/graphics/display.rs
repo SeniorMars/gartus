@@ -68,9 +68,7 @@ impl Canvas {
     /// let image = Canvas::new(500, 500, Rgb::default());
     /// ```
     pub fn new(width: u32, height: u32, line_color: Rgb) -> Self {
-        Self::builder(width, height)
-            .line_color(line_color)
-            .build()
+        Self::builder(width, height).line_color(line_color).build()
     }
 
     /// Returns a new [Canvas] to be drawn on with a specific background color.
@@ -94,6 +92,45 @@ impl Canvas {
         Self::builder(width, height)
             .background(background_color)
             .build()
+    }
+
+    /// Returns a new [`Canvas`] initialized with exact pixel data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixels.len()` is not `width * height`.
+    pub fn from_pixels(width: u32, height: u32, pixels: Vec<Rgb>) -> Self {
+        assert_eq!(
+            pixels.len(),
+            Self::pixel_count(width, height),
+            "pixel data must match canvas size"
+        );
+        Self {
+            width,
+            height,
+            pixels,
+            upper_left_origin: false,
+            wrapped: true,
+            line: Rgb::default(),
+            line_width: 1.0,
+        }
+    }
+
+    pub(crate) fn with_pixels_like(&self, pixels: Vec<Rgb>) -> Self {
+        assert_eq!(
+            pixels.len(),
+            self.pixels.len(),
+            "new pixel data must match canvas size"
+        );
+        Self {
+            width: self.width,
+            height: self.height,
+            pixels,
+            upper_left_origin: self.upper_left_origin,
+            wrapped: self.wrapped,
+            line: self.line,
+            line_width: self.line_width,
+        }
     }
 
     /// Returns the width of a [Canvas]
@@ -281,6 +318,33 @@ impl Canvas {
         );
         self.pixels = pixels;
     }
+
+    /// Returns a new canvas with every pixel transformed by `f`.
+    pub fn map_pixels<F>(&self, mut f: F) -> Self
+    where
+        F: FnMut(Rgb) -> Rgb,
+    {
+        self.with_pixels_like(self.pixels.iter().copied().map(&mut f).collect())
+    }
+
+    /// Returns a new canvas with every pixel transformed by `f`.
+    ///
+    /// The callback receives `(x, y, pixel)` in storage coordinates.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn map_pixels_with_position<F>(&self, mut f: F) -> Self
+    where
+        F: FnMut(u32, u32, Rgb) -> Rgb,
+    {
+        let width = self.width as usize;
+        let pixels = self
+            .pixels
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(idx, pixel)| f((idx % width) as u32, (idx / width) as u32, pixel))
+            .collect();
+        self.with_pixels_like(pixels)
+    }
 }
 
 impl Canvas {
@@ -417,14 +481,11 @@ impl Canvas {
 
     fn write_binary_ppm<W: Write>(&self, mut out: W) -> io::Result<()> {
         writeln!(out, "P6\n{} {}\n255", self.width, self.height)?;
-        
+
         // SAFETY: Rgb is #[repr(C)] and contains three u8 fields with no padding.
         // It is safe to view a slice of Rgb as a slice of u8 for binary output.
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                self.pixels.as_ptr().cast::<u8>(),
-                self.pixels.len() * 3,
-            )
+            std::slice::from_raw_parts(self.pixels.as_ptr().cast::<u8>(), self.pixels.len() * 3)
         };
         out.write_all(bytes)?;
         Ok(())
@@ -487,9 +548,10 @@ impl Canvas {
                 )
             })?;
 
-        let stdin = child.stdin.as_mut().ok_or_else(|| {
-            io::Error::other("Failed to open stdin for ImageMagick")
-        })?;
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::other("Failed to open stdin for ImageMagick"))?;
 
         self.write_binary_ppm(stdin)?;
 
@@ -517,7 +579,7 @@ impl Canvas {
     /// ```
     pub fn display(&self) -> io::Result<()> {
         let mut child = Command::new("magick")
-            .args(["-", "display:"])
+            .args(["display", "-"])
             .stdin(Stdio::piped())
             .spawn()
             .map_err(|e| {
@@ -527,9 +589,10 @@ impl Canvas {
                 )
             })?;
 
-        let stdin = child.stdin.as_mut().ok_or_else(|| {
-            io::Error::other("Failed to open stdin for ImageMagick")
-        })?;
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::other("Failed to open stdin for ImageMagick"))?;
 
         self.write_binary_ppm(stdin)?;
 
@@ -625,5 +688,38 @@ impl CanvasBuilder {
             line: self.line_color,
             line_width: self.line_width,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_pixels_preserves_exact_pixel_data() {
+        let canvas = Canvas::from_pixels(2, 1, vec![Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
+
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 1);
+        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
+    }
+
+    #[test]
+    fn map_pixels_preserves_canvas_metadata() {
+        let canvas = Canvas::builder(1, 1)
+            .background(Rgb::new(10, 20, 30))
+            .line_color(Rgb::new(40, 50, 60))
+            .line_width(3.0)
+            .upper_left_origin(true)
+            .wrapped(false)
+            .build();
+
+        let mapped = canvas.map_pixels(|pixel| Rgb::new(pixel.blue, pixel.green, pixel.red));
+
+        assert_eq!(mapped.pixels(), &[Rgb::new(30, 20, 10)]);
+        assert_eq!(mapped.line_color(), Rgb::new(40, 50, 60));
+        assert!((mapped.line_width() - 3.0).abs() < f64::EPSILON);
+        assert!(mapped.upper_left_origin);
+        assert!(!mapped.wrapped);
     }
 }

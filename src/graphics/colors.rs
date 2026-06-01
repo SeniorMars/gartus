@@ -126,6 +126,7 @@ impl Rgb {
         [self.red, self.green, self.blue]
     }
 
+    #[cfg(feature = "old_parser")]
     pub(crate) fn name_to_const(color: &str) -> Option<Rgb> {
         match color {
             "black" => Some(Rgb::BLACK),

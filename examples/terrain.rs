@@ -35,7 +35,7 @@ fn main() {
 
     // 2. Build EdgeMatrix for the grid
     println!("Building grid...");
-    let mut polygons = EdgeMatrix::new();
+    let mut polygons = PolygonMatrix::new();
     let scale = 650.0; // Increased scale from 500.0
     let h_scale = 350.0; // Increased height from 300.0
 

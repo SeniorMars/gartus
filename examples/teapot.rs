@@ -11,7 +11,7 @@ fn main() {
 
     println!("Generating Utah Teapot...");
 
-    let mut matrix = EdgeMatrix::new();
+    let mut matrix = PolygonMatrix::new();
 
     for patch_indices in &TEAPOT_PATCHES {
         let mut controls = [[(0.0, 0.0, 0.0); 4]; 4];

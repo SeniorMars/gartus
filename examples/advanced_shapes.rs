@@ -11,7 +11,7 @@ fn main() {
 
     // 1. Surface of Revolution (Vase/Wine Glass profile)
     println!("Building Revolution Surface (Vase)...");
-    let mut vase_edges = EdgeMatrix::new();
+    let mut vase_edges = PolygonMatrix::new();
     let mut profile = Vec::new();
     for i in 0..=50 {
         let t = i as f64 / 50.0;
@@ -29,7 +29,7 @@ fn main() {
 
     // 2. Icosahedron
     println!("Building Icosahedron...");
-    let mut ico_edges = EdgeMatrix::new();
+    let mut ico_edges = PolygonMatrix::new();
     ico_edges.add_icosahedron((0.0, 0.0, 0.0), 80.0);
     let ico_transform = Matrix::translate(600.0, 200.0, 0.0) * Matrix::rotate_y(45.0) * Matrix::rotate_x(20.0);
     let ico_final = ico_edges.apply(&ico_transform);
@@ -38,7 +38,7 @@ fn main() {
 
     // 3. Dodecahedron
     println!("Building Dodecahedron...");
-    let mut dodeca_edges = EdgeMatrix::new();
+    let mut dodeca_edges = PolygonMatrix::new();
     dodeca_edges.add_dodecahedron((0.0, 0.0, 0.0), 70.0);
     let dodeca_transform = Matrix::translate(600.0, 600.0, 0.0) * Matrix::rotate_z(30.0) * Matrix::rotate_x(30.0);
     let dodeca_final = dodeca_edges.apply(&dodeca_transform);
@@ -47,7 +47,7 @@ fn main() {
 
     // 4. Torus Knot (Parametric Revolution Surface)
     println!("Building Torus Knot...");
-    let mut knot_edges = EdgeMatrix::new();
+    let mut knot_edges = PolygonMatrix::new();
     let mut knot_profile = Vec::new();
     for i in 0..=30 {
         let t = i as f64 / 30.0 * 2.0 * PI;

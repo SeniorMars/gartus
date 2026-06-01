@@ -28,9 +28,24 @@ default = ["external", "old_parser", "turtle", "filters", "fancy_math"]
 external = ["filters"]
 filters = []
 old_parser = []
-old_shapes = []
 turtle = []
 fancy_math = []
+
+[[example]]
+name = "frac_tree"
+required-features = ["turtle"]
+
+[[example]]
+name = "maze"
+required-features = ["turtle"]
+
+[[test]]
+name = "script"
+required-features = ["old_parser"]
+
+[[test]]
+name = "dw_tests"
+required-features = ["old_parser"]
 
 # [[bench]]
 # name = "derp"

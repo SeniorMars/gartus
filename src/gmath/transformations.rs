@@ -11,7 +11,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let h = Matrix::hermite();
     /// ```
-    #[must_use] pub fn hermite() -> Self {
+    pub fn hermite() -> Self {
         Matrix::new(4, 4, vec![0.0, 1.0, 0.0, 3.0,
                                0.0, 1.0, 0.0, 2.0,
                                0.0, 1.0, 1.0, 1.0,
@@ -27,7 +27,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let h_inverse = Matrix::inverse_hermite();
     /// ```
-    #[must_use] pub fn inverse_hermite() -> Self {
+    pub fn inverse_hermite() -> Self {
         Matrix::new(4, 4, vec![2.0, -3.0, 0.0, 1.0,
                                -2.0, 3.0, 0.0, 0.0,
                                1.0, -2.0, 1.0, 0.0,
@@ -43,7 +43,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let h_inverse = Matrix::inverse_bezier();
     /// ```
-    #[must_use] pub fn inverse_bezier() -> Self {
+    pub fn inverse_bezier() -> Self {
         Matrix::new(4, 4, vec![-1.0, 3.0, -3.0, 1.0,
                                3.0, -6.0, 3.0, 0.0,
                                -3.0, 3.0, 0.0, 0.0,
@@ -59,7 +59,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_yz();
     /// ```
-    #[must_use] pub fn reflect_yz() -> Self {
+    pub fn reflect_yz() -> Self {
         Matrix::new(4, 4, vec![-1.0, 0.0, 0.0, 0.0,
                                0.0, 1.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -75,7 +75,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_xz();
     /// ```
-    #[must_use] pub fn reflect_xz() -> Self {
+    pub fn reflect_xz() -> Self {
         Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 0.0,
                                0.0, -1.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -91,7 +91,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_xy();
     /// ```
-    #[must_use] pub fn reflect_xy() -> Self {
+    pub fn reflect_xy() -> Self {
         Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 0.0,
                                0.0, 1.0, 0.0, 0.0,
                                0.0, 0.0, -1.0, 0.0,
@@ -107,7 +107,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_45();
     /// ```
-    #[must_use] pub fn reflect_45() -> Self {
+    pub fn reflect_45() -> Self {
         Matrix::new(4, 4, vec![0.0, 1.0, 0.0, 0.0,
                                1.0, 0.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -123,7 +123,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_neg45();
     /// ```
-    #[must_use] pub fn reflect_neg45() -> Self {
+    pub fn reflect_neg45() -> Self {
         Matrix::new(4, 4, vec![0.0, -1.0, 0.0, 0.0,
                                -1.0, 0.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -139,7 +139,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let reflect = Matrix::reflect_origin();
     /// ```
-    #[must_use] pub fn reflect_origin() -> Self {
+    pub fn reflect_origin() -> Self {
         Matrix::new(4, 4, vec![-1.0, 0.0, 0.0, 0.0,
                                0.0, -1.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -161,7 +161,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let translate = Matrix::translate(50.0, -100.0, 0.0);
     /// ```
-    #[must_use] pub fn translate(x: f64, y: f64, z: f64) -> Self {
+    pub fn translate(x: f64, y: f64, z: f64) -> Self {
         Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 0.0,
                                0.0, 1.0, 0.0, 0.0,
                                0.0, 0.0, 1.0, 0.0,
@@ -183,7 +183,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let dilation = Matrix::scale(0.5, 0.25, 0.1);
     /// ```
-    #[must_use] pub fn scale(x: f64, y: f64, z: f64) -> Self {
+    pub fn scale(x: f64, y: f64, z: f64) -> Self {
         Matrix::new(4, 4, vec![x, 0.0, 0.0, 0.0,
                                0.0, y, 0.0, 0.0,
                                0.0, 0.0, z, 0.0,
@@ -211,7 +211,6 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_point(180.0, 100.0, 100.0, 100.0);
     /// ```
-    #[must_use]
     pub fn rotate_point(theta: f64, x: f64, y: f64, z: f64) -> Self {
         let len = (x * x + y * y + z * z).sqrt();
         assert!(len > f64::EPSILON, "rotation axis must be non-zero");
@@ -245,28 +244,6 @@ impl Matrix {
     }
 
 
-    #[must_use]
-    /// Creates an orthographic projection matrix for 3D graphics.
-    ///
-    /// The orthographic projection matrix is used to project 3D coordinates onto a 2D plane
-    /// without considering perspective. It defines a viewing volume where objects inside
-    /// this volume are displayed on the 2D plane.
-    ///
-    /// # Arguments
-    ///
-    /// * `left` - The left coordinate of the view volume.
-    /// * `right` - The right coordinate of the view volume.
-    /// * `bottom` - The bottom coordinate of the view volume.
-    /// * `top` - The top coordinate of the view volume.
-    /// * `near` - The near clipping plane distance.
-    /// * `far` - The far clipping plane distance.
-    ///
-    /// # Returns
-    ///
-    /// A 4x4 orthographic projection matrix.
-    ///
-    /// # Examples
-    ///
     /// Basic usage:
     ///
     /// ```
@@ -289,7 +266,6 @@ impl Matrix {
         )
     }
 
-    #[must_use]
     /// Creates a perspective projection matrix for 3D graphics.
     ///
     /// The perspective projection matrix is used to project 3D coordinates onto a 2D plane
@@ -329,7 +305,6 @@ impl Matrix {
         )
     }
 
-    #[must_use]
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     /// Creates a viewport transformation matrix for mapping normalized device coordinates to screen coordinates.
     ///
@@ -371,7 +346,6 @@ impl Matrix {
         )
     }
 
-    #[must_use]
     /// Creates a `LookAt` transformation matrix for positioning a camera in 3D space.
     ///
     /// The `LookAt` transformation matrix is used to position the camera in a 3D scene by specifying
@@ -454,7 +428,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_x(45.0);
     /// ```
-    #[must_use] pub fn rotate_x(theta: f64) -> Self {
+    pub fn rotate_x(theta: f64) -> Self {
         let angle = theta.to_radians();
         Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 0.0,
                                0.0, angle.cos(), angle.sin(), 0.0,
@@ -475,7 +449,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_y(45.0);
     /// ```
-    #[must_use] pub fn rotate_y(theta: f64) -> Self {
+    pub fn rotate_y(theta: f64) -> Self {
         let angle = theta.to_radians();
         Matrix::new(4, 4, vec![angle.cos(), 0.0, -angle.sin(), 0.0,
                                0.0, 1.0, 0.0, 0.0,
@@ -496,7 +470,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::rotate_z(45.0);
     /// ```
-    #[must_use] pub fn rotate_z(theta: f64) -> Self {
+    pub fn rotate_z(theta: f64) -> Self {
         let angle = theta.to_radians();
         Matrix::new(4, 4, vec![angle.cos(), angle.sin(), 0.0, 0.0,
                                -angle.sin(), angle.cos(), 0.0, 0.0,
@@ -518,7 +492,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_x(1.3, 0.5);
     /// ```
-    #[must_use] pub fn shearing_x(sh_y: f64, sh_z: f64) -> Self {
+    pub fn shearing_x(sh_y: f64, sh_z: f64) -> Self {
         Matrix::new(4, 4, vec![1.0, 0.0, 0.0, 0.0,
                                sh_y, 1.0, 0.0, 0.0,
                                sh_z, 0.0, 1.0, 0.0,
@@ -539,7 +513,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_y(1.3, 0.5);
     /// ```
-    #[must_use] pub fn shearing_y(sh_x: f64, sh_z: f64) -> Self {
+    pub fn shearing_y(sh_x: f64, sh_z: f64) -> Self {
         Matrix::new(4, 4, vec![1.0, sh_x, 0.0, 0.0,
                                0.0, 1.0, 0.0, 0.0,
                                0.0, sh_z, 1.0, 0.0,
@@ -560,7 +534,7 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let rotate = Matrix::shearing_z(1.3, 0.5);
     /// ```
-    #[must_use] pub fn shearing_z(sh_x: f64, sh_y: f64) -> Self {
+    pub fn shearing_z(sh_x: f64, sh_y: f64) -> Self {
         Matrix::new(4, 4, vec![1.0, 0.0, sh_x, 0.0,
                                0.0, 1.0, sh_y, 0.0,
                                0.0, 0.0, 1.0, 0.0,

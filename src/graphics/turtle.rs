@@ -75,7 +75,7 @@ impl Turtle {
     /// let red = Rgb::new(255, 0, 0);
     /// let turtle = Turtle::new(red, 0.0, 25.0, 25.0);
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn new(color: Rgb, direction_angle: f64, x: f64, y: f64) -> Self {
         Self {
             color,
@@ -183,6 +183,16 @@ impl Turtle {
         }
     }
 
+    /// Move the turtle backward without drawing.
+    pub fn backward(&mut self, step: f64) -> ((f64, f64), (f64, f64)) {
+        self.forward(-step)
+    }
+
+    /// Move the turtle backward and draw when the pen is down.
+    pub fn draw_backward(&mut self, canvas: &mut Canvas, step: f64) {
+        self.draw_forward(canvas, -step);
+    }
+
     /// Compatibility wrapper for [`Turtle::draw_forward`].
     pub fn move_turtle(&mut self, canvas: &mut Canvas, step: f64) {
         self.draw_forward(canvas, step);
@@ -232,6 +242,16 @@ impl Turtle {
         }
     }
 
+    /// Move the turtle to the origin without drawing.
+    pub fn home(&mut self) -> ((f64, f64), (f64, f64)) {
+        self.goto(0.0, 0.0)
+    }
+
+    /// Move the turtle to the origin and draw when the pen is down.
+    pub fn draw_home(&mut self, canvas: &mut Canvas) {
+        self.draw_goto(canvas, 0.0, 0.0);
+    }
+
     // /// Get a reference to the turtle's canvas.
     // pub fn canvas(&self) -> &Canvas<C> {
     //     self.canvas.as_ref()
@@ -277,7 +297,7 @@ impl Turtle {
     }
 
     /// Get a reference to the turtle's state stack.
-    #[must_use] 
+    #[must_use]
     pub fn state_stack(&self) -> &[TurtleState] {
         &self.state_stack
     }
@@ -326,6 +346,15 @@ mod test {
     }
 
     #[test]
+    fn backward_moves_opposite_heading() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 10.0, 20.0);
+        let (_, end) = turtle.backward(5.0);
+
+        assert!((end.0 - 5.0).abs() < f64::EPSILON);
+        assert!((end.1 - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn goto_updates_position_without_canvas() {
         let mut turtle = Turtle::new(Rgb::default(), 0.0, 10.0, 20.0);
         let (start, end) = turtle.goto(-5.0, 12.0);
@@ -333,6 +362,16 @@ mod test {
         assert_eq!(start, (10.0, 20.0));
         assert_eq!(end, (-5.0, 12.0));
         assert_eq!(turtle.position(), (-5.0, 12.0));
+    }
+
+    #[test]
+    fn home_returns_to_origin() {
+        let mut turtle = Turtle::new(Rgb::default(), 0.0, 10.0, 20.0);
+        let (start, end) = turtle.home();
+
+        assert_eq!(start, (10.0, 20.0));
+        assert_eq!(end, (0.0, 0.0));
+        assert_eq!(turtle.position(), (0.0, 0.0));
     }
 
     #[test]

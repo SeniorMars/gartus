@@ -21,12 +21,16 @@ impl Canvas {
             .collect()
     }
 
+    fn blank_like(&self) -> Canvas {
+        self.with_pixels_like(vec![Rgb::default(); self.len()])
+    }
+
     /// Generic convolution with a 3x3 kernel and additive bias.
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
     pub fn convolve_3x3(&self, kernel: [f32; 9], bias: f32) -> Canvas {
         let width = self.width() as isize;
         let height = self.height() as isize;
-        let mut filtered = self.clone();
+        let mut filtered = self.blank_like();
 
         for y in 0..height {
             for x in 0..width {
@@ -88,7 +92,7 @@ impl Canvas {
     fn apply_edge_kernels(&self, gx: [f32; 9], gy: [f32; 9]) -> Canvas {
         let x_img = self.convolve_3x3(gx, 0.0);
         let y_img = self.convolve_3x3(gy, 0.0);
-        let mut result = self.clone();
+        let mut result = self.blank_like();
 
         for i in 0..self.len() {
             let px = x_img[i];
@@ -111,82 +115,80 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Gamma correction.
     pub fn gamma(&self, gamma: f32) -> Canvas {
-        let mut result = self.clone();
         let inv_gamma = 1.0 / gamma;
-        for pixel in &mut result {
-            pixel.red = (255.0 * (f32::from(pixel.red) / 255.0).powf(inv_gamma)).min(255.0) as u8;
-            pixel.green = (255.0 * (f32::from(pixel.green) / 255.0).powf(inv_gamma)).min(255.0) as u8;
-            pixel.blue = (255.0 * (f32::from(pixel.blue) / 255.0).powf(inv_gamma)).min(255.0) as u8;
-        }
-        result
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                (255.0 * (f32::from(pixel.red) / 255.0).powf(inv_gamma)).min(255.0) as u8,
+                (255.0 * (f32::from(pixel.green) / 255.0).powf(inv_gamma)).min(255.0) as u8,
+                (255.0 * (f32::from(pixel.blue) / 255.0).powf(inv_gamma)).min(255.0) as u8,
+            )
+        })
     }
 
     /// Adjust saturation.
     pub fn adjust_saturation(&self, factor: f32) -> Canvas {
-        let mut result = self.clone();
-        for pixel in &mut result {
+        self.map_pixels(|pixel| {
             let gray = f32::from(pixel.luminance());
-            pixel.red = Self::clamp_u8(gray + factor * (f32::from(pixel.red) - gray));
-            pixel.green = Self::clamp_u8(gray + factor * (f32::from(pixel.green) - gray));
-            pixel.blue = Self::clamp_u8(gray + factor * (f32::from(pixel.blue) - gray));
-        }
-        result
+            Rgb::new(
+                Self::clamp_u8(gray + factor * (f32::from(pixel.red) - gray)),
+                Self::clamp_u8(gray + factor * (f32::from(pixel.green) - gray)),
+                Self::clamp_u8(gray + factor * (f32::from(pixel.blue) - gray)),
+            )
+        })
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Rotates hue by given degrees.
     pub fn hue_rotate(&self, degrees: f32) -> Canvas {
-        let mut result = self.clone();
-        for pixel in &mut result {
-            let mut hsv = Hsv::from(*pixel);
+        self.map_pixels(|pixel| {
+            let mut hsv = Hsv::from(pixel);
             let new_hue = (f32::from(hsv.hue) + degrees).round() as i32;
             hsv.hue = ((new_hue % 360 + 360) % 360) as u16;
-            *pixel = Rgb::from(hsv);
-        }
-        result
+            Rgb::from(hsv)
+        })
     }
 
     /// Adjust color temperature (positive = warmer, negative = cooler).
     pub fn adjust_temperature(&self, amount: i16) -> Canvas {
-        let mut result = self.clone();
-        for pixel in &mut result {
-            pixel.red = Self::clamp_u8(f32::from(pixel.red) + f32::from(amount));
-            pixel.blue = Self::clamp_u8(f32::from(pixel.blue) - f32::from(amount));
-        }
-        result
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                Self::clamp_u8(f32::from(pixel.red) + f32::from(amount)),
+                pixel.green,
+                Self::clamp_u8(f32::from(pixel.blue) - f32::from(amount)),
+            )
+        })
     }
 
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     /// Vignette effect.
     pub fn vignette(&self, strength: f32) -> Canvas {
-        let mut result = self.clone();
         let w = self.width() as f32;
         let h = self.height() as f32;
         let cx = w / 2.0;
         let cy = h / 2.0;
         let max_dist = (cx * cx + cy * cy).sqrt();
 
-        for y in 0..self.height() {
-            for x in 0..self.width() {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
-                let dist = (dx * dx + dy * dy).sqrt() / max_dist;
-                let factor = 1.0 - (dist * strength).min(1.0);
-
-                let idx = (y * self.width() + x) as usize;
-                let p = &mut result[idx];
-                p.red = (f32::from(p.red) * factor) as u8;
-                p.green = (f32::from(p.green) * factor) as u8;
-                p.blue = (f32::from(p.blue) * factor) as u8;
-            }
-        }
-        result
+        self.map_pixels_with_position(|x, y, pixel| {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let dist = (dx * dx + dy * dy).sqrt() / max_dist;
+            let factor = 1.0 - (dist * strength).min(1.0);
+            Rgb::new(
+                (f32::from(pixel.red) * factor) as u8,
+                (f32::from(pixel.green) * factor) as u8,
+                (f32::from(pixel.blue) * factor) as u8,
+            )
+        })
     }
 
     #[allow(clippy::cast_possible_truncation)]
     /// Pixelate / Mosaic effect.
     pub fn pixelate(&self, block_size: usize) -> Canvas {
-        let mut result = self.clone();
+        let mut result = self.blank_like();
         let w = self.width() as usize;
         let h = self.height() as usize;
 
@@ -227,19 +229,27 @@ impl Canvas {
     /// Ordered dithering using a 4x4 Bayer matrix.
     pub fn ordered_dither(&self) -> Canvas {
         let bayer = [0, 12, 3, 15, 8, 4, 11, 7, 2, 14, 1, 13, 10, 6, 9, 5];
-        let mut result = self.clone();
-        let w = self.width() as usize;
-
-        for y in 0..self.height() as usize {
-            for x in 0..w {
-                let threshold = ((bayer[(y % 4) * 4 + (x % 4)] as f32 + 0.5) / 16.0) * 255.0;
-                let p = &mut result[y * w + x];
-                p.red = if f32::from(p.red) > threshold { 255 } else { 0 };
-                p.green = if f32::from(p.green) > threshold { 255 } else { 0 };
-                p.blue = if f32::from(p.blue) > threshold { 255 } else { 0 };
-            }
-        }
-        result
+        self.map_pixels_with_position(|x, y, pixel| {
+            let threshold =
+                ((bayer[((y as usize % 4) * 4) + (x as usize % 4)] as f32 + 0.5) / 16.0) * 255.0;
+            Rgb::new(
+                if f32::from(pixel.red) > threshold {
+                    255
+                } else {
+                    0
+                },
+                if f32::from(pixel.green) > threshold {
+                    255
+                } else {
+                    0
+                },
+                if f32::from(pixel.blue) > threshold {
+                    255
+                } else {
+                    0
+                },
+            )
+        })
     }
 
     /// Floyd-Steinberg error-diffusion dithering.
@@ -273,26 +283,32 @@ impl Canvas {
             }
         }
 
-        let mut result = self.clone();
-        for (pixel, value) in (&mut result).into_iter().zip(values) {
-            let value = Self::clamp_u8(value);
-            *pixel = Rgb::new(value, value, value);
-        }
-        result
+        let pixels = values
+            .into_iter()
+            .map(|value| {
+                let value = Self::clamp_u8(value);
+                Rgb::new(value, value, value)
+            })
+            .collect();
+        self.with_pixels_like(pixels)
     }
 
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
     /// Median filter for noise reduction.
     pub fn median_filter(&self, radius: usize) -> Canvas {
-        let mut result = self.clone();
+        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
+        let window_len = (2 * radius + 1).pow(2);
+        let mut rs = Vec::with_capacity(window_len);
+        let mut gs = Vec::with_capacity(window_len);
+        let mut bs = Vec::with_capacity(window_len);
 
         for y in 0..h {
             for x in 0..w {
-                let mut rs = Vec::new();
-                let mut gs = Vec::new();
-                let mut bs = Vec::new();
+                rs.clear();
+                gs.clear();
+                bs.clear();
 
                 for dy in -(radius as isize)..=(radius as isize) {
                     for dx in -(radius as isize)..=(radius as isize) {
@@ -321,7 +337,11 @@ impl Canvas {
         self.oil_painting_custom(3, 32)
     }
 
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation
+    )]
     /// Applies an oil-painting effect using local intensity buckets.
     ///
     /// # Panics
@@ -329,17 +349,21 @@ impl Canvas {
     /// Panics if `levels` is 0.
     pub fn oil_painting_custom(&self, radius: usize, levels: usize) -> Canvas {
         assert!(levels > 0, "oil painting levels must be positive");
-        let mut result = self.clone();
+        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
         let radius = radius as isize;
+        let mut counts = vec![0u32; levels];
+        let mut red_sums = vec![0u32; levels];
+        let mut green_sums = vec![0u32; levels];
+        let mut blue_sums = vec![0u32; levels];
 
         for y in 0..h {
             for x in 0..w {
-                let mut counts = vec![0u32; levels];
-                let mut red_sums = vec![0u32; levels];
-                let mut green_sums = vec![0u32; levels];
-                let mut blue_sums = vec![0u32; levels];
+                counts.fill(0);
+                red_sums.fill(0);
+                green_sums.fill(0);
+                blue_sums.fill(0);
 
                 for dy in -radius..=radius {
                     for dx in -radius..=radius {
@@ -369,10 +393,14 @@ impl Canvas {
         result
     }
 
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation
+    )]
     /// Applies a Watercolor Effect.
     pub fn watercolor(&self) -> Canvas {
-        let mut result = self.clone();
+        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
         let radius = 3;
@@ -410,42 +438,35 @@ impl Canvas {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Converts the image to grayscale.
     pub fn grayscale(&self) -> Canvas {
-        let mut filtered_image = self.clone();
-        filtered_image.iter_mut().for_each(|pixel| {
+        self.map_pixels(|pixel| {
             let (r, g, b) = pixel.values();
             let average = ((f32::from(r) + f32::from(g) + f32::from(b)) / 3.0).round() as u8;
-            *pixel = Rgb::new(average, average, average);
-        });
-        filtered_image
+            Rgb::new(average, average, average)
+        })
     }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Applies a sepia tone filter.
     pub fn sepia(&self) -> Canvas {
-        let mut filtered_image = self.clone();
-        filtered_image.iter_mut().for_each(|pixel| {
+        self.map_pixels(|pixel| {
             let (r, g, b) = pixel.values();
-            let sepia_red =
-                (0.393 * f32::from(r) + 0.769 * f32::from(g) + 0.198 * f32::from(b)).min(255.0) as u8;
-            let sepia_green =
-                (0.349 * f32::from(r) + 0.686 * f32::from(g) + 0.168 * f32::from(b)).min(255.0) as u8;
-            let sepia_blue =
-                (0.272 * f32::from(r) + 0.534 * f32::from(g) + 0.131 * f32::from(b)).min(255.0) as u8;
-            *pixel = Rgb::new(sepia_red, sepia_green, sepia_blue);
-        });
-        filtered_image
+            let sepia_red = (0.393 * f32::from(r) + 0.769 * f32::from(g) + 0.198 * f32::from(b))
+                .min(255.0) as u8;
+            let sepia_green = (0.349 * f32::from(r) + 0.686 * f32::from(g) + 0.168 * f32::from(b))
+                .min(255.0) as u8;
+            let sepia_blue = (0.272 * f32::from(r) + 0.534 * f32::from(g) + 0.131 * f32::from(b))
+                .min(255.0) as u8;
+            Rgb::new(sepia_red, sepia_green, sepia_blue)
+        })
     }
 
     /// Reflects the image horizontally.
     pub fn reflect(&self) -> Canvas {
-        let mut filtered_image = self.clone();
-        filtered_image.iter_row_mut().for_each(|row| {
-            let len = row.len();
-            (0..row.len() / 2).for_each(|i| {
-                row.swap(i, len - i - 1);
-            });
-        });
-        filtered_image
+        let mut pixels = Vec::with_capacity(self.len());
+        for row in self.iter_row() {
+            pixels.extend(row.iter().rev().copied());
+        }
+        self.with_pixels_like(pixels)
     }
 
     /// Applies a box blur filter.
@@ -464,47 +485,43 @@ impl Canvas {
 
     /// Inverts all pixel colors.
     pub fn invert(&self) -> Canvas {
-        let mut inverted_image = self.clone();
-        inverted_image.iter_mut().for_each(|pixel| {
+        self.map_pixels(|pixel| {
             let (r, g, b) = pixel.values();
-            *pixel = Rgb::new(255 - r, 255 - g, 255 - b);
-        });
-        inverted_image
+            Rgb::new(255 - r, 255 - g, 255 - b)
+        })
     }
 
     /// Converts to black and white using a luminance threshold.
     pub fn black_and_white(&self, threshold: u8) -> Canvas {
-        let mut bw_image = self.clone();
-        bw_image.iter_mut().for_each(|pixel| {
+        self.map_pixels(|pixel| {
             if pixel.luminance() >= threshold {
-                *pixel = Rgb::WHITE;
+                Rgb::WHITE
             } else {
-                *pixel = Rgb::BLACK;
+                Rgb::BLACK
             }
-        });
-        bw_image
+        })
     }
 
     /// Adjusts brightness by adding a signed offset to each channel.
     pub fn adjust_brightness(&self, brightness: i16) -> Canvas {
-        let mut adjusted_image = self.clone();
-        adjusted_image.iter_mut().for_each(|pixel| {
-            pixel.red = Self::clamp_u8(f32::from(pixel.red) + f32::from(brightness));
-            pixel.green = Self::clamp_u8(f32::from(pixel.green) + f32::from(brightness));
-            pixel.blue = Self::clamp_u8(f32::from(pixel.blue) + f32::from(brightness));
-        });
-        adjusted_image
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                Self::clamp_u8(f32::from(pixel.red) + f32::from(brightness)),
+                Self::clamp_u8(f32::from(pixel.green) + f32::from(brightness)),
+                Self::clamp_u8(f32::from(pixel.blue) + f32::from(brightness)),
+            )
+        })
     }
 
     /// Adjusts contrast by scaling each channel around the midpoint.
     pub fn adjust_contrast(&self, contrast: f32) -> Canvas {
-        let mut adjusted_image = self.clone();
-        adjusted_image.iter_mut().for_each(|pixel| {
-            pixel.red = Self::clamp_u8((f32::from(pixel.red) - 127.5) * contrast + 127.5);
-            pixel.green = Self::clamp_u8((f32::from(pixel.green) - 127.5) * contrast + 127.5);
-            pixel.blue = Self::clamp_u8((f32::from(pixel.blue) - 127.5) * contrast + 127.5);
-        });
-        adjusted_image
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                Self::clamp_u8((f32::from(pixel.red) - 127.5) * contrast + 127.5),
+                Self::clamp_u8((f32::from(pixel.green) - 127.5) * contrast + 127.5),
+                Self::clamp_u8((f32::from(pixel.blue) - 127.5) * contrast + 127.5),
+            )
+        })
     }
 
     /// Laplacian edge detection.
@@ -529,67 +546,75 @@ impl Canvas {
             radius.is_finite() && radius >= 1.0,
             "gaussian blur radius must be finite and at least 1.0"
         );
-        let width = self.width() as isize;
-        let height = self.height() as isize;
-        let mut blurred_image = self.clone();
+        if self.is_empty() {
+            return self.blank_like();
+        }
 
         let radius = radius.round() as isize;
-        let kernel_size = (2 * radius + 1) as usize;
-        let mut kernel = vec![vec![0.0f32; kernel_size]; kernel_size];
-        let kernel_center = radius;
+        let width = self.width() as usize;
+        let height = self.height() as usize;
         let sigma = (radius as f32 / 2.0).max(1.0);
         let two_sigma_squared = 2.0 * sigma * sigma;
-        let mut kernel_sum = 0.0f32;
-
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..kernel_size {
-            for j in 0..kernel_size {
-                let x = (i as isize - kernel_center) as f32;
-                let y = (j as isize - kernel_center) as f32;
-                let exponent = -(x * x + y * y) / two_sigma_squared;
-                let weight = exponent.exp();
-                kernel[i][j] = weight;
-                kernel_sum += weight;
-            }
+        let mut kernel = Vec::with_capacity((radius * 2 + 1) as usize);
+        let mut kernel_sum = 0.0;
+        for i in -radius..=radius {
+            let distance = i as f32;
+            let weight = (-(distance * distance) / two_sigma_squared).exp();
+            kernel.push(weight);
+            kernel_sum += weight;
+        }
+        for weight in &mut kernel {
+            *weight /= kernel_sum;
         }
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..kernel_size {
-            for j in 0..kernel_size {
-                kernel[i][j] /= kernel_sum;
-            }
-        }
-
+        let mut horizontal = vec![[0.0f32; 3]; self.len()];
         for y in 0..height {
             for x in 0..width {
                 let mut r_sum = 0.0;
                 let mut g_sum = 0.0;
                 let mut b_sum = 0.0;
-                #[allow(clippy::needless_range_loop)]
-                for i in 0..kernel_size {
-                    for j in 0..kernel_size {
-                        let dx = i as isize - kernel_center;
-                        let dy = j as isize - kernel_center;
-                        let px = (x + dx).clamp(0, width - 1);
-                        let py = (y + dy).clamp(0, height - 1);
-                        let pixel = self[(py * width + px) as usize];
-                        let weight = kernel[i][j];
-                        r_sum += weight * f32::from(pixel.red);
-                        g_sum += weight * f32::from(pixel.green);
-                        b_sum += weight * f32::from(pixel.blue);
-                    }
+                for (kernel_idx, weight) in kernel.iter().enumerate() {
+                    let dx = kernel_idx as isize - radius;
+                    let px = (x as isize + dx).clamp(0, width as isize - 1) as usize;
+                    let pixel = self[Self::idx(width, px, y)];
+                    r_sum += weight * f32::from(pixel.red);
+                    g_sum += weight * f32::from(pixel.green);
+                    b_sum += weight * f32::from(pixel.blue);
                 }
-                blurred_image[(y * width + x) as usize] = Rgb::new(
-                    r_sum.round() as u8,
-                    g_sum.round() as u8,
-                    b_sum.round() as u8,
-                );
+                horizontal[Self::idx(width, x, y)] = [r_sum, g_sum, b_sum];
             }
         }
-        blurred_image
+
+        let mut pixels = Vec::with_capacity(self.len());
+        for y in 0..height {
+            for x in 0..width {
+                let mut r_sum = 0.0;
+                let mut g_sum = 0.0;
+                let mut b_sum = 0.0;
+                for (kernel_idx, weight) in kernel.iter().enumerate() {
+                    let dy = kernel_idx as isize - radius;
+                    let py = (y as isize + dy).clamp(0, height as isize - 1) as usize;
+                    let pixel = horizontal[Self::idx(width, x, py)];
+                    r_sum += weight * pixel[0];
+                    g_sum += weight * pixel[1];
+                    b_sum += weight * pixel[2];
+                }
+                pixels.push(Rgb::new(
+                    Self::clamp_u8(r_sum),
+                    Self::clamp_u8(g_sum),
+                    Self::clamp_u8(b_sum),
+                ));
+            }
+        }
+
+        self.with_pixels_like(pixels)
     }
 
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     /// Bilateral filter that smooths noise while preserving strong color edges.
     ///
     /// # Panics
@@ -612,7 +637,7 @@ impl Canvas {
         let radius = radius as isize;
         let two_sigma_space_squared = 2.0 * sigma_space * sigma_space;
         let two_sigma_color_squared = 2.0 * sigma_color * sigma_color;
-        let mut result = self.clone();
+        let mut result = self.blank_like();
 
         for y in 0..height {
             for x in 0..width {
@@ -662,12 +687,11 @@ impl Canvas {
             "unsharp amount must be finite and non-negative"
         );
         let blurred = self.gaussian_blur(radius);
-        let mut result = self.clone();
-
+        let mut pixels = Vec::with_capacity(self.len());
         for idx in 0..self.len() {
             let original = self[idx];
             let blur = blurred[idx];
-            result[idx] = Rgb::new(
+            pixels.push(Rgb::new(
                 Self::clamp_u8(
                     f32::from(original.red)
                         + amount * (f32::from(original.red) - f32::from(blur.red)),
@@ -680,9 +704,9 @@ impl Canvas {
                     f32::from(original.blue)
                         + amount * (f32::from(original.blue) - f32::from(blur.blue)),
                 ),
-            );
+            ));
         }
-        result
+        self.with_pixels_like(pixels)
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -735,7 +759,7 @@ impl Canvas {
             }
         }
 
-        let mut result = self.clone();
+        let mut result = self.blank_like();
         for y in 0..height {
             for x in 0..width {
                 let tile_x = (x / tile_size).min(tiles_x - 1);
@@ -801,11 +825,7 @@ impl Canvas {
     }
 
     fn apply_luminance_lut(&self, lut: &[u8; 256]) -> Canvas {
-        let mut result = self.clone();
-        for pixel in &mut result {
-            *pixel = Self::equalized_luminance_pixel(*pixel, lut);
-        }
-        result
+        self.map_pixels(|pixel| Self::equalized_luminance_pixel(pixel, lut))
     }
 
     fn equalized_luminance_pixel(pixel: Rgb, lut: &[u8; 256]) -> Rgb {
@@ -843,11 +863,12 @@ impl Canvas {
             f32::from(high_threshold),
         );
 
-        let mut result = self.clone();
-        for (pixel, edge) in result.iter_mut().zip(edges) {
-            *pixel = if edge { Rgb::WHITE } else { Rgb::BLACK };
-        }
-        result
+        self.with_pixels_like(
+            edges
+                .into_iter()
+                .map(|edge| if edge { Rgb::WHITE } else { Rgb::BLACK })
+                .collect(),
+        )
     }
 
     /// Emboss filter.
@@ -859,31 +880,37 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Posterize to a given number of color levels.
     pub fn posterize(&self, levels: u8) -> Canvas {
-        let mut posterized_image = self.clone();
         let levels = f32::from(levels.max(1));
-        posterized_image.iter_mut().for_each(|pixel| {
-            pixel.red = ((f32::from(pixel.red) / 255.0 * levels).round() / levels * 255.0) as u8;
-            pixel.green = ((f32::from(pixel.green) / 255.0 * levels).round() / levels * 255.0) as u8;
-            pixel.blue = ((f32::from(pixel.blue) / 255.0 * levels).round() / levels * 255.0) as u8;
-        });
-        posterized_image
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                ((f32::from(pixel.red) / 255.0 * levels).round() / levels * 255.0) as u8,
+                ((f32::from(pixel.green) / 255.0 * levels).round() / levels * 255.0) as u8,
+                ((f32::from(pixel.blue) / 255.0 * levels).round() / levels * 255.0) as u8,
+            )
+        })
     }
 
     /// Solarize channels above the given threshold.
     pub fn solarize(&self, threshold: u8) -> Canvas {
-        let mut solarized_image = self.clone();
-        solarized_image.iter_mut().for_each(|pixel| {
-            if pixel.red > threshold {
-                pixel.red = 255 - pixel.red;
-            }
-            if pixel.green > threshold {
-                pixel.green = 255 - pixel.green;
-            }
-            if pixel.blue > threshold {
-                pixel.blue = 255 - pixel.blue;
-            }
-        });
-        solarized_image
+        self.map_pixels(|pixel| {
+            Rgb::new(
+                if pixel.red > threshold {
+                    255 - pixel.red
+                } else {
+                    pixel.red
+                },
+                if pixel.green > threshold {
+                    255 - pixel.green
+                } else {
+                    pixel.green
+                },
+                if pixel.blue > threshold {
+                    255 - pixel.blue
+                } else {
+                    pixel.blue
+                },
+            )
+        })
     }
 }
 
@@ -1073,24 +1100,22 @@ mod tests {
     fn canny_returns_binary_edges() {
         let mut canvas = Canvas::new(3, 3, Rgb::BLACK);
         canvas.fill_canvas(vec![
-                Rgb::BLACK,
-                Rgb::WHITE,
-                Rgb::WHITE,
-                Rgb::BLACK,
-                Rgb::WHITE,
-                Rgb::WHITE,
-                Rgb::BLACK,
-                Rgb::WHITE,
-                Rgb::WHITE,
-            ]);
+            Rgb::BLACK,
+            Rgb::WHITE,
+            Rgb::WHITE,
+            Rgb::BLACK,
+            Rgb::WHITE,
+            Rgb::WHITE,
+            Rgb::BLACK,
+            Rgb::WHITE,
+            Rgb::WHITE,
+        ]);
 
         let edges = canvas.canny(10, 20);
 
-        assert!(
-            edges
-                .pixels()
-                .iter()
-                .all(|pixel| *pixel == Rgb::BLACK || *pixel == Rgb::WHITE)
-        );
+        assert!(edges
+            .pixels()
+            .iter()
+            .all(|pixel| *pixel == Rgb::BLACK || *pixel == Rgb::WHITE));
     }
 }

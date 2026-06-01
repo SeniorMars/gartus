@@ -1,5 +1,5 @@
 use super::colors::Rgb;
-use crate::gmath::{edge_matrix::EdgeMatrix, matrix::Matrix};
+use crate::gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix};
 use crate::graphics::display::Canvas;
 use std::collections::HashSet;
 
@@ -229,20 +229,28 @@ impl Canvas {
         }
     }
 
-    /// Draws all triangles in `polygons` onto the [`Canvas`].
+    /// Draws all triangles in `polygons` onto the [`Canvas`] with backface culling.
     ///
     /// # Panics
     /// Panics if the polygon matrix does not contain a multiple of 3 points.
-    pub fn draw_polygons(&mut self, polygons: &EdgeMatrix) {
+    pub fn draw_polygons(&mut self, polygons: &PolygonMatrix) {
         assert!(
             polygons.cols().is_multiple_of(3),
             "polygon matrix must contain multiples of 3 points"
         );
 
         for (p0, p1, p2) in polygons.iter_triangles() {
-            self.draw_line(self.line, p0[0], p0[1], p1[0], p1[1]);
-            self.draw_line(self.line, p1[0], p1[1], p2[0], p2[1]);
-            self.draw_line(self.line, p2[0], p2[1], p0[0], p0[1]);
+            let ax = p1[0] - p0[0];
+            let ay = p1[1] - p0[1];
+            let bx = p2[0] - p0[0];
+            let by = p2[1] - p0[1];
+            let normal_z = ax * by - ay * bx;
+
+            if normal_z > 0.0 {
+                self.draw_line(self.line, p0[0], p0[1], p1[0], p1[1]);
+                self.draw_line(self.line, p1[0], p1[1], p2[0], p2[1]);
+                self.draw_line(self.line, p2[0], p2[1], p0[0], p0[1]);
+            }
         }
     }
 
