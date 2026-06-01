@@ -1,0 +1,12 @@
+# Quad plus pentagon fixture for importer regression tests.
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+v 2 0 0
+v 3 0 0
+v 3 1 0
+v 2.5 1.5 0
+v 2 1 0
+f 1 2 3 4
+f 5 6 7 8 9

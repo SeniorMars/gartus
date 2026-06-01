@@ -167,11 +167,13 @@ impl Rgb {
     pub fn lerp(self, other: Self, t: f64) -> Self {
         let t = t.clamp(0.0, 1.0);
         Self {
-            red: (f64::from(self.red) + f64::from(i32::from(other.red) - i32::from(self.red)) * t).round()
-                as u8,
-            green: (f64::from(self.green) + f64::from(i32::from(other.green) - i32::from(self.green)) * t)
+            red: (f64::from(self.red) + f64::from(i32::from(other.red) - i32::from(self.red)) * t)
                 .round() as u8,
-            blue: (f64::from(self.blue) + f64::from(i32::from(other.blue) - i32::from(self.blue)) * t)
+            green: (f64::from(self.green)
+                + f64::from(i32::from(other.green) - i32::from(self.green)) * t)
+                .round() as u8,
+            blue: (f64::from(self.blue)
+                + f64::from(i32::from(other.blue) - i32::from(self.blue)) * t)
                 .round() as u8,
         }
     }

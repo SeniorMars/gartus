@@ -21,7 +21,7 @@ fn main() {
         profile.push((x, y));
     }
     vase_edges.add_revolution_surface(&profile, 40);
-    
+
     let vase_transform = Matrix::translate(200.0, 400.0, 0.0) * Matrix::rotate_x(20.0);
     let vase_final = vase_edges.apply(&vase_transform);
     canvas.set_line_pixel(Rgb::new(0, 200, 255));
@@ -31,7 +31,8 @@ fn main() {
     println!("Building Icosahedron...");
     let mut ico_edges = PolygonMatrix::new();
     ico_edges.add_icosahedron((0.0, 0.0, 0.0), 80.0);
-    let ico_transform = Matrix::translate(600.0, 200.0, 0.0) * Matrix::rotate_y(45.0) * Matrix::rotate_x(20.0);
+    let ico_transform =
+        Matrix::translate(600.0, 200.0, 0.0) * Matrix::rotate_y(45.0) * Matrix::rotate_x(20.0);
     let ico_final = ico_edges.apply(&ico_transform);
     canvas.set_line_pixel(Rgb::new(255, 100, 0));
     canvas.draw_polygons(&ico_final);
@@ -40,7 +41,8 @@ fn main() {
     println!("Building Dodecahedron...");
     let mut dodeca_edges = PolygonMatrix::new();
     dodeca_edges.add_dodecahedron((0.0, 0.0, 0.0), 70.0);
-    let dodeca_transform = Matrix::translate(600.0, 600.0, 0.0) * Matrix::rotate_z(30.0) * Matrix::rotate_x(30.0);
+    let dodeca_transform =
+        Matrix::translate(600.0, 600.0, 0.0) * Matrix::rotate_z(30.0) * Matrix::rotate_x(30.0);
     let dodeca_final = dodeca_edges.apply(&dodeca_transform);
     canvas.set_line_pixel(Rgb::new(100, 255, 100));
     canvas.draw_polygons(&dodeca_final);
@@ -62,6 +64,8 @@ fn main() {
     canvas.draw_polygons(&knot_final);
 
     println!("Rendering and saving...");
-    canvas.save_extension("pics/advanced_shapes.png").expect("Could not save image");
+    canvas
+        .save_extension("pics/advanced_shapes.png")
+        .expect("Could not save image");
     println!("Done! Saved to advanced_shapes.png");
 }

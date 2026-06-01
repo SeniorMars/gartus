@@ -1113,9 +1113,11 @@ mod tests {
 
         let edges = canvas.canny(10, 20);
 
-        assert!(edges
-            .pixels()
-            .iter()
-            .all(|pixel| *pixel == Rgb::BLACK || *pixel == Rgb::WHITE));
+        assert!(
+            edges
+                .pixels()
+                .iter()
+                .all(|pixel| *pixel == Rgb::BLACK || *pixel == Rgb::WHITE)
+        );
     }
 }

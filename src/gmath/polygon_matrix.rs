@@ -9,6 +9,15 @@ pub struct PolygonMatrix {
     inner: Matrix,
 }
 
+/// Axis-aligned bounds for 3D points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds3 {
+    /// Minimum x, y, and z coordinates.
+    pub min: (f64, f64, f64),
+    /// Maximum x, y, and z coordinates.
+    pub max: (f64, f64, f64),
+}
+
 impl PolygonMatrix {
     /// Creates an empty polygon matrix (4 rows, 0 cols).
     #[must_use]
@@ -33,6 +42,12 @@ impl PolygonMatrix {
         self.inner.cols()
     }
 
+    /// Number of complete triangles in this polygon matrix.
+    #[must_use]
+    pub fn triangle_count(&self) -> usize {
+        self.inner.cols() / 3
+    }
+
     /// Total number of f64 values stored.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -43,6 +58,42 @@ impl PolygonMatrix {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.cols() == 0
+    }
+
+    /// Returns the axis-aligned bounds for all points in this matrix.
+    #[must_use]
+    pub fn bounds(&self) -> Option<Bounds3> {
+        self.bounds_from_col(0)
+    }
+
+    /// Returns the axis-aligned bounds for points starting at `start_col`.
+    ///
+    /// # Panics
+    /// Panics if `start_col` is greater than the current column count.
+    #[must_use]
+    pub fn bounds_from_col(&self, start_col: usize) -> Option<Bounds3> {
+        assert!(
+            start_col <= self.cols(),
+            "start column must be within the polygon matrix"
+        );
+
+        let mut points = self.iter_points().skip(start_col);
+        let first = points.next()?;
+        let mut bounds = Bounds3 {
+            min: (first[0], first[1], first[2]),
+            max: (first[0], first[1], first[2]),
+        };
+
+        for point in points {
+            bounds.min.0 = bounds.min.0.min(point[0]);
+            bounds.min.1 = bounds.min.1.min(point[1]);
+            bounds.min.2 = bounds.min.2.min(point[2]);
+            bounds.max.0 = bounds.max.0.max(point[0]);
+            bounds.max.1 = bounds.max.1.max(point[1]);
+            bounds.max.2 = bounds.max.2.max(point[2]);
+        }
+
+        Some(bounds)
     }
 
     /// Adds a point (x, y, z) with implicit w=1.
@@ -69,6 +120,17 @@ impl PolygonMatrix {
         ]);
     }
 
+    /// Appends multiple triangles to the matrix.
+    ///
+    /// Each triangle is stored in the point order supplied by the caller.
+    pub fn push_polygons(&mut self, polygons: &[[(f64, f64, f64); 3]]) {
+        let mut data = Vec::with_capacity(polygons.len() * 12);
+        for &[p0, p1, p2] in polygons {
+            Self::extend_polygon_data(&mut data, p0, p1, p2);
+        }
+        self.append_homogeneous_points(&data);
+    }
+
     /// Appends another `PolygonMatrix`'s points to this one.
     ///
     /// # Panics
@@ -77,6 +139,17 @@ impl PolygonMatrix {
         self.inner
             .append_columns(&other.inner)
             .expect("PolygonMatrix values must always have 4 rows");
+    }
+
+    /// Truncates this polygon matrix to `cols` points.
+    ///
+    /// This is primarily used to roll back failed streaming imports after batches have already
+    /// been appended.
+    ///
+    /// # Panics
+    /// Panics if `cols` is greater than the current column count.
+    pub fn truncate_cols(&mut self, cols: usize) {
+        self.inner.truncate_cols(cols);
     }
 
     /// Returns an iterator over individual points as `&[f64]` slices of length 4.
@@ -91,6 +164,48 @@ impl PolygonMatrix {
             let (p0, p1) = p01.split_at(4);
             (p0, p1, p2)
         })
+    }
+
+    /// Reverses the winding order of every triangle in place.
+    ///
+    /// This is useful for imported meshes whose face order is opposite the renderer's
+    /// backface-culling convention.
+    ///
+    /// # Panics
+    /// Panics if the polygon matrix does not contain a multiple of 3 points.
+    pub fn reverse_winding(&mut self) {
+        self.reverse_winding_from_col(0);
+    }
+
+    /// Reverses the winding order of triangles starting at `start_col`.
+    ///
+    /// # Panics
+    /// Panics if `start_col` is not on a triangle boundary or the polygon matrix does not contain
+    /// a multiple of 3 points after `start_col`.
+    pub fn reverse_winding_from_col(&mut self, start_col: usize) {
+        assert!(
+            start_col.is_multiple_of(3) && (self.cols() - start_col).is_multiple_of(3),
+            "polygon matrix must contain multiples of 3 points"
+        );
+
+        for triangle_start in (start_col..self.cols()).step_by(3) {
+            for row in 0..4 {
+                let p1 = self.inner[(row, triangle_start + 1)];
+                self.inner[(row, triangle_start + 1)] = self.inner[(row, triangle_start + 2)];
+                self.inner[(row, triangle_start + 2)] = p1;
+            }
+        }
+    }
+
+    /// Returns a copy with every triangle winding order reversed.
+    ///
+    /// # Panics
+    /// Panics if the polygon matrix does not contain a multiple of 3 points.
+    #[must_use]
+    pub fn reversed_winding(&self) -> Self {
+        let mut reversed = self.clone();
+        reversed.reverse_winding();
+        reversed
     }
 
     /// Apply a 4×4 transformation matrix to all points. Returns a new `PolygonMatrix`.
@@ -735,6 +850,148 @@ mod tests {
         test.add_revolution_surface(&profile, 4);
         // 4 steps * 1 quad * 2 triangles/quad * 3 points = 24 columns
         assert_eq!(test.cols(), 24);
+    }
+
+    #[test]
+    fn push_polygons_appends_triangle_batch() {
+        let mut matrix = PolygonMatrix::new();
+        matrix.push_polygons(&[
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
+        ]);
+
+        assert_eq!(matrix.cols(), 6);
+        assert_eq!(matrix.triangle_count(), 2);
+        assert_eq!(
+            matrix.as_matrix().data(),
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0, //
+                1.0, 1.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn bounds_reports_axis_aligned_extents() {
+        let mut matrix = PolygonMatrix::new();
+        assert_eq!(matrix.bounds(), None);
+
+        matrix.push_polygons(&[
+            [(-1.0, 2.0, 0.5), (4.0, -3.0, 2.0), (0.0, 1.0, -5.0)],
+            [(10.0, 0.0, 0.0), (12.0, 1.0, 1.0), (11.0, 2.0, 2.0)],
+        ]);
+
+        assert_eq!(
+            matrix.bounds(),
+            Some(Bounds3 {
+                min: (-1.0, -3.0, -5.0),
+                max: (12.0, 2.0, 2.0),
+            })
+        );
+        assert_eq!(
+            matrix.bounds_from_col(3),
+            Some(Bounds3 {
+                min: (10.0, 0.0, 0.0),
+                max: (12.0, 2.0, 2.0),
+            })
+        );
+    }
+
+    #[test]
+    fn truncate_cols_rolls_back_appended_points() {
+        let mut matrix = PolygonMatrix::new();
+        matrix.push_polygons(&[
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(2.0, 0.0, 0.0), (3.0, 0.0, 0.0), (2.0, 1.0, 0.0)],
+        ]);
+
+        matrix.truncate_cols(3);
+
+        assert_eq!(matrix.cols(), 3);
+        assert_eq!(
+            matrix.as_matrix().data(),
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn reverse_winding_swaps_triangle_vertices() {
+        let mut matrix = PolygonMatrix::new();
+        matrix.add_polygon((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0));
+
+        matrix.reverse_winding();
+
+        assert_eq!(
+            matrix.as_matrix().data(),
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn reverse_winding_from_col_leaves_existing_triangles_alone() {
+        let mut matrix = PolygonMatrix::new();
+        matrix.push_polygons(&[
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(2.0, 0.0, 0.0), (3.0, 0.0, 0.0), (2.0, 1.0, 0.0)],
+        ]);
+
+        matrix.reverse_winding_from_col(3);
+
+        assert_eq!(
+            matrix.as_matrix().data(),
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0, //
+                2.0, 0.0, 0.0, 1.0, //
+                2.0, 1.0, 0.0, 1.0, //
+                3.0, 0.0, 0.0, 1.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn draw_polygons_culls_reversed_winding() {
+        fn lit_pixels(canvas: &Canvas) -> usize {
+            canvas
+                .pixels()
+                .iter()
+                .filter(|&&pixel| pixel == Rgb::WHITE)
+                .count()
+        }
+
+        let mut visible = PolygonMatrix::new();
+        visible.add_polygon((1.0, 1.0, 0.0), (8.0, 1.0, 0.0), (1.0, 8.0, 0.0));
+
+        let hidden = visible.reversed_winding();
+
+        let mut visible_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
+        visible_canvas.set_line_pixel(Rgb::WHITE);
+        visible_canvas.draw_polygons(&visible);
+        assert!(lit_pixels(&visible_canvas) > 0);
+
+        let mut hidden_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
+        hidden_canvas.set_line_pixel(Rgb::WHITE);
+        hidden_canvas.draw_polygons(&hidden);
+        assert_eq!(lit_pixels(&hidden_canvas), 0);
+
+        let corrected = hidden.reversed_winding();
+        let mut corrected_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
+        corrected_canvas.set_line_pixel(Rgb::WHITE);
+        corrected_canvas.draw_polygons(&corrected);
+        assert!(lit_pixels(&corrected_canvas) > 0);
     }
 
     #[test]

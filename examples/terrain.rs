@@ -66,12 +66,28 @@ fn main() {
     // 3. Manual Projection and Rendering with Height-based Coloring
     let cos45 = std::f64::consts::FRAC_1_SQRT_2;
     let sin45 = std::f64::consts::FRAC_1_SQRT_2;
-    let cabinet = Matrix::new(4, 4, vec![
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.5 * cos45, 0.5 * sin45, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0
-    ]);
+    let cabinet = Matrix::new(
+        4,
+        4,
+        vec![
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5 * cos45,
+            0.5 * sin45,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ],
+    );
 
     let transformed = polygons.apply(&cabinet);
 

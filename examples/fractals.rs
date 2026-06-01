@@ -145,8 +145,7 @@ mod test {
                 data.push(Rgb { red, green, blue })
             });
         });
-        mandel
-            .fill_canvas(data);
+        mandel.fill_canvas(data);
         mandel.display().expect("Could not render image");
         let brot = mandel.sobel();
         brot.save_extension("./pics/mandel.png")
@@ -283,8 +282,7 @@ mod test {
                 }))
             })
         });
-        color_domain
-            .fill_canvas(data);
+        color_domain.fill_canvas(data);
         color_domain.display().expect("Could not render image");
         color_domain
             .save_extension("./pics/failed_domain20.png")
@@ -319,8 +317,7 @@ mod test {
                 // write!(writer, "{} {} {} ", i as u8, i as u8, i as u8)?;
             }
         }
-        julia
-            .fill_canvas(data);
+        julia.fill_canvas(data);
         let julia = julia.sobel();
         julia.display().expect("Could not render image");
         julia

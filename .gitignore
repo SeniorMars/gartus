@@ -17,6 +17,7 @@ Cargo.lock
 *.lo
 *.o
 *.obj
+!examples/data/meshes/*.obj
 
 # Precompiled Headers
 *.gch

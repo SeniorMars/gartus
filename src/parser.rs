@@ -4,7 +4,11 @@ use crate::gmath::polygon_matrix::PolygonMatrix;
 use crate::graphics::{colors::Rgb, display::Canvas};
 use std::collections::HashMap;
 use std::fmt;
-use std::{fs, io, path::Path, str::FromStr};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 /**
 ```text
@@ -19,6 +23,12 @@ The file follows the following format:
             takes 5 arguments (cx, cy, cz, r1, r2)
         box: add a rectangular prism to the polygon matrix -
             takes 6 arguments (x, y, z, width, height, depth)
+        mesh: add triangles from an OBJ or ASCII STL file to the polygon matrix -
+            takes 1 argument (file name)
+            OBJ texture coordinates, normals, materials, groups, objects, and smoothing are ignored
+        mesh_reverse: add triangles from an OBJ or ASCII STL file with winding reversed -
+            takes 1 argument (file name)
+        reverse_winding: reverse all triangle winding in the polygon matrix
         circle: add a circle to the edge matrix -
             takes 4 arguments (cx, cy, cz, r)
         hermite: add a hermite curve to the edge matrix -
@@ -93,6 +103,8 @@ pub struct Parser {
     canvas: Canvas,
     /// Whether parser `display` commands should spawn the external viewer.
     display_enabled: bool,
+    /// Stack of directories for resolving relative include and mesh paths.
+    source_dirs: Vec<PathBuf>,
     /// Whether the canvas needs to be rerendered from the edge matrix.
     canvas_dirty: bool,
 }
@@ -109,6 +121,8 @@ pub enum ParserError {
     ArgumentError(usize, String),
     /// An unknown command for the Parser
     CommandError(usize, String),
+    /// An error while loading an external mesh file.
+    MeshError(usize, String, String),
     /// Stack underflow error
     StackUnderflow(usize),
 }
@@ -123,6 +137,12 @@ impl fmt::Display for ParserError {
             ),
             ParserError::CommandError(line_num, line) => {
                 write!(f, "There was an unknown command: {line}:{line_num}")
+            }
+            ParserError::MeshError(line_num, file_name, err) => {
+                write!(
+                    f,
+                    "Could not load mesh `{file_name}` at line {line_num}: {err}"
+                )
             }
             ParserError::ArgumentError(line_num, line) => {
                 write!(
@@ -172,6 +192,7 @@ impl Parser {
             symbols: HashMap::new(),
             canvas: Canvas::new(width, height, *color),
             display_enabled: true,
+            source_dirs: Vec::new(),
             canvas_dirty: true,
         }
     }
@@ -211,6 +232,7 @@ impl Parser {
             symbols: HashMap::new(),
             canvas,
             display_enabled: true,
+            source_dirs: Vec::new(),
             canvas_dirty: true,
         }
     }
@@ -242,8 +264,9 @@ impl Parser {
     ///
     /// Returns a `ParserError`
     pub fn parse_file(&mut self) -> Result<(), ParserError> {
-        let contents = fs::read_to_string(&self.file_name).map_err(ParserError::Io)?;
-        self.parse_string(&contents)
+        let path = PathBuf::from(&self.file_name);
+        let contents = fs::read_to_string(&path).map_err(ParserError::Io)?;
+        self.parse_source(&contents, path.parent())
     }
 
     /// Parses and runs through the commands in a string.
@@ -252,6 +275,28 @@ impl Parser {
     ///
     /// Returns a `ParserError`
     pub fn parse_string(&mut self, contents: &str) -> Result<(), ParserError> {
+        self.parse_source(contents, None)
+    }
+
+    fn parse_source(
+        &mut self,
+        contents: &str,
+        source_dir: Option<&Path>,
+    ) -> Result<(), ParserError> {
+        if let Some(source_dir) = source_dir.filter(|dir| !dir.as_os_str().is_empty()) {
+            self.source_dirs.push(source_dir.to_path_buf());
+        }
+
+        let result = self.parse_contents(contents);
+
+        if source_dir.is_some_and(|dir| !dir.as_os_str().is_empty()) {
+            self.source_dirs.pop();
+        }
+
+        result
+    }
+
+    fn parse_contents(&mut self, contents: &str) -> Result<(), ParserError> {
         let mut iter = contents.lines().enumerate();
         while let Some((line_num, line)) = iter.next() {
             let command = line.trim();
@@ -285,6 +330,17 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    fn resolve_script_path(&self, file_name: &str) -> PathBuf {
+        let path = Path::new(file_name.trim());
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(source_dir) = self.source_dirs.last() {
+            source_dir.join(path)
+        } else {
+            path.to_path_buf()
+        }
     }
 
     fn next_arg_line<'a>(
@@ -422,6 +478,23 @@ impl Parser {
             "cone" => self.parse_cone(Self::next_arg_line(iter, cline_num, command)?),
             "pyramid" => self.parse_pyramid(Self::next_arg_line(iter, cline_num, command)?),
             "bezier_surface" => self.parse_bezier_surface(iter, cline_num),
+            #[cfg(feature = "external")]
+            "mesh" => self.parse_mesh(Self::next_arg_line(iter, cline_num, command)?),
+            #[cfg(not(feature = "external"))]
+            "mesh" => Self::parse_mesh_unavailable(Self::next_arg_line(iter, cline_num, command)?),
+            #[cfg(feature = "external")]
+            "mesh_reverse" => {
+                self.parse_mesh_reverse(Self::next_arg_line(iter, cline_num, command)?)
+            }
+            #[cfg(not(feature = "external"))]
+            "mesh_reverse" => {
+                Self::parse_mesh_unavailable(Self::next_arg_line(iter, cline_num, command)?)
+            }
+            "reverse_winding" => {
+                self.polygon_matrix.reverse_winding();
+                self.canvas_dirty = true;
+                Ok(())
+            }
             "include" => self.parse_include(Self::next_arg_line(iter, cline_num, command)?),
             "save" => self.save(Self::next_arg_line(iter, cline_num, command)?),
             "display" => self.display(),
@@ -871,10 +944,41 @@ impl Parser {
         Ok(())
     }
 
+    #[cfg(feature = "external")]
+    fn parse_mesh(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, file_name) = line;
+        let path = self.resolve_script_path(file_name);
+        crate::external::add_mesh(path.to_string_lossy().as_ref(), &mut self.polygon_matrix)
+            .map_err(|err| {
+                ParserError::MeshError(line_num, path.display().to_string(), err.to_string())
+            })?;
+        self.canvas_dirty = true;
+        Ok(())
+    }
+
+    #[cfg(feature = "external")]
+    fn parse_mesh_reverse(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
+        let start_col = self.polygon_matrix.cols();
+        self.parse_mesh(line)?;
+        self.polygon_matrix.reverse_winding_from_col(start_col);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "external"))]
+    fn parse_mesh_unavailable(line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, file_name) = line;
+        Err(ParserError::MeshError(
+            line_num,
+            file_name.trim().to_string(),
+            "mesh command requires the `external` feature".to_string(),
+        ))
+    }
+
     fn parse_include(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (_line_num, file_name) = line;
-        let contents = fs::read_to_string(file_name.trim()).map_err(ParserError::Io)?;
-        self.parse_string(&contents)
+        let path = self.resolve_script_path(file_name);
+        let contents = fs::read_to_string(&path).map_err(ParserError::Io)?;
+        self.parse_source(&contents, path.parent())
     }
 }
 
@@ -894,6 +998,18 @@ mod tests {
 
     fn temp_file(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("gartus-parser-{name}-{}.cg", std::process::id()))
+    }
+
+    fn temp_file_with_extension(name: &str, extension: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "gartus-parser-{name}-{}.{}",
+            std::process::id(),
+            extension
+        ))
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("gartus-parser-{name}-{}", std::process::id()))
     }
 
     #[test]
@@ -962,7 +1078,9 @@ mod tests {
 
         assert_eq!(
             parser.edge_matrix().as_matrix().data(),
-            &[10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0]
+            &[
+                10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0
+            ]
         );
     }
 
@@ -978,7 +1096,9 @@ mod tests {
 
         assert_eq!(
             parser.edge_matrix().as_matrix().data(),
-            &[10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0]
+            &[
+                10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0
+            ]
         );
     }
 
@@ -1020,6 +1140,22 @@ mod tests {
     }
 
     #[test]
+    fn reverse_winding_command_flips_polygon_faces() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser.parse_string("box\n0 0 0 1 1 1").expect("box valid");
+        let before = parser.polygon_matrix().as_matrix().data().to_vec();
+
+        parser
+            .parse_string("reverse_winding")
+            .expect("reverse winding valid");
+        let after = parser.polygon_matrix().as_matrix().data();
+
+        assert_eq!(&after[0..4], &before[0..4]);
+        assert_eq!(&after[4..8], &before[8..12]);
+        assert_eq!(&after[8..12], &before[4..8]);
+    }
+
+    #[test]
     fn test_include_command() {
         let path = temp_file("include-target");
         fs::write(&path, "line\n0 0 0 1 1 1\n").expect("write temp script");
@@ -1031,6 +1167,144 @@ mod tests {
 
         assert_eq!(parser.edge_matrix().cols(), 2);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn include_paths_resolve_relative_to_script_file() {
+        let dir = temp_dir("relative-include");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let main_path = dir.join("main.cg");
+        let child_path = dir.join("child.cg");
+        fs::write(&main_path, "include\nchild.cg\n").expect("write main script");
+        fs::write(&child_path, "line\n0 0 0 1 1 1\n").expect("write child script");
+
+        let mut parser = Parser::new(main_path.to_str().expect("utf8 path"), 10, 10, &Rgb::GREEN);
+        parser.parse_file().expect("include valid");
+
+        assert_eq!(parser.edge_matrix().cols(), 2);
+        let _ = fs::remove_file(main_path);
+        let _ = fs::remove_file(child_path);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn test_mesh_command() {
+        let path = temp_file_with_extension("mesh", "obj");
+        fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write temp obj");
+
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser
+            .parse_string(&format!("mesh\n{}", path.to_str().unwrap()))
+            .expect("mesh valid");
+
+        assert_eq!(parser.polygon_matrix().cols(), 3);
+        assert!(parser.is_dirty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn mesh_paths_resolve_relative_to_script_file() {
+        let dir = temp_dir("relative-mesh");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let script_path = dir.join("main.cg");
+        let mesh_path = dir.join("triangle.obj");
+        fs::write(&script_path, "mesh\ntriangle.obj\n").expect("write script");
+        fs::write(&mesh_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write obj");
+
+        let mut parser = Parser::new(
+            script_path.to_str().expect("utf8 path"),
+            10,
+            10,
+            &Rgb::GREEN,
+        );
+        parser.parse_file().expect("mesh valid");
+
+        assert_eq!(parser.polygon_matrix().cols(), 3);
+        let _ = fs::remove_file(script_path);
+        let _ = fs::remove_file(mesh_path);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn nested_include_mesh_paths_resolve_relative_to_included_script() {
+        let dir = temp_dir("nested-include-mesh");
+        let scripts_dir = dir.join("scripts");
+        let subdir = scripts_dir.join("sub");
+        let meshes_dir = scripts_dir.join("meshes");
+        fs::create_dir_all(&subdir).expect("create script dir");
+        fs::create_dir_all(&meshes_dir).expect("create mesh dir");
+
+        let main_path = scripts_dir.join("main.cg");
+        let child_path = subdir.join("child.cg");
+        let mesh_path = meshes_dir.join("triangle.obj");
+        fs::write(&main_path, "include\nsub/child.cg\n").expect("write main script");
+        fs::write(&child_path, "mesh\n../meshes/triangle.obj\n").expect("write child script");
+        fs::write(&mesh_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write obj");
+
+        let mut parser = Parser::new(main_path.to_str().expect("utf8 path"), 10, 10, &Rgb::GREEN);
+        parser.parse_file().expect("nested include mesh valid");
+
+        assert_eq!(parser.polygon_matrix().cols(), 3);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn mesh_reverse_reverses_only_imported_winding() {
+        let path = temp_file_with_extension("mesh-reverse", "obj");
+        fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write temp obj");
+
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser.parse_string("box\n0 0 0 1 1 1").expect("box valid");
+        let existing = parser.polygon_matrix().as_matrix().data().to_vec();
+        parser
+            .parse_string(&format!("mesh_reverse\n{}", path.to_str().unwrap()))
+            .expect("mesh reverse valid");
+
+        let data = parser.polygon_matrix().as_matrix().data();
+        assert_eq!(&data[..existing.len()], existing.as_slice());
+        assert_eq!(
+            &data[existing.len()..],
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0,
+            ]
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn example_teapot_mesh_script_parses() {
+        let mut parser = Parser::new(
+            "examples/data/scripts/teapot_mesh.cg",
+            800,
+            800,
+            &Rgb::GREEN,
+        );
+        parser.set_display_enabled(false);
+
+        parser.parse_file().expect("teapot mesh script valid");
+
+        assert!(!parser.polygon_matrix().is_empty());
+        assert!(!parser.is_dirty());
+    }
+
+    #[cfg(not(feature = "external"))]
+    #[test]
+    fn mesh_command_reports_missing_external_feature() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+
+        let error = parser
+            .parse_string("mesh\ntriangle.obj")
+            .expect_err("mesh should require external feature");
+
+        assert!(matches!(error, ParserError::MeshError(1, _, _)));
+        assert!(error.to_string().contains("external"));
     }
 
     #[test]

@@ -220,18 +220,20 @@ fn curve_script() {
     dw.parse_string("circle\n250 250 0 200")
         .expect("circle 1 valid");
     expected_edges.add_circle(250.0, 250.0, 0.0, 200.0, 0.001);
-    assert!(dw
-        .edge_matrix()
-        .as_matrix()
-        .approx_eq(expected_edges.as_matrix(), 1e-10));
+    assert!(
+        dw.edge_matrix()
+            .as_matrix()
+            .approx_eq(expected_edges.as_matrix(), 1e-10)
+    );
 
     dw.parse_string("circle\n175 325 0 50")
         .expect("circle 2 valid");
     expected_edges.add_circle(175.0, 325.0, 0.0, 50.0, 0.001);
-    assert!(dw
-        .edge_matrix()
-        .as_matrix()
-        .approx_eq(expected_edges.as_matrix(), 1e-10));
+    assert!(
+        dw.edge_matrix()
+            .as_matrix()
+            .approx_eq(expected_edges.as_matrix(), 1e-10)
+    );
 
     dw.parse_string("hermite\n150 150 350 150 -100 -100 100 150")
         .expect("hermite valid");
@@ -241,10 +243,11 @@ fn curve_script() {
         (-100.0, -100.0),
         (100.0, 150.0),
     );
-    assert!(dw
-        .edge_matrix()
-        .as_matrix()
-        .approx_eq(expected_edges.as_matrix(), 1e-10));
+    assert!(
+        dw.edge_matrix()
+            .as_matrix()
+            .approx_eq(expected_edges.as_matrix(), 1e-10)
+    );
 
     dw.parse_string("bezier\n200 250 150 50 300 250 300 250")
         .expect("bezier valid");
@@ -254,10 +257,11 @@ fn curve_script() {
         (300.0, 250.0),
         (300.0, 250.0),
     );
-    assert!(dw
-        .edge_matrix()
-        .as_matrix()
-        .approx_eq(expected_edges.as_matrix(), 1e-10));
+    assert!(
+        dw.edge_matrix()
+            .as_matrix()
+            .approx_eq(expected_edges.as_matrix(), 1e-10)
+    );
 
     let mut dw_full = Parser::new("./tests/script_curves", 500, 500, &Rgb::new(0, 255, 0));
     dw_full

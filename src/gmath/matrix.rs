@@ -626,6 +626,15 @@ impl Matrix {
         Ok(())
     }
 
+    pub(crate) fn truncate_cols(&mut self, cols: usize) {
+        assert!(
+            cols <= self.cols,
+            "cannot truncate matrix to more columns than it contains"
+        );
+        self.data.truncate(cols * self.rows);
+        self.cols = cols;
+    }
+
     pub(crate) fn apply_homogeneous_transform_from_col(
         &mut self,
         start_col: usize,
@@ -1187,7 +1196,7 @@ mod tests {
     #[test]
     fn test_determinant_known_values() {
         let a = Matrix::new(2, 2, vec![3.0, 1.0, 8.0, 2.0]); // col-major: [[3, 1], [8, 2]] -> [3 8; 1 2]
-                                                             // det = 3*2 - 8*1 = -2
+        // det = 3*2 - 8*1 = -2
         assert!((a.determinant().unwrap() - (-2.0)).abs() < EPS);
 
         let b = Matrix::identity_matrix(4);

@@ -1,7 +1,7 @@
 use gartus::prelude::*;
 #[path = "data/teapot.rs"]
 mod teapot_data;
-use teapot_data::{TEAPOT_VERTICES, TEAPOT_PATCHES};
+use teapot_data::{TEAPOT_PATCHES, TEAPOT_VERTICES};
 
 fn main() {
     let width = 800;
@@ -28,20 +28,22 @@ fn main() {
     // Teapot is naturally ~6.5 units wide (spout to handle) and ~3 units high.
     // After rotate_x(-90), Z (0..3.15) becomes Y (height).
     // X (-3..3.5) remains X (width).
-    // To center: 
+    // To center:
     // X center is approx 0.25. Scaled (100) -> 25. To get to 400: 400 - 25 = 375.
     // Y center is approx 1.57. Scaled (100) -> 157. To get to 400: 400 - 157 = 243.
-    let transform = Matrix::translate(375.0, 240.0, 0.0) 
-        * Matrix::rotate_x(-90.0) 
-        * Matrix::rotate_y(15.0) 
+    let transform = Matrix::translate(375.0, 240.0, 0.0)
+        * Matrix::rotate_x(-90.0)
+        * Matrix::rotate_y(15.0)
         * Matrix::scale(100.0, 100.0, 100.0);
-    
+
     let final_matrix = matrix.apply(&transform);
-    
+
     canvas.set_line_pixel(Rgb::new(255, 200, 100)); // Golden teapot
     canvas.draw_polygons(&final_matrix);
 
     println!("Rendering and saving...");
-    canvas.save_extension("pics/teapot.png").expect("Could not save teapot.png");
+    canvas
+        .save_extension("pics/teapot.png")
+        .expect("Could not save teapot.png");
     println!("Done! Saved to pics/teapot.png");
 }

@@ -1,0 +1,16 @@
+# Load and render the OBJ teapot mesh.
+mesh
+../meshes/teapot.obj
+ident
+scale
+100 100 100
+rotate
+x -90
+rotate
+y 15
+move
+375 240 0
+apply
+color
+255 200 100
+display
