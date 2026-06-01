@@ -17,48 +17,41 @@ The file follows the following format:
      Every command is a single character that takes up a line
      Any command that requires arguments must have those arguments
      in the second line. The commands are as follows:
-        sphere: add a sphere to the polygon matrix -
+        sphere: generate a sphere, apply the current coordinate system, draw -
             takes 4 arguments (cx, cy, cz, r)
-        torus: add a torus to the polygon matrix -
+        torus: generate a torus, apply the current coordinate system, draw -
             takes 5 arguments (cx, cy, cz, r1, r2)
-        box: add a rectangular prism to the polygon matrix -
+        box: generate a rectangular prism, apply the current coordinate system, draw -
             takes 6 arguments (x, y, z, width, height, depth)
-        mesh: add triangles from an OBJ or ASCII STL file to the polygon matrix -
+        mesh: load triangles from an OBJ or ASCII STL file, apply current CS, draw -
             takes 1 argument (file name)
             OBJ texture coordinates, normals, materials, groups, objects, and smoothing are ignored
-        mesh_reverse: add triangles from an OBJ or ASCII STL file with winding reversed -
+        mesh_reverse: load triangles from an OBJ or ASCII STL file with winding reversed -
             takes 1 argument (file name)
-        reverse_winding: reverse all triangle winding in the polygon matrix
-        circle: add a circle to the edge matrix -
+        circle: generate a circle, apply the current coordinate system, draw -
             takes 4 arguments (cx, cy, cz, r)
-        hermite: add a hermite curve to the edge matrix -
+        hermite: generate a hermite curve, apply the current CS, draw -
             takes 8 arguments (x0, y0, x1, y1, rx0, ry0, rx1, ry1)
-        bezier: add a third degree bezier curve to the edge matrix -
+        bezier: generate a third degree bezier curve, apply the current CS, draw -
             takes 8 arguments (x0, y0, x1, y1, x2, y2, x3, y3)
-        beziern: add a nth degree bezier curve to the edge matrix -
-            takes the n-degree and (n + 2) * 2 arguments for points for x, y i.e., "n x0 y0 x1 y1 x2 y2 ... xn yn"
-        line: add a line to the edge matrix -
-            takes 6 arguemnts (x0, y0, z0, x1, y1, z1)
-        ident: set the transform matrix to the identity matrix -
-        scale: create a scale matrix,
-            then multiply the transform matrix by the scale matrix -
+        beziern: generate a nth degree bezier curve, apply the current CS, draw -
+            takes the n-degree and (n + 2) * 2 arguments for x, y points
+        line: generate a line segment, apply the current coordinate system, draw -
+            takes 6 arguments (x0, y0, z0, x1, y1, z1)
+        scale: multiply the current top of the CS stack by a scale matrix -
             takes 3 arguments (sx, sy, sz)
-        move: create a translation matrix,
-            then multiply the transform matrix by the translation matrix -
+        move: multiply the current top of the CS stack by a translation matrix -
             takes 3 arguments (tx, ty, tz)
-        rotate: create a rotation matrix,
-            then multiply the transform matrix by the rotation matrix -
+        rotate: multiply the current top of the CS stack by a rotation matrix -
             takes 2 arguments (axis, theta) axis should be x y or z
-        push: push a copy of the current transform matrix onto the stack
-        pop: pop the top matrix from the stack and set it as the current transform matrix
+        push: push a copy of the current top of the CS stack onto the stack
+        pop: remove the top of the CS stack
         set: set a variable to a value
             takes 2 arguments (variable_name, value)
-        reflect: create a reflection matrix,
-            then multiply the transform matrix by the rotation matrix -
-            takes a argument (axis) - should be x y or z
-        shear: create a shearing matrix,
-            then multiply the transform matrix by the shearing matrix -
-            takes 3 arguments (axis, sh_factor, sh_factor)  axis should be x, y, or z
+        reflect: multiply the current top of the CS stack by a reflection matrix -
+            takes 1 argument (axis) - should be x y or z
+        shear: multiply the current top of the CS stack by a shearing matrix -
+            takes 3 arguments (axis, sh_factor, sh_factor) axis should be x, y, or z
         color: changes the line's color -- should be ONLY RGB or a color constant
             takes 3 argument representing the new color parameters
             takes 1 argument representing the new color constant
@@ -68,15 +61,9 @@ The file follows the following format:
                 "emboss", "oil", "watercolor", "solarize", "black_and_white",
                 "brightness", "posterize", "gaussian", "contrast", "bilateral",
                 "unsharp", "histogram", "clahe", "canny", "floyd_steinberg"
-        apply: apply the current transformation matrix to the edge and polygon matrices
-        clear: clear the edge and polygon matrices and the canvas
-        reset: reset transformation matrix, clear matrices, stack, variables and canvas
-        display: clear the screen, then
-            draw the lines and polygons to the screen
-            display the screen
-        save: clear the screen, then
-            draw the lines and polygons to the screen
-            save the screen to a file -
+        reset: reset CS stack, variables, and canvas
+        display: show the current canvas
+        save: save the current canvas to a file -
             takes 1 argument (file name)
         quit: end parsing
 ```
@@ -85,17 +72,9 @@ The file follows the following format:
 pub struct Parser {
     /// The name of the file being parsed
     file_name: String,
-    /// The [`EdgeMatrix`] where points will be appended to draw onto the [Canvas]
-    edge_matrix: EdgeMatrix,
-    /// The [`PolygonMatrix`] where triangles will be appended to draw onto the [Canvas]
-    polygon_matrix: PolygonMatrix,
-    /// First edge column that still needs the next parser `apply`.
-    edge_apply_start: usize,
-    /// First polygon column that still needs the next parser `apply`.
-    polygon_apply_start: usize,
-    /// The [Matrix] that transformations will be applied to
+    /// The current top of the coordinate system stack
     trans_matrix: Matrix,
-    /// The transformation stack for hierarchical modeling
+    /// The coordinate system stack for hierarchical modeling
     trans_stack: Vec<Matrix>,
     /// Symbol table for variables
     symbols: HashMap<String, f64>,
@@ -105,8 +84,10 @@ pub struct Parser {
     display_enabled: bool,
     /// Stack of directories for resolving relative include and mesh paths.
     source_dirs: Vec<PathBuf>,
-    /// Whether the canvas needs to be rerendered from the edge matrix.
-    canvas_dirty: bool,
+    /// Temporary edge matrix to avoid allocations
+    tmp_edge: EdgeMatrix,
+    /// Temporary polygon matrix to avoid allocations
+    tmp_polygon: PolygonMatrix,
 }
 
 #[derive(Debug)]
@@ -183,17 +164,14 @@ impl Parser {
     pub fn new(file_name: &str, width: u32, height: u32, color: &Rgb) -> Self {
         Self {
             file_name: file_name.to_string(),
-            edge_matrix: EdgeMatrix::new(),
-            polygon_matrix: PolygonMatrix::new(),
-            edge_apply_start: 0,
-            polygon_apply_start: 0,
             trans_matrix: Matrix::identity_matrix(4),
             trans_stack: Vec::new(),
             symbols: HashMap::new(),
             canvas: Canvas::new(width, height, *color),
             display_enabled: true,
             source_dirs: Vec::new(),
-            canvas_dirty: true,
+            tmp_edge: EdgeMatrix::new(),
+            tmp_polygon: PolygonMatrix::new(),
         }
     }
 
@@ -223,17 +201,14 @@ impl Parser {
         canvas.line = *color;
         Self {
             file_name: file_name.to_string(),
-            edge_matrix: EdgeMatrix::new(),
-            polygon_matrix: PolygonMatrix::new(),
-            edge_apply_start: 0,
-            polygon_apply_start: 0,
             trans_matrix: Matrix::identity_matrix(4),
             trans_stack: Vec::new(),
             symbols: HashMap::new(),
             canvas,
             display_enabled: true,
             source_dirs: Vec::new(),
-            canvas_dirty: true,
+            tmp_edge: EdgeMatrix::new(),
+            tmp_polygon: PolygonMatrix::new(),
         }
     }
 
@@ -245,12 +220,6 @@ impl Parser {
     /// Get a reference to the parser's canvas.
     pub fn canvas(&self) -> &Canvas {
         &self.canvas
-    }
-
-    /// Returns true if the canvas needs to be rerendered.
-    #[must_use]
-    pub fn is_dirty(&self) -> bool {
-        self.canvas_dirty
     }
 
     /// Enables or disables external display for parser `display` commands.
@@ -302,8 +271,9 @@ impl Parser {
             let command = line.trim();
             match command {
                 comment if comment.starts_with('#') => {}
-                "" => {}
+                "" | "apply" => {}
                 "quit" => return Ok(()),
+                "ident" => self.trans_matrix = Matrix::identity_matrix(4),
                 "push" => self.trans_stack.push(self.trans_matrix.clone()),
                 "pop" => {
                     self.trans_matrix = self
@@ -312,17 +282,8 @@ impl Parser {
                         .ok_or(ParserError::StackUnderflow(line_num))?;
                 }
                 "set" => self.parse_set(Self::next_arg_line(&mut iter, line_num, command)?)?,
-                "ident" => self.trans_matrix = Matrix::identity_matrix(4),
-                "apply" => self.parse_apply(),
                 "display" => self.display()?,
-                "clear" => {
-                    self.edge_matrix = EdgeMatrix::new();
-                    self.polygon_matrix = PolygonMatrix::new();
-                    self.edge_apply_start = 0;
-                    self.polygon_apply_start = 0;
-                    self.canvas.clear_canvas();
-                    self.canvas_dirty = false;
-                }
+                "clear" => self.canvas.clear_canvas(),
                 "reset" => self.parse_reset(),
                 _ => {
                     self.handle_command(&mut iter, line_num, command)?;
@@ -461,8 +422,9 @@ impl Parser {
                         x_points.push(coords[i]);
                         y_points.push(coords[i + 1]);
                     }
-                    self.edge_matrix.add_beziern(n_degree, &x_points, &y_points);
-                    self.canvas_dirty = true;
+                    let mut tmp = EdgeMatrix::new();
+                    tmp.add_beziern(n_degree, &x_points, &y_points);
+                    self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
                     Ok(())
                 } else {
                     Err(ParserError::ArgumentError(
@@ -490,11 +452,6 @@ impl Parser {
             "mesh_reverse" => {
                 Self::parse_mesh_unavailable(Self::next_arg_line(iter, cline_num, command)?)
             }
-            "reverse_winding" => {
-                self.polygon_matrix.reverse_winding();
-                self.canvas_dirty = true;
-                Ok(())
-            }
             "include" => self.parse_include(Self::next_arg_line(iter, cline_num, command)?),
             "save" => self.save(Self::next_arg_line(iter, cline_num, command)?),
             "display" => self.display(),
@@ -510,12 +467,7 @@ impl Parser {
             return Err(ParserError::ArgumentError(line_num, line.to_string()));
         }
         let name = parts[0].to_string();
-        let val = parts[1]
-            .parse::<f64>()
-            .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
-        if !val.is_finite() {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
+        let val = self.finite_value(parts[1], line_num, line)?;
         self.symbols.insert(name, val);
         Ok(())
     }
@@ -541,7 +493,7 @@ impl Parser {
                 ));
             }
         };
-        self.trans_matrix = &rotate_matrix * &self.trans_matrix;
+        self.trans_matrix = &self.trans_matrix * &rotate_matrix;
         Ok(())
     }
 
@@ -564,7 +516,7 @@ impl Parser {
                 ));
             }
         };
-        self.trans_matrix = &reflect_matrix * &self.trans_matrix;
+        self.trans_matrix = &self.trans_matrix * &reflect_matrix;
         Ok(())
     }
 
@@ -590,7 +542,7 @@ impl Parser {
                 ));
             }
         };
-        self.trans_matrix = &shear_matrix * &self.trans_matrix;
+        self.trans_matrix = &self.trans_matrix * &shear_matrix;
         Ok(())
     }
 
@@ -601,7 +553,6 @@ impl Parser {
             [name] => match Rgb::name_to_const(&name.to_lowercase()) {
                 Some(color) => {
                     self.canvas.line = color;
-                    self.canvas_dirty = true;
                     Ok(())
                 }
                 None => Err(ParserError::ArgumentError(line_num, line.to_string())),
@@ -611,7 +562,6 @@ impl Parser {
                 let green = self.parse_u8_value(g_s, line_num, line)?;
                 let blue = self.parse_u8_value(b_s, line_num, line)?;
                 self.canvas.line = Rgb::new(red, green, blue);
-                self.canvas_dirty = true;
                 Ok(())
             }
             _ => Err(ParserError::ArgumentError(line_num, line.to_string())),
@@ -621,9 +571,11 @@ impl Parser {
     fn parse_circle(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 4, line_num)?;
-        self.edge_matrix
+        self.tmp_edge.clear();
+        self.tmp_edge
             .add_circle(args[0], args[1], args[2], args[3], 0.001);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_lines(&self.tmp_edge.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -634,8 +586,9 @@ impl Parser {
         let p1 = (args[2], args[3]);
         let r0 = (args[4], args[5]);
         let r1 = (args[6], args[7]);
-        self.edge_matrix.add_hermite(p0, p1, r0, r1);
-        self.canvas_dirty = true;
+        let mut tmp = EdgeMatrix::new();
+        tmp.add_hermite(p0, p1, r0, r1);
+        self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -646,8 +599,9 @@ impl Parser {
         let p1 = (args[2], args[3]);
         let p2 = (args[4], args[5]);
         let p3 = (args[6], args[7]);
-        self.edge_matrix.add_bezier3(p0, p1, p2, p3);
-        self.canvas_dirty = true;
+        let mut tmp = EdgeMatrix::new();
+        tmp.add_bezier3(p0, p1, p2, p3);
+        self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -655,7 +609,7 @@ impl Parser {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 3, line_num)?;
         let dilate_matrix = Matrix::scale(args[0], args[1], args[2]);
-        self.trans_matrix = &dilate_matrix * &self.trans_matrix;
+        self.trans_matrix = &self.trans_matrix * &dilate_matrix;
         Ok(())
     }
 
@@ -663,44 +617,22 @@ impl Parser {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 3, line_num)?;
         let translation_matrix = Matrix::translate(args[0], args[1], args[2]);
-        self.trans_matrix = &translation_matrix * &self.trans_matrix;
+        self.trans_matrix = &self.trans_matrix * &translation_matrix;
         Ok(())
     }
 
     fn parse_line(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 6, line_num)?;
-        self.edge_matrix
+        self.tmp_edge.clear();
+        self.tmp_edge
             .push_edge(args[0], args[1], args[2], args[3], args[4], args[5]);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_lines(&self.tmp_edge.apply(&self.trans_matrix));
         Ok(())
     }
 
-    fn parse_apply(&mut self) {
-        self.edge_matrix
-            .apply_from_col_mut(self.edge_apply_start, &self.trans_matrix);
-        self.polygon_matrix
-            .apply_from_col_mut(self.polygon_apply_start, &self.trans_matrix);
-        self.edge_apply_start = self.edge_matrix.cols();
-        self.polygon_apply_start = self.polygon_matrix.cols();
-        self.canvas_dirty = true;
-    }
-
-    fn render_scene(&mut self) {
-        self.canvas.clear_canvas();
-        self.canvas.try_draw_lines(&self.edge_matrix);
-        self.canvas.draw_polygons(&self.polygon_matrix);
-        self.canvas_dirty = false;
-    }
-
-    fn ensure_rendered(&mut self) {
-        if self.canvas_dirty {
-            self.render_scene();
-        }
-    }
-
     fn display(&mut self) -> Result<(), ParserError> {
-        self.ensure_rendered();
         if self.display_enabled {
             self.canvas.display().map_err(ParserError::Io)?;
         }
@@ -709,7 +641,6 @@ impl Parser {
 
     fn save(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, file_name) = line;
-        self.ensure_rendered();
         let extension = Path::new(file_name)
             .extension()
             .and_then(|extension| extension.to_str())
@@ -725,6 +656,7 @@ impl Parser {
         }
     }
 
+    #[allow(dead_code)]
     fn parse_as<T: FromStr>(line: &str) -> Result<Vec<T>, T::Err> {
         line.split_whitespace().map(str::parse).collect()
     }
@@ -732,7 +664,6 @@ impl Parser {
     /// Set the parser's color.
     pub fn set_color(&mut self, color: &Rgb) {
         self.canvas.line = *color;
-        self.canvas_dirty = true;
     }
 
     /// Get a reference to the parser's trans matrix.
@@ -740,41 +671,9 @@ impl Parser {
         &self.trans_matrix
     }
 
-    /// Get a reference to the parser's edge matrix.
-    #[must_use]
-    pub fn edge_matrix(&self) -> &EdgeMatrix {
-        &self.edge_matrix
-    }
-
-    /// Get a reference to the parser's polygon matrix.
-    #[must_use]
-    pub fn polygon_matrix(&self) -> &PolygonMatrix {
-        &self.polygon_matrix
-    }
-
-    /// Allows you to modify the parser's edge matrix.
-    ///
-    /// * `func`: A function that takes a mutable reference to the parser's edge matrix.
-    ///
-    /// have fun
-    pub fn with_edge_matrix<F>(&mut self, func: F)
-    where
-        F: FnOnce(&mut EdgeMatrix),
-    {
-        func(&mut self.edge_matrix);
-        self.edge_apply_start = self.edge_apply_start.min(self.edge_matrix.cols());
-        self.canvas_dirty = true;
-    }
-
-    /// Applies a function to the internal edge matrix and marks canvas dirty.
-    pub fn edge_matrix_fun(&mut self, func: &dyn Fn(&mut EdgeMatrix)) {
-        self.with_edge_matrix(|edges| func(edges));
-    }
-
     fn parse_filter(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
         let args: Vec<&str> = line.split_whitespace().collect();
-        self.ensure_rendered();
 
         match args.len() {
             2 => {
@@ -817,7 +716,6 @@ impl Parser {
                     }
                     _ => return Err(ParserError::ArgumentError(line_num, line.to_string())),
                 };
-                self.canvas_dirty = false;
                 Ok(())
             }
             1 => {
@@ -840,7 +738,6 @@ impl Parser {
                     "floyd_steinberg" | "floyd" => self.canvas.floyd_steinberg_dither(),
                     _ => return Err(ParserError::ArgumentError(line_num, line.to_string())),
                 };
-                self.canvas_dirty = false;
                 Ok(())
             }
             _ => Err(ParserError::ArgumentError(line_num, line.to_string())),
@@ -849,67 +746,74 @@ impl Parser {
 
     fn parse_reset(&mut self) {
         self.canvas.clear_canvas();
-        self.edge_matrix = EdgeMatrix::new();
-        self.polygon_matrix = PolygonMatrix::new();
-        self.edge_apply_start = 0;
-        self.polygon_apply_start = 0;
         self.trans_matrix = Matrix::identity_matrix(4);
         self.trans_stack.clear();
         self.symbols.clear();
-        self.canvas_dirty = false;
     }
 
     fn parse_box(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 6, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_box((args[0], args[1], args[2]), args[3], args[4], args[5]);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
     fn parse_sphere(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 4, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_sphere((args[0], args[1], args[2]), args[3], 24);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
     fn parse_torus(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 5, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_torus((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
     fn parse_cylinder(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 5, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_cylinder((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
     fn parse_cone(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 5, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_cone((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
     fn parse_pyramid(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 5, line_num)?;
-        self.polygon_matrix
+        self.tmp_polygon.clear();
+        self.tmp_polygon
             .add_pyramid((args[0], args[1], args[2]), args[3], args[4]);
-        self.canvas_dirty = true;
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -939,8 +843,9 @@ impl Parser {
             }
         }
 
-        self.polygon_matrix.add_bezier_surface(controls, steps);
-        self.canvas_dirty = true;
+        let mut tmp = PolygonMatrix::new();
+        tmp.add_bezier_surface(controls, steps);
+        self.canvas.draw_polygons(&tmp.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -948,19 +853,25 @@ impl Parser {
     fn parse_mesh(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, file_name) = line;
         let path = self.resolve_script_path(file_name);
-        crate::external::add_mesh(path.to_string_lossy().as_ref(), &mut self.polygon_matrix)
-            .map_err(|err| {
-                ParserError::MeshError(line_num, path.display().to_string(), err.to_string())
-            })?;
-        self.canvas_dirty = true;
+        let mut tmp = PolygonMatrix::new();
+        crate::external::add_mesh(path.to_string_lossy().as_ref(), &mut tmp).map_err(|err| {
+            ParserError::MeshError(line_num, path.display().to_string(), err.to_string())
+        })?;
+        self.canvas.draw_polygons(&tmp.apply(&self.trans_matrix));
         Ok(())
     }
 
     #[cfg(feature = "external")]
     fn parse_mesh_reverse(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
-        let start_col = self.polygon_matrix.cols();
-        self.parse_mesh(line)?;
-        self.polygon_matrix.reverse_winding_from_col(start_col);
+        let (line_num, file_name) = line;
+        let path = self.resolve_script_path(file_name);
+        self.tmp_polygon.clear();
+        crate::external::add_mesh(path.to_string_lossy().as_ref(), &mut self.tmp_polygon).map_err(
+            |err| ParserError::MeshError(line_num, path.display().to_string(), err.to_string()),
+        )?;
+        self.tmp_polygon.reverse_winding();
+        self.canvas
+            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
         Ok(())
     }
 
@@ -1031,18 +942,6 @@ mod tests {
     }
 
     #[test]
-    fn extra_whitespace_in_arguments_is_accepted() {
-        let path = temp_file("whitespace");
-        fs::write(&path, "line\n0   0  0    1 1 0\n").expect("write temp script");
-
-        let mut parser = Parser::new(path.to_str().expect("utf8 path"), 2, 2, &Rgb::GREEN);
-        parser.parse_file().expect("script should parse");
-
-        assert_eq!(parser.edge_matrix().cols(), 2);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
     fn beziern_degree_must_be_integer() {
         let path = temp_file("beziern-degree");
         fs::write(&path, "beziern\n3.7\n0 0 1 1 2 2 3 3\n").expect("write temp script");
@@ -1067,105 +966,75 @@ mod tests {
     }
 
     #[test]
-    fn apply_only_transforms_pending_geometry() {
-        let mut parser = Parser::new("test", 50, 50, &Rgb::GREEN);
-
-        parser
-            .parse_string(
-                "line\n0 0 0 1 0 0\nmove\n10 0 0\napply\nident\nline\n0 0 0 1 0 0\nmove\n0 20 0\napply",
-            )
-            .expect("script valid");
-
-        assert_eq!(
-            parser.edge_matrix().as_matrix().data(),
-            &[
-                10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0
-            ]
-        );
-    }
-
-    #[test]
-    fn push_pop_scopes_applied_geometry() {
-        let mut parser = Parser::new("test", 50, 50, &Rgb::GREEN);
-
-        parser
-            .parse_string(
-                "push\nmove\n10 0 0\nline\n0 0 0 1 0 0\napply\npop\nmove\n0 20 0\nline\n0 0 0 1 0 0\napply",
-            )
-            .expect("script valid");
-
-        assert_eq!(
-            parser.edge_matrix().as_matrix().data(),
-            &[
-                10.0, 0.0, 0.0, 1.0, 11.0, 0.0, 0.0, 1.0, 0.0, 20.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0
-            ]
-        );
-    }
-
-    #[test]
-    #[allow(clippy::float_cmp)]
     fn test_variables() {
         let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
         parser
             .parse_string("set\nx 100\nmove\nx 0 0")
             .expect("set valid");
-        assert_eq!(parser.trans_matrix().get(0, 3), 100.0);
+        assert!((parser.trans_matrix().get(0, 3) - 100.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_new_primitives() {
+    fn transform_order_is_top_times_t() {
+        // move then scale: CS = I*T*S. Applied to point [1,0,0]: scale first → [2,0,0], then translate → [12,0,0]
         let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
-
         parser
-            .parse_string("cylinder\n0 0 0 10 20")
-            .expect("cylinder valid");
-        assert!(!parser.polygon_matrix().is_empty());
-        let mut manual = crate::gmath::polygon_matrix::PolygonMatrix::new();
-        manual.add_cylinder((0.0, 0.0, 0.0), 10.0, 20.0, 24);
-        assert_eq!(parser.polygon_matrix().cols(), manual.cols());
-
-        parser
-            .parse_string("clear\ncone\n0 0 0 10 20")
-            .expect("cone valid");
-        manual = crate::gmath::polygon_matrix::PolygonMatrix::new();
-        manual.add_cone((0.0, 0.0, 0.0), 10.0, 20.0, 24);
-        assert_eq!(parser.polygon_matrix().cols(), manual.cols());
-
-        parser
-            .parse_string("clear\npyramid\n0 0 0 10 20")
-            .expect("pyramid valid");
-        manual = crate::gmath::polygon_matrix::PolygonMatrix::new();
-        manual.add_pyramid((0.0, 0.0, 0.0), 10.0, 20.0);
-        assert_eq!(parser.polygon_matrix().cols(), manual.cols());
+            .parse_string("move\n10 0 0\nscale\n2 2 2")
+            .expect("valid");
+        let m = parser.trans_matrix();
+        // T(10,0,0) * S(2,2,2) = [[2,0,0,10],[0,2,0,0],[0,0,2,0],[0,0,0,1]]
+        assert!((m.get(0, 0) - 2.0).abs() < 1e-9);
+        assert!((m.get(0, 3) - 10.0).abs() < 1e-9);
     }
 
     #[test]
-    fn reverse_winding_command_flips_polygon_faces() {
-        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
-        parser.parse_string("box\n0 0 0 1 1 1").expect("box valid");
-        let before = parser.polygon_matrix().as_matrix().data().to_vec();
-
+    fn shapes_draw_immediately_to_canvas() {
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser = Parser::new_with_bg("test", 100, 100, &fg, &bg);
+        // Move sphere into canvas center and draw it
         parser
-            .parse_string("reverse_winding")
-            .expect("reverse winding valid");
-        let after = parser.polygon_matrix().as_matrix().data();
+            .parse_string("move\n50 50 0\nsphere\n0 0 0 20")
+            .expect("valid");
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(has_fg, "sphere should draw to canvas immediately");
+    }
 
-        assert_eq!(&after[0..4], &before[0..4]);
-        assert_eq!(&after[4..8], &before[8..12]);
-        assert_eq!(&after[8..12], &before[4..8]);
+    #[test]
+    fn push_pop_restores_coordinate_system() {
+        // Shapes drawn in different CS should produce different results
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser = Parser::new_with_bg("test", 200, 200, &fg, &bg);
+
+        // Draw a box at (20, 100, 0) then push, move to (150, 100, 0), draw another, pop
+        parser
+            .parse_string(
+                "move\n20 100 0\nbox\n0 0 0 10 10 1\npush\nmove\n130 0 0\nbox\n0 0 0 10 10 1\npop",
+            )
+            .expect("valid");
+
+        // After pop, trans_matrix should be back to T(20,100,0)
+        let m = parser.trans_matrix();
+        assert!((m.get(0, 3) - 20.0).abs() < 1e-9);
+        assert!((m.get(1, 3) - 100.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_include_command() {
         let path = temp_file("include-target");
-        fs::write(&path, "line\n0 0 0 1 1 1\n").expect("write temp script");
+        fs::write(&path, "move\n5 5 0\nline\n0 0 0 1 1 0\n").expect("write temp script");
 
-        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser = Parser::new_with_bg("test", 20, 20, &fg, &bg);
         parser
             .parse_string(&format!("include\n{}", path.to_str().unwrap()))
             .expect("include valid");
 
-        assert_eq!(parser.edge_matrix().cols(), 2);
+        // Line was drawn: canvas should have fg pixels
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(has_fg, "included script should draw to canvas");
         let _ = fs::remove_file(path);
     }
 
@@ -1176,12 +1045,16 @@ mod tests {
         let main_path = dir.join("main.cg");
         let child_path = dir.join("child.cg");
         fs::write(&main_path, "include\nchild.cg\n").expect("write main script");
-        fs::write(&child_path, "line\n0 0 0 1 1 1\n").expect("write child script");
+        fs::write(&child_path, "move\n1 1 0\nline\n0 0 0 1 1 0\n").expect("write child script");
 
-        let mut parser = Parser::new(main_path.to_str().expect("utf8 path"), 10, 10, &Rgb::GREEN);
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser =
+            Parser::new_with_bg(main_path.to_str().expect("utf8 path"), 20, 20, &fg, &bg);
         parser.parse_file().expect("include valid");
 
-        assert_eq!(parser.edge_matrix().cols(), 2);
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(has_fg, "relative-included script should draw to canvas");
         let _ = fs::remove_file(main_path);
         let _ = fs::remove_file(child_path);
         let _ = fs::remove_dir(dir);
@@ -1191,15 +1064,18 @@ mod tests {
     #[test]
     fn test_mesh_command() {
         let path = temp_file_with_extension("mesh", "obj");
-        fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write temp obj");
+        // Triangle facing viewer (counterclockwise from front) centered near canvas
+        fs::write(&path, "v 40 40 0\nv 60 40 0\nv 50 60 0\nf 1 2 3\n").expect("write temp obj");
 
-        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser = Parser::new_with_bg("test", 100, 100, &fg, &bg);
         parser
             .parse_string(&format!("mesh\n{}", path.to_str().unwrap()))
             .expect("mesh valid");
 
-        assert_eq!(parser.polygon_matrix().cols(), 3);
-        assert!(parser.is_dirty());
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(has_fg, "mesh should draw to canvas immediately");
         let _ = fs::remove_file(path);
     }
 
@@ -1211,17 +1087,16 @@ mod tests {
         let script_path = dir.join("main.cg");
         let mesh_path = dir.join("triangle.obj");
         fs::write(&script_path, "mesh\ntriangle.obj\n").expect("write script");
-        fs::write(&mesh_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write obj");
+        fs::write(&mesh_path, "v 40 40 0\nv 60 40 0\nv 50 60 0\nf 1 2 3\n").expect("write obj");
 
-        let mut parser = Parser::new(
-            script_path.to_str().expect("utf8 path"),
-            10,
-            10,
-            &Rgb::GREEN,
-        );
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser =
+            Parser::new_with_bg(script_path.to_str().expect("utf8 path"), 100, 100, &fg, &bg);
         parser.parse_file().expect("mesh valid");
 
-        assert_eq!(parser.polygon_matrix().cols(), 3);
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(has_fg, "relative-path mesh should draw to canvas");
         let _ = fs::remove_file(script_path);
         let _ = fs::remove_file(mesh_path);
         let _ = fs::remove_dir(dir);
@@ -1242,56 +1117,20 @@ mod tests {
         let mesh_path = meshes_dir.join("triangle.obj");
         fs::write(&main_path, "include\nsub/child.cg\n").expect("write main script");
         fs::write(&child_path, "mesh\n../meshes/triangle.obj\n").expect("write child script");
-        fs::write(&mesh_path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write obj");
+        fs::write(&mesh_path, "v 40 40 0\nv 60 40 0\nv 50 60 0\nf 1 2 3\n").expect("write obj");
 
-        let mut parser = Parser::new(main_path.to_str().expect("utf8 path"), 10, 10, &Rgb::GREEN);
+        let bg = Rgb::new(0, 0, 0);
+        let fg = Rgb::new(255, 255, 255);
+        let mut parser =
+            Parser::new_with_bg(main_path.to_str().expect("utf8 path"), 100, 100, &fg, &bg);
         parser.parse_file().expect("nested include mesh valid");
 
-        assert_eq!(parser.polygon_matrix().cols(), 3);
+        let has_fg = parser.canvas().pixels().contains(&fg);
+        assert!(
+            has_fg,
+            "nested-include relative-path mesh should draw to canvas"
+        );
         let _ = fs::remove_dir_all(dir);
-    }
-
-    #[cfg(feature = "external")]
-    #[test]
-    fn mesh_reverse_reverses_only_imported_winding() {
-        let path = temp_file_with_extension("mesh-reverse", "obj");
-        fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").expect("write temp obj");
-
-        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
-        parser.parse_string("box\n0 0 0 1 1 1").expect("box valid");
-        let existing = parser.polygon_matrix().as_matrix().data().to_vec();
-        parser
-            .parse_string(&format!("mesh_reverse\n{}", path.to_str().unwrap()))
-            .expect("mesh reverse valid");
-
-        let data = parser.polygon_matrix().as_matrix().data();
-        assert_eq!(&data[..existing.len()], existing.as_slice());
-        assert_eq!(
-            &data[existing.len()..],
-            &[
-                0.0, 0.0, 0.0, 1.0, //
-                0.0, 1.0, 0.0, 1.0, //
-                1.0, 0.0, 0.0, 1.0,
-            ]
-        );
-        let _ = fs::remove_file(path);
-    }
-
-    #[cfg(feature = "external")]
-    #[test]
-    fn example_teapot_mesh_script_parses() {
-        let mut parser = Parser::new(
-            "examples/data/scripts/teapot_mesh.cg",
-            800,
-            800,
-            &Rgb::GREEN,
-        );
-        parser.set_display_enabled(false);
-
-        parser.parse_file().expect("teapot mesh script valid");
-
-        assert!(!parser.polygon_matrix().is_empty());
-        assert!(!parser.is_dirty());
     }
 
     #[cfg(not(feature = "external"))]
@@ -1317,6 +1156,43 @@ mod tests {
 
             assert!(matches!(error, ParserError::ArgumentError(1, _)));
         }
+    }
+
+    #[test]
+    fn parse_ident_resets_transform_matrix() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser
+            .parse_string("scale\n2 2 2\nrotate\nz 45\nident")
+            .expect("ident valid");
+        assert_eq!(
+            parser.trans_matrix(),
+            &crate::gmath::matrix::Matrix::identity_matrix(4)
+        );
+    }
+
+    #[test]
+    fn parse_apply_is_noop() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser
+            .parse_string("scale\n2 2 2\napply")
+            .expect("apply valid");
+        let m = parser.trans_matrix();
+        assert!((m.get(0, 0) - 2.0).abs() < 1e-9);
+        assert!((m.get(1, 1) - 2.0).abs() < 1e-9);
+        assert!((m.get(2, 2) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn set_accepts_previous_symbol_values() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser
+            .parse_string("set\nbase 3\nset\nscale_x base")
+            .expect("set should resolve existing symbol");
+
+        parser
+            .parse_string("move\nscale_x 0 0")
+            .expect("move should use symbol from set");
+        assert!((parser.trans_matrix().get(0, 3) - 3.0).abs() < 1e-9);
     }
 
     #[test]

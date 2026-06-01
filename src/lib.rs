@@ -26,7 +26,6 @@ pub mod gmath;
 pub mod graphics;
 /// This module hosts a [Parser] that allows an image to be created through
 /// a detailed specification. More information found in the module.
-#[cfg(feature = "old_parser")]
 pub mod parser;
 /// prelude
 pub mod prelude;

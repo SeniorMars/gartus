@@ -2,347 +2,508 @@ use gartus::gmath::edge_matrix::EdgeMatrix;
 use gartus::gmath::matrix::*;
 use gartus::gmath::polygon_matrix::PolygonMatrix;
 use gartus::graphics::colors::*;
+use gartus::graphics::display::Canvas;
 use gartus::parser::Parser;
 
-#[test]
-#[ignore]
-fn script_polygons() {
-    let color = Rgb::new(0, 255, 0);
-    let mut dw = Parser::new("./tests/script_polygon", 500, 500, &color);
-
-    // Initial state check
-    assert!(dw.edge_matrix().is_empty());
-    assert!(dw.polygon_matrix().is_empty());
-    assert_eq!(dw.trans_matrix(), &Matrix::identity_matrix(4));
-    assert!(dw.is_dirty()); // Starts dirty until first render
-
-    // 1. box 0 0 0 200 100 400
-    dw.parse_string("box\n0 0 0 200 100 400")
-        .expect("box valid");
-    let mut manual_poly = PolygonMatrix::new();
-    manual_poly.add_box((0.0, 0.0, 0.0), 200.0, 100.0, 400.0);
-    assert_eq!(dw.polygon_matrix(), &manual_poly, "Box geometry mismatch");
-    assert!(dw.is_dirty(), "Box should mark canvas dirty");
-
-    // 2. ident, rotate, move
-    dw.parse_string("ident").expect("ident valid");
-    let mut manual_trans = Matrix::identity_matrix(4);
-    assert_eq!(dw.trans_matrix(), &manual_trans);
-
-    dw.parse_string("rotate\nx 20").expect("rotate x valid");
-    manual_trans = &Matrix::rotate_x(20.0) * &manual_trans;
-    assert_eq!(dw.trans_matrix(), &manual_trans);
-
-    dw.parse_string("rotate\ny 20").expect("rotate y valid");
-    manual_trans = &Matrix::rotate_y(20.0) * &manual_trans;
-    assert_eq!(dw.trans_matrix(), &manual_trans);
-
-    dw.parse_string("move\n150 200 0").expect("move valid");
-    manual_trans = &Matrix::translate(150.0, 200.0, 0.0) * &manual_trans;
-    assert_eq!(dw.trans_matrix(), &manual_trans);
-
-    // 3. apply (Transfers trans to poly)
-    dw.parse_string("apply").expect("apply valid");
-    manual_poly = manual_poly.apply(&manual_trans);
-    assert_eq!(dw.polygon_matrix(), &manual_poly, "Apply mismatch");
-    assert!(dw.is_dirty());
-
-    // 4. display renders the canvas and sends it to the external viewer.
-    dw.parse_string("display").expect("display valid");
-    assert!(!dw.is_dirty(), "Display should clear dirty flag");
-
-    let mut blank = true;
-    for y in 0..500 {
-        for x in 0..500 {
-            if dw.canvas().get_pixel(x, y) != Some(&Rgb::default()) {
-                blank = false;
-                break;
-            }
-        }
-    }
-    assert!(!blank, "Canvas should not be blank after display");
-
-    // 5. clear (Resets matrices and canvas)
-    dw.parse_string("clear").expect("clear valid");
-    assert!(dw.polygon_matrix().is_empty());
-    assert!(dw.edge_matrix().is_empty());
-    assert!(!dw.is_dirty());
-
-    // 6. sphere
-    dw.parse_string("sphere\n0 0 0 200").expect("sphere valid");
-    manual_poly = PolygonMatrix::new();
-    manual_poly.add_sphere((0.0, 0.0, 0.0), 200.0, 24);
-    assert_eq!(dw.polygon_matrix(), &manual_poly);
-    assert!(dw.is_dirty());
-
-    // 7. Test transform stack reset logic in script
-    dw.parse_string("ident\nrotate\ny 90\nmove\n250 250 0")
-        .expect("sphere trans valid");
-    manual_trans = Matrix::identity_matrix(4);
-    manual_trans = &Matrix::rotate_y(90.0) * &manual_trans;
-    manual_trans = &Matrix::translate(250.0, 250.0, 0.0) * &manual_trans;
-    assert_eq!(dw.trans_matrix(), &manual_trans);
-
-    // 8. Final Apply
-    dw.parse_string("apply").expect("sphere apply valid");
-    manual_poly = manual_poly.apply(&manual_trans);
-    assert_eq!(dw.polygon_matrix(), &manual_poly);
-
-    // 9. Full script regression check
-    let mut dw_final = Parser::new("./tests/script_polygon", 500, 500, &color);
-    dw_final
-        .parse_file()
-        .expect("Full script execution should succeed");
-
-    let mut expected_poly = PolygonMatrix::new();
-    expected_poly.add_torus((0.0, 0.0, 0.0), 25.0, 150.0, 24);
-
-    let mut m1 = Matrix::identity_matrix(4);
-    m1 = &Matrix::rotate_y(90.0) * &m1;
-    m1 = &Matrix::translate(250.0, 250.0, 0.0) * &m1;
-    expected_poly = expected_poly.apply(&m1);
-
-    // Later torus `apply` commands have no newly-added geometry, so they should
-    // not transform the already-finalized torus again.
-
-    assert!(
-        dw_final
-            .polygon_matrix()
-            .as_matrix()
-            .approx_eq(expected_poly.as_matrix(), 1e-10),
-        "Final state mismatch after pending-only transformations"
-    );
-    assert!(
-        !dw_final.is_dirty(),
-        "Final state should be rendered (due to display command)"
-    );
+fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
+    a.pixels()
+        .iter()
+        .zip(b.pixels().iter())
+        .all(|(p, q)| p == q)
 }
 
 #[test]
-#[ignore]
-fn script_3d() {
-    let mut dw = Parser::new("./tests/script_3d", 500, 500, &Rgb::new(0, 255, 0));
+fn script_cstack() {
+    let green = Rgb::new(0, 255, 0);
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    // --- parser side ---
+    let mut dw = Parser::new("./tests/script_cstack", W, H, &green);
+    dw.set_display_enabled(false);
     dw.parse_file().expect("Script is valid");
+    assert!(
+        std::path::Path::new("robot.png").exists(),
+        "script should save robot.png"
+    );
+    let _ = std::fs::remove_file("robot.png");
+
+    // --- manual side: replicate every CS step from script_cstack ---
+    // Parser::new uses Canvas::new(w, h, color) → line=green, bg=black(default)
+    let mut manual = Canvas::new(W, H, green);
+
+    // script starts at identity; first command is push (saves identity), then body CS:
+    //   move 250 250 0  → T(250,250,0)
+    //   rotate y -30    → * Ry(-30)
+    let body = &Matrix::identity_matrix(4)
+        * &(&Matrix::translate(250.0, 250.0, 0.0) * &Matrix::rotate_y(-30.0));
+
+    // BODY box
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-100.0, 125.0, 50.0), 200.0, 250.0, 100.0);
+    manual.draw_polygons(&pm.apply(&body));
+
+    // HEAD: body * T(0,175,0) * Ry(90)
+    let head = &body * &(&Matrix::translate(0.0, 175.0, 0.0) * &Matrix::rotate_y(90.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_sphere((0.0, 0.0, 0.0), 50.0, 24);
+    manual.draw_polygons(&pm.apply(&head));
+
+    // LEFT ARM: body * T(-100,125,0) * Rx(-45)
+    let left_arm = &body * &(&Matrix::translate(-100.0, 125.0, 0.0) * &Matrix::rotate_x(-45.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-40.0, 0.0, 40.0), 40.0, 100.0, 80.0);
+    manual.draw_polygons(&pm.apply(&left_arm));
+
+    // LEFT LOWER ARM: left_arm * T(-20,-100,0)
+    let left_lower = &left_arm * &Matrix::translate(-20.0, -100.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-10.0, 0.0, 10.0), 20.0, 125.0, 20.0);
+    manual.draw_polygons(&pm.apply(&left_lower));
+
+    // RIGHT ARM: body * T(100,125,0) * Rx(-45)
+    let right_arm = &body * &(&Matrix::translate(100.0, 125.0, 0.0) * &Matrix::rotate_x(-45.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((0.0, 0.0, 40.0), 40.0, 100.0, 80.0);
+    manual.draw_polygons(&pm.apply(&right_arm));
+
+    // RIGHT LOWER ARM: right_arm * T(20,-100,0) * Rx(-20)
+    let right_lower =
+        &right_arm * &(&Matrix::translate(20.0, -100.0, 0.0) * &Matrix::rotate_x(-20.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-10.0, 0.0, 10.0), 20.0, 125.0, 20.0);
+    manual.draw_polygons(&pm.apply(&right_lower));
+
+    // LEFT LEG: body * T(-100,-125,0)
+    let left_leg = &body * &Matrix::translate(-100.0, -125.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((0.0, 0.0, 40.0), 50.0, 120.0, 80.0);
+    manual.draw_polygons(&pm.apply(&left_leg));
+
+    // RIGHT LEG: body * T(100,-125,0)
+    let right_leg = &body * &Matrix::translate(100.0, -125.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-50.0, 0.0, 40.0), 50.0, 120.0, 80.0);
+    manual.draw_polygons(&pm.apply(&right_leg));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser script_cstack should match manual CS construction"
+    );
 }
 
 #[test]
-#[ignore]
-fn script_transform() {
-    let mut dw = Parser::new("./tests/script_transform", 500, 500, &Rgb::new(0, 255, 0));
+fn script_polygons() {
+    // box + sphere drawn, then clear, then torus — final canvas = torus only.
+    // CS = I * Rx(20) * Ry(20) * T(150,200,0) persists through clear.
+    let color = Rgb::new(0, 255, 0);
+    let bg = Rgb::default();
+    const W: u32 = 500;
+    const H: u32 = 500;
 
-    let mut manual_edges = EdgeMatrix::new();
-    let lines = [
-        (0.0, 0.0, 0.0, 100.0, 0.0, 0.0),
-        (100.0, 0.0, 0.0, 100.0, 100.0, 0.0),
-        (100.0, 100.0, 0.0, 0.0, 100.0, 0.0),
-        (0.0, 100.0, 0.0, 0.0, 0.0, 0.0),
-        (0.0, 0.0, 100.0, 100.0, 0.0, 100.0),
-        (100.0, 0.0, 100.0, 100.0, 100.0, 100.0),
-        (100.0, 100.0, 100.0, 0.0, 100.0, 100.0),
-        (0.0, 100.0, 100.0, 0.0, 0.0, 100.0),
-        (0.0, 0.0, 0.0, 0.0, 0.0, 100.0),
-        (0.0, 100.0, 0.0, 0.0, 100.0, 100.0),
-        (100.0, 100.0, 0.0, 100.0, 100.0, 100.0),
-        (100.0, 0.0, 0.0, 100.0, 0.0, 100.0),
+    // --- parser side ---
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string(
+        "box\n0 0 0 200 100 400\nrotate\nx 20\nrotate\ny 20\nmove\n150 200 0\nsphere\n0 0 0 200\nclear\ntorus\n0 0 0 25 150",
+    )
+    .unwrap();
+
+    // --- manual side: only torus survives the clear ---
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    // CS = Rx(20) * Ry(20) * T(150,200,0)
+    let cs = &(&Matrix::rotate_x(20.0) * &Matrix::rotate_y(20.0))
+        * &Matrix::translate(150.0, 200.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_torus((0.0, 0.0, 0.0), 25.0, 150.0, 24);
+    manual.draw_polygons(&pm.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "script_polygons final canvas should match manual torus"
+    );
+}
+
+#[test]
+fn script_transform() {
+    // Cube wireframe at T(250,250,0), then push/scale/cube again/pop.
+    // Rotations after pop draw nothing; no final clear so canvas holds all lines.
+    // Parity: manual replicates both draw passes then compares pixel-for-pixel.
+    let color = Rgb::new(0, 255, 0);
+    let bg = Rgb::default();
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    const CUBE: &[&str] = &[
+        "0 0 0 100 0 0",
+        "100 0 0 100 100 0",
+        "100 100 0 0 100 0",
+        "0 100 0 0 0 0",
+        "0 0 100 100 0 100",
+        "100 0 100 100 100 100",
+        "100 100 100 0 100 100",
+        "0 100 100 0 0 100",
+        "0 0 0 0 0 100",
+        "0 100 0 0 100 100",
+        "100 100 0 100 100 100",
+        "100 0 0 100 0 100",
     ];
 
-    for l in &lines {
-        dw.parse_string(&format!(
-            "line\n{} {} {} {} {} {}",
-            l.0, l.1, l.2, l.3, l.4, l.5
-        ))
-        .expect("line valid");
-        manual_edges.push_edge(l.0, l.1, l.2, l.3, l.4, l.5);
+    // --- parser side ---
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    let mut script = String::from("move\n250 250 0\n");
+    for e in CUBE {
+        script.push_str(&format!("line\n{e}\n"));
     }
-    assert_eq!(
-        dw.edge_matrix().as_matrix(),
-        manual_edges.as_matrix(),
-        "Initial line batch mismatch"
-    );
+    script.push_str("push\nscale\n2 2 2\n");
+    for e in CUBE {
+        script.push_str(&format!("line\n{e}\n"));
+    }
+    script.push_str("pop\nrotate\nz 20\nrotate\nx 20\nrotate\ny 20");
+    dw.parse_string(&script).unwrap();
 
-    dw.parse_string("ident\nscale\n2 2 2\napply")
-        .expect("scale valid");
-    let mut m_scale = Matrix::identity_matrix(4);
-    m_scale = &Matrix::scale(2.0, 2.0, 2.0) * &m_scale;
-    manual_edges = manual_edges.apply(&m_scale);
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(manual_edges.as_matrix(), 1e-10),
-        "Scale apply mismatch"
-    );
+    // --- manual side ---
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs1 = &Matrix::identity_matrix(4) * &Matrix::translate(250.0, 250.0, 0.0);
+    let cs2 = &cs1 * &Matrix::scale(2.0, 2.0, 2.0);
 
-    dw.parse_string("ident\nmove\n100 100 0\napply")
-        .expect("move valid");
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(manual_edges.as_matrix(), 1e-10),
-        "Move apply should not affect finalized edges"
-    );
+    let cube_pts: &[(f64, f64, f64, f64, f64, f64)] = &[
+        (0., 0., 0., 100., 0., 0.),
+        (100., 0., 0., 100., 100., 0.),
+        (100., 100., 0., 0., 100., 0.),
+        (0., 100., 0., 0., 0., 0.),
+        (0., 0., 100., 100., 0., 100.),
+        (100., 0., 100., 100., 100., 100.),
+        (100., 100., 100., 0., 100., 100.),
+        (0., 100., 100., 0., 0., 100.),
+        (0., 0., 0., 0., 0., 100.),
+        (0., 100., 0., 0., 100., 100.),
+        (100., 100., 0., 100., 100., 100.),
+        (100., 0., 0., 100., 0., 100.),
+    ];
+    let mut em1 = EdgeMatrix::new();
+    for &(x0, y0, z0, x1, y1, z1) in cube_pts {
+        em1.push_edge(x0, y0, z0, x1, y1, z1);
+    }
+    manual.draw_lines(&em1.apply(&cs1));
+    let mut em2 = EdgeMatrix::new();
+    for &(x0, y0, z0, x1, y1, z1) in cube_pts {
+        em2.push_edge(x0, y0, z0, x1, y1, z1);
+    }
+    manual.draw_lines(&em2.apply(&cs2));
 
-    dw.parse_string("ident\nrotate\nz 20\nrotate\nx 20\nrotate\ny 20\napply")
-        .expect("multi-rotate valid");
     assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(manual_edges.as_matrix(), 1e-10),
-        "Multi-rotate apply should not affect finalized edges"
-    );
-
-    dw.parse_string("ident\nrotate\ny 20\napply")
-        .expect("final rotate valid");
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(manual_edges.as_matrix(), 1e-10),
-        "Final rotate apply should not affect finalized edges"
-    );
-
-    let mut dw_full = Parser::new("./tests/script_transform", 500, 500, &Rgb::new(0, 255, 0));
-    dw_full.parse_file().expect("Full script should run");
-    assert!(
-        dw_full
-            .edge_matrix()
-            .as_matrix()
-            .approx_eq(manual_edges.as_matrix(), 1e-10),
-        "Full script result mismatch"
+        pixels_eq(dw.canvas(), &manual),
+        "script_transform canvas should match manual cube wireframes"
     );
 }
 
 #[test]
-#[ignore]
 fn curve_script() {
-    let mut dw = Parser::new("./tests/script_curves", 500, 500, &Rgb::new(0, 255, 0));
+    // clear erases earlier curves; final canvas = 5 curves drawn in second batch.
+    // Parity: manual replicates those 5 edge draws at identity CS.
+    let color = Rgb::new(0, 255, 0);
+    let bg = Rgb::default();
+    const W: u32 = 500;
+    const H: u32 = 500;
 
-    let mut expected_edges = EdgeMatrix::new();
-
-    dw.parse_string("circle\n250 250 0 200")
-        .expect("circle 1 valid");
-    expected_edges.add_circle(250.0, 250.0, 0.0, 200.0, 0.001);
+    // --- parser side ---
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string(
+        "circle\n250 250 0 200\ncircle\n175 325 0 50\nhermite\n150 150 350 150 -100 -100 100 150\nbezier\n200 250 150 50 300 250 300 250\nclear\ncircle\n250 250 0 200\ncircle\n175 325 0 50\ncircle\n325 325 0 50\nhermite\n150 150 350 150 -100 -100 100 150\nbezier\n200 250 150 50 300 250 300 250\nsave\nface.png",
+    )
+    .unwrap();
     assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(expected_edges.as_matrix(), 1e-10)
+        std::path::Path::new("face.png").exists(),
+        "save should create face.png"
     );
+    let _ = std::fs::remove_file("face.png");
 
-    dw.parse_string("circle\n175 325 0 50")
-        .expect("circle 2 valid");
-    expected_edges.add_circle(175.0, 325.0, 0.0, 50.0, 0.001);
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(expected_edges.as_matrix(), 1e-10)
-    );
-
-    dw.parse_string("hermite\n150 150 350 150 -100 -100 100 150")
-        .expect("hermite valid");
-    expected_edges.add_hermite(
+    // --- manual side: only the post-clear batch survives ---
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = Matrix::identity_matrix(4);
+    let mut em = EdgeMatrix::new();
+    em.add_circle(250.0, 250.0, 0.0, 200.0, 0.001);
+    em.add_circle(175.0, 325.0, 0.0, 50.0, 0.001);
+    em.add_circle(325.0, 325.0, 0.0, 50.0, 0.001);
+    em.add_hermite(
         (150.0, 150.0),
         (350.0, 150.0),
         (-100.0, -100.0),
         (100.0, 150.0),
     );
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(expected_edges.as_matrix(), 1e-10)
-    );
-
-    dw.parse_string("bezier\n200 250 150 50 300 250 300 250")
-        .expect("bezier valid");
-    expected_edges.add_bezier3(
+    em.add_bezier3(
         (200.0, 250.0),
         (150.0, 50.0),
         (300.0, 250.0),
         (300.0, 250.0),
     );
-    assert!(
-        dw.edge_matrix()
-            .as_matrix()
-            .approx_eq(expected_edges.as_matrix(), 1e-10)
-    );
-
-    let mut dw_full = Parser::new("./tests/script_curves", 500, 500, &Rgb::new(0, 255, 0));
-    dw_full
-        .parse_file()
-        .expect("Full script execution should succeed");
-
-    let mut final_expected = EdgeMatrix::new();
-    final_expected.add_circle(250.0, 250.0, 0.0, 200.0, 0.001);
-    final_expected.add_circle(175.0, 325.0, 0.0, 50.0, 0.001);
-    final_expected.add_circle(325.0, 325.0, 0.0, 50.0, 0.001);
-    final_expected.add_circle(175.0, 325.0, 0.0, 10.0, 0.001);
-    final_expected.add_circle(325.0, 325.0, 0.0, 10.0, 0.001);
-    final_expected.add_hermite(
-        (150.0, 150.0),
-        (350.0, 150.0),
-        (-100.0, -100.0),
-        (100.0, 150.0),
-    );
-    final_expected.add_bezier3(
-        (200.0, 250.0),
-        (150.0, 50.0),
-        (300.0, 250.0),
-        (300.0, 250.0),
-    );
-
-    final_expected.add_bezier3((46.0, 494.0), (7.0, 488.0), (47.0, 455.0), (10.0, 450.0));
-    final_expected.add_hermite((77.0, 492.0), (73.0, 455.0), (3.0, 32.0), (-6.0, 25.0));
-    final_expected.add_bezier3((82.0, 479.0), (80.0, 490.0), (69.0, 469.0), (68.0, 481.0));
-    final_expected.add_bezier3((91.0, 486.0), (91.0, 444.0), (112.0, 448.0), (111.0, 487.0));
-    final_expected.add_bezier3(
-        (161.0, 489.0),
-        (114.0, 455.0),
-        (132.0, 469.0),
-        (139.0, 490.0),
-    );
-    final_expected.add_bezier3(
-        (111.0, 451.0),
-        (114.0, 455.0),
-        (132.0, 469.0),
-        (139.0, 490.0),
-    );
-    final_expected.add_hermite(
-        (185.0, 496.0),
-        (179.0, 453.0),
-        (-105.0, -23.0),
-        (100.0, 23.0),
-    );
-    final_expected.add_hermite(
-        (220.0, 493.0),
-        (204.0, 453.0),
-        (-112.0, -20.0),
-        (-125.0, -29.0),
-    );
+    manual.draw_lines(&em.apply(&cs));
 
     assert!(
-        dw_full
-            .edge_matrix()
-            .as_matrix()
-            .approx_eq(final_expected.as_matrix(), 1e-10),
-        "Full curve script result mismatch"
+        pixels_eq(dw.canvas(), &manual),
+        "curve_script final canvas should match manual edge draws"
     );
 }
 
 #[test]
-fn matrix_test() {
-    let mut edge_matrix = EdgeMatrix::new();
-    edge_matrix.push_edge(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-    let ident = Matrix::identity_matrix(4);
-    let res = ident.mult_matrix(edge_matrix.as_matrix());
-    assert_eq!(res, *edge_matrix.as_matrix());
+fn script_3d() {
+    // Box + sphere + torus each in their own push/pop CS, all visible in final canvas.
+    let color = Rgb::new(0, 255, 0);
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    // --- parser side ---
+    let mut dw = Parser::new("./tests/script_3d", W, H, &color);
+    dw.set_display_enabled(false);
+    dw.parse_file().unwrap();
+    assert!(
+        std::path::Path::new("scene_3d.png").exists(),
+        "script should save scene_3d.png"
+    );
+    let _ = std::fs::remove_file("scene_3d.png");
+
+    // --- manual side ---
+    let mut manual = Canvas::new(W, H, color);
+
+    // box: T(130,350,0) * Ry(20) * Rx(15)
+    let box_cs = &(&Matrix::translate(130.0, 350.0, 0.0) * &Matrix::rotate_y(20.0))
+        * &Matrix::rotate_x(15.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-50.0, -50.0, -50.0), 100.0, 100.0, 100.0);
+    manual.draw_polygons(&pm.apply(&box_cs));
+
+    // sphere: T(250,250,0)
+    let sphere_cs = Matrix::translate(250.0, 250.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_sphere((0.0, 0.0, 0.0), 80.0, 24);
+    manual.draw_polygons(&pm.apply(&sphere_cs));
+
+    // torus: T(370,150,0) * Rx(60)
+    let torus_cs = &Matrix::translate(370.0, 150.0, 0.0) * &Matrix::rotate_x(60.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_torus((0.0, 0.0, 0.0), 20.0, 60.0, 24);
+    manual.draw_polygons(&pm.apply(&torus_cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "script_3d final canvas should match manual construction"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Parity tests: parser output == manual construction via library APIs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parity_line_identity_cs() {
+    let color = Rgb::new(200, 100, 50);
+    let bg = Rgb::default();
+    const W: u32 = 200;
+    const H: u32 = 200;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("line\n10 10 0 150 180 0").unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = Matrix::identity_matrix(4);
+    let mut em = EdgeMatrix::new();
+    em.push_edge(10.0, 10.0, 0.0, 150.0, 180.0, 0.0);
+    manual.draw_lines(&em.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser line should match manual draw_lines"
+    );
 }
 
 #[test]
-fn test_transformation_order() {
-    let mut dw = Parser::new("test", 10, 10, &Rgb::new(0, 0, 0));
-    dw.parse_string("line\n0 0 0 0 1 0").expect("line valid");
-    dw.parse_string("rotate\nx 90\nmove\n0 10 0\napply")
-        .expect("ops valid");
-    let edges = dw.edge_matrix();
-    let p1 = edges.iter_points().nth(1).expect("second point of line");
-    assert!((p1[0] - 0.0).abs() < 1e-10);
-    assert!((p1[1] - 10.0).abs() < 1e-10);
-    assert!((p1[2] - 1.0).abs() < 1e-10);
+fn parity_line_after_translate() {
+    let color = Rgb::new(0, 200, 255);
+    let bg = Rgb::default();
+    const W: u32 = 300;
+    const H: u32 = 300;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("move\n50 80 0\nline\n0 0 0 100 100 0")
+        .unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = &Matrix::identity_matrix(4) * &Matrix::translate(50.0, 80.0, 0.0);
+    let mut em = EdgeMatrix::new();
+    em.push_edge(0.0, 0.0, 0.0, 100.0, 100.0, 0.0);
+    manual.draw_lines(&em.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser line+move should match manual"
+    );
+}
+
+#[test]
+fn parity_box_identity_cs() {
+    let color = Rgb::new(255, 128, 0);
+    let bg = Rgb::default();
+    const W: u32 = 300;
+    const H: u32 = 300;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("box\n50 50 0 100 80 60").unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = Matrix::identity_matrix(4);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((50.0, 50.0, 0.0), 100.0, 80.0, 60.0);
+    manual.draw_polygons(&pm.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser box should match manual draw_polygons"
+    );
+}
+
+#[test]
+fn parity_sphere_after_translate() {
+    let color = Rgb::new(100, 200, 50);
+    let bg = Rgb::default();
+    const W: u32 = 400;
+    const H: u32 = 400;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("move\n200 200 0\nsphere\n0 0 0 100")
+        .unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = &Matrix::identity_matrix(4) * &Matrix::translate(200.0, 200.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_sphere((0.0, 0.0, 0.0), 100.0, 24);
+    manual.draw_polygons(&pm.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser sphere+move should match manual"
+    );
+}
+
+#[test]
+fn parity_torus_after_translate() {
+    let color = Rgb::new(180, 60, 220);
+    let bg = Rgb::default();
+    const W: u32 = 400;
+    const H: u32 = 400;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("move\n200 200 0\ntorus\n0 0 0 30 100")
+        .unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = &Matrix::identity_matrix(4) * &Matrix::translate(200.0, 200.0, 0.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_torus((0.0, 0.0, 0.0), 30.0, 100.0, 24);
+    manual.draw_polygons(&pm.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser torus+move should match manual"
+    );
+}
+
+#[test]
+fn parity_push_pop_two_boxes() {
+    // Draw box at T(30,30,0), push, move to T(30,30,0)*T(100,0,0), draw second box, pop.
+    // Parser and manual should produce identical canvases.
+    let color = Rgb::new(0, 180, 180);
+    let bg = Rgb::default();
+    const W: u32 = 400;
+    const H: u32 = 300;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string(
+        "move\n30 30 0\nbox\n0 0 0 60 60 1\npush\nmove\n100 0 0\nbox\n0 0 0 60 60 1\npop",
+    )
+    .unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs1 = &Matrix::identity_matrix(4) * &Matrix::translate(30.0, 30.0, 0.0);
+    let mut pm1 = PolygonMatrix::new();
+    pm1.add_box((0.0, 0.0, 0.0), 60.0, 60.0, 1.0);
+    manual.draw_polygons(&pm1.apply(&cs1));
+
+    let cs2 = &cs1 * &Matrix::translate(100.0, 0.0, 0.0);
+    let mut pm2 = PolygonMatrix::new();
+    pm2.add_box((0.0, 0.0, 0.0), 60.0, 60.0, 1.0);
+    manual.draw_polygons(&pm2.apply(&cs2));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser push/pop two boxes should match manual"
+    );
+}
+
+#[test]
+fn parity_rotate_then_box() {
+    // CS = I * R_y(45), then draw a box.
+    let color = Rgb::new(255, 0, 128);
+    let bg = Rgb::default();
+    const W: u32 = 300;
+    const H: u32 = 300;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("move\n150 150 0\nrotate\ny 45\nbox\n-50 -50 -50 100 100 100")
+        .unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = &(&Matrix::identity_matrix(4) * &Matrix::translate(150.0, 150.0, 0.0))
+        * &Matrix::rotate_y(45.0);
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-50.0, -50.0, -50.0), 100.0, 100.0, 100.0);
+    manual.draw_polygons(&pm.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser rotate+box should match manual"
+    );
+}
+
+#[test]
+fn parity_circle_identity_cs() {
+    let color = Rgb::new(0, 150, 255);
+    let bg = Rgb::default();
+    const W: u32 = 400;
+    const H: u32 = 400;
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    dw.parse_string("circle\n200 200 0 150").unwrap();
+
+    let mut manual = Canvas::new_with_bg(W, H, bg);
+    manual.line = color;
+    let cs = Matrix::identity_matrix(4);
+    let mut em = EdgeMatrix::new();
+    em.add_circle(200.0, 200.0, 0.0, 150.0, 0.001);
+    manual.draw_lines(&em.apply(&cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "parser circle should match manual"
+    );
 }

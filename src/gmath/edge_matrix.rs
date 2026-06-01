@@ -29,6 +29,11 @@ impl EdgeMatrix {
         }
     }
 
+    /// Clears all points from the matrix without deallocating memory.
+    pub fn clear(&mut self) {
+        self.inner.truncate_cols(0);
+    }
+
     /// Creates an edge matrix from a flat `[x0, y0, x1, y1, ...]` coordinate list.
     ///
     /// Adjacent coordinate pairs become points with the supplied `z` value.
@@ -128,13 +133,6 @@ impl EdgeMatrix {
         Self {
             inner: transform.mult_matrix(&self.inner),
         }
-    }
-
-    /// Apply a 4x4 transformation matrix in place to points starting at `start_col`.
-    #[cfg(feature = "old_parser")]
-    pub(crate) fn apply_from_col_mut(&mut self, start_col: usize, transform: &Matrix) {
-        self.inner
-            .apply_homogeneous_transform_from_col(start_col, transform);
     }
 
     /// Get a reference to the underlying `Matrix` (for interop with `draw_lines` etc.)

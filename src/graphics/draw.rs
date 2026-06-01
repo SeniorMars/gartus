@@ -234,22 +234,21 @@ impl Canvas {
     /// # Panics
     /// Panics if the polygon matrix does not contain a multiple of 3 points.
     pub fn draw_polygons(&mut self, polygons: &PolygonMatrix) {
+        let data = polygons.as_matrix().data();
         assert!(
-            polygons.cols().is_multiple_of(3),
+            data.len().is_multiple_of(12),
             "polygon matrix must contain multiples of 3 points"
         );
 
-        for (p0, p1, p2) in polygons.iter_triangles() {
-            let ax = p1[0] - p0[0];
-            let ay = p1[1] - p0[1];
-            let bx = p2[0] - p0[0];
-            let by = p2[1] - p0[1];
-            let normal_z = ax * by - ay * bx;
-
-            if normal_z > 0.0 {
-                self.draw_line(self.line, p0[0], p0[1], p1[0], p1[1]);
-                self.draw_line(self.line, p1[0], p1[1], p2[0], p2[1]);
-                self.draw_line(self.line, p2[0], p2[1], p0[0], p0[1]);
+        // Loop over raw f64 data; fixed chunk[N] offsets
+        // Triangle layout: [x0,y0,z0,w0, x1,y1,z1,w1, x2,y2,z2,w2]
+        // n⃗ · v⃗ = nz = (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0)   (v⃗ = <0,0,1>)
+        for c in data.chunks_exact(12) {
+            let vis = (c[4] - c[0]) * (c[9] - c[1]) - (c[5] - c[1]) * (c[8] - c[0]) > 0.0;
+            if vis {
+                self.draw_line(self.line, c[0], c[1], c[4], c[5]);
+                self.draw_line(self.line, c[4], c[5], c[8], c[9]);
+                self.draw_line(self.line, c[8], c[9], c[0], c[1]);
             }
         }
     }

@@ -36,6 +36,11 @@ impl PolygonMatrix {
         }
     }
 
+    /// Clears all points from the matrix without deallocating memory.
+    pub fn clear(&mut self) {
+        self.inner.truncate_cols(0);
+    }
+
     /// Number of points (columns) in this polygon matrix.
     #[must_use]
     pub fn cols(&self) -> usize {
@@ -214,13 +219,6 @@ impl PolygonMatrix {
         Self {
             inner: transform.mult_matrix(&self.inner),
         }
-    }
-
-    /// Apply a 4x4 transformation matrix in place to points starting at `start_col`.
-    #[cfg(feature = "old_parser")]
-    pub(crate) fn apply_from_col_mut(&mut self, start_col: usize, transform: &Matrix) {
-        self.inner
-            .apply_homogeneous_transform_from_col(start_col, transform);
     }
 
     /// Get a reference to the underlying `Matrix`.
