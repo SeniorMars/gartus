@@ -2,9 +2,10 @@ use std::{
     error::Error,
     fmt, fs,
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
@@ -16,6 +17,7 @@ type Point3 = (f64, f64, f64);
 type Triangle = [Point3; 3];
 
 const MESH_TRIANGLE_BATCH: usize = 4096;
+static TEMP_PPM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Summary of triangles imported from a mesh file.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,6 +129,10 @@ pub fn add_mesh(file_name: &str, polygons: &mut PolygonMatrix) -> MeshResult<Mes
             ));
         }
     };
+
+    if ext == "stl" && is_binary_stl(path)? {
+        return Err(MeshError::at_path(path, "unsupported binary STL"));
+    }
 
     let file = File::open(path)
         .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
@@ -251,6 +257,32 @@ fn parse_obj_vertex_index(
     }
 
     usize::try_from(resolved).map_err(|_| MeshError::new("OBJ face index overflowed usize"))
+}
+
+fn is_binary_stl(path: &Path) -> MeshResult<bool> {
+    let mut file = File::open(path)
+        .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|err| MeshError::at_path(path, format!("could not stat file: {err}")))?;
+    let mut header = [0_u8; 84];
+    let bytes_read = file
+        .read(&mut header)
+        .map_err(|err| MeshError::at_path(path, format!("could not read STL header: {err}")))?;
+
+    if header[..bytes_read].contains(&0) {
+        return Ok(true);
+    }
+
+    if bytes_read == header.len() {
+        let triangle_count = u32::from_le_bytes([header[80], header[81], header[82], header[83]]);
+        let expected_len = 84_u64 + u64::from(triangle_count) * 50;
+        if expected_len == metadata.len() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn parse_stl<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()> {
@@ -413,7 +445,11 @@ fn temp_ppm_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
         .file_stem()
         .and_then(|stem| stem.to_str())
         .ok_or("Invalid file name")?;
-    Ok(std::env::temp_dir().join(format!("gartus-ppmify-{stem}-{}.ppm", std::process::id())))
+    let counter = TEMP_PPM_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Ok(std::env::temp_dir().join(format!(
+        "gartus-ppmify-{stem}-{}-{counter}.ppm",
+        std::process::id()
+    )))
 }
 
 fn dimension_glitch(canvas: &Canvas) -> Canvas {
@@ -464,6 +500,19 @@ fn scale_channel(value: u16, maxval: u16) -> Result<u8, Box<dyn Error>> {
     )
 }
 
+fn consume_p6_separator(buffer: &[u8], cursor: &mut usize) -> Result<(), Box<dyn Error>> {
+    if *cursor >= buffer.len() || !buffer[*cursor].is_ascii_whitespace() {
+        return Err("Invalid PPM file: missing binary data separator".into());
+    }
+
+    let separator = buffer[*cursor];
+    *cursor += 1;
+    if separator == b'\r' && *cursor < buffer.len() && buffer[*cursor] == b'\n' {
+        *cursor += 1;
+    }
+    Ok(())
+}
+
 fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
     let buffer = fs::read(path)?;
     let mut cursor = 0;
@@ -479,8 +528,8 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
         .ok_or("Invalid PPM file: missing maxval")?
         .parse::<u16>()?;
 
-    if maxval == 0 || maxval > 255 {
-        return Err(format!("unsupported PPM maxval {maxval}; only 1..=255 is supported").into());
+    if maxval == 0 {
+        return Err("unsupported PPM maxval 0; maxval must be 1..=65535".into());
     }
 
     let pixel_count = u64::from(width) * u64::from(height);
@@ -508,13 +557,12 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
             }
         }
         "P6" => {
-            if cursor >= buffer.len() || !buffer[cursor].is_ascii_whitespace() {
-                return Err("Invalid PPM file: missing binary data separator".into());
-            }
-            cursor += 1;
+            consume_p6_separator(&buffer, &mut cursor)?;
 
+            let bytes_per_sample = if maxval < 256 { 1 } else { 2 };
             let needed = pixel_count
                 .checked_mul(3)
+                .and_then(|count| count.checked_mul(bytes_per_sample))
                 .ok_or("PPM image data is too large")?;
             if buffer.len().saturating_sub(cursor) < needed {
                 return Err(format!(
@@ -524,12 +572,25 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
                 .into());
             }
 
-            for chunk in buffer[cursor..cursor + needed].chunks_exact(3) {
-                pixels.push(Rgb::new(
-                    scale_channel(u16::from(chunk[0]), maxval)?,
-                    scale_channel(u16::from(chunk[1]), maxval)?,
-                    scale_channel(u16::from(chunk[2]), maxval)?,
-                ));
+            if bytes_per_sample == 1 {
+                for chunk in buffer[cursor..cursor + needed].chunks_exact(3) {
+                    pixels.push(Rgb::new(
+                        scale_channel(u16::from(chunk[0]), maxval)?,
+                        scale_channel(u16::from(chunk[1]), maxval)?,
+                        scale_channel(u16::from(chunk[2]), maxval)?,
+                    ));
+                }
+            } else {
+                for chunk in buffer[cursor..cursor + needed].chunks_exact(6) {
+                    let red = u16::from_be_bytes([chunk[0], chunk[1]]);
+                    let green = u16::from_be_bytes([chunk[2], chunk[3]]);
+                    let blue = u16::from_be_bytes([chunk[4], chunk[5]]);
+                    pixels.push(Rgb::new(
+                        scale_channel(red, maxval)?,
+                        scale_channel(green, maxval)?,
+                        scale_channel(blue, maxval)?,
+                    ));
+                }
             }
         }
         _ => return Err(format!("Invalid PPM file: unsupported magic {magic}").into()),
@@ -542,7 +603,7 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_mesh, meshify, parse_obj, parse_stl, ppmify};
+    use super::{add_mesh, meshify, parse_obj, parse_stl, ppmify, temp_ppm_path};
     use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
     use crate::graphics::colors::Rgb;
     use std::fs;
@@ -589,6 +650,38 @@ mod tests {
 
         assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3)]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parses_p6_with_crlf_header_separator() {
+        let path = temp_file("crlf", "ppm");
+        fs::write(&path, b"P6\r\n1 1\r\n255\r\n\x01\x02\x03").expect("write temp ppm");
+
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+
+        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3)]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parses_p6_sixteen_bit_samples() {
+        let path = temp_file("sixteen-bit", "ppm");
+        fs::write(&path, b"P6\n1 1\n1023\n\x03\xff\x02\x00\x00\x00").expect("write temp ppm");
+
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+
+        assert_eq!(canvas.pixels(), &[Rgb::new(255, 128, 0)]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn temp_ppm_paths_are_unique_per_call() {
+        let path = Path::new("/tmp/source.png");
+
+        let first = temp_ppm_path(path).expect("temp path");
+        let second = temp_ppm_path(path).expect("temp path");
+
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -897,6 +990,20 @@ endsolid bad
         let error = meshify(path.to_str().expect("utf8 path")).expect_err("mesh should fail");
 
         assert!(error.to_string().contains("unsupported mesh extension"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_binary_stl_with_clear_error() {
+        let path = temp_file("binary", "stl");
+        let mut bytes = vec![b' '; 80];
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&[0_u8; 50]);
+        fs::write(&path, bytes).expect("write binary stl");
+
+        let error = meshify(path.to_str().expect("utf8 path")).expect_err("mesh should fail");
+
+        assert!(error.to_string().contains("unsupported binary STL"));
         let _ = fs::remove_file(path);
     }
 

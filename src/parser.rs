@@ -455,7 +455,10 @@ impl Parser {
             "include" => self.parse_include(Self::next_arg_line(iter, cline_num, command)?),
             "save" => self.save(Self::next_arg_line(iter, cline_num, command)?),
             "display" => self.display(),
+            #[cfg(feature = "filters")]
             "filter" => self.parse_filter(Self::next_arg_line(iter, cline_num, command)?),
+            #[cfg(not(feature = "filters"))]
+            "filter" => Self::parse_filter(Self::next_arg_line(iter, cline_num, command)?),
             _ => Err(ParserError::CommandError(cline_num, command.to_string())),
         }
     }
@@ -671,6 +674,7 @@ impl Parser {
         &self.trans_matrix
     }
 
+    #[cfg(feature = "filters")]
     fn parse_filter(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
         let args: Vec<&str> = line.split_whitespace().collect();
@@ -742,6 +746,15 @@ impl Parser {
             }
             _ => Err(ParserError::ArgumentError(line_num, line.to_string())),
         }
+    }
+
+    #[cfg(not(feature = "filters"))]
+    fn parse_filter(line: (usize, &str)) -> Result<(), ParserError> {
+        let (line_num, line) = line;
+        Err(ParserError::ArgumentError(
+            line_num,
+            format!("filter command requires the `filters` feature: {line}"),
+        ))
     }
 
     fn parse_reset(&mut self) {
@@ -911,6 +924,7 @@ mod tests {
         std::env::temp_dir().join(format!("gartus-parser-{name}-{}.cg", std::process::id()))
     }
 
+    #[cfg(feature = "external")]
     fn temp_file_with_extension(name: &str, extension: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "gartus-parser-{name}-{}.{}",
@@ -1144,6 +1158,19 @@ mod tests {
 
         assert!(matches!(error, ParserError::MeshError(1, _, _)));
         assert!(error.to_string().contains("external"));
+    }
+
+    #[cfg(not(feature = "filters"))]
+    #[test]
+    fn filter_command_reports_missing_filters_feature() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+
+        let error = parser
+            .parse_string("filter\ngrayscale")
+            .expect_err("filter should require filters feature");
+
+        assert!(matches!(error, ParserError::ArgumentError(1, _)));
+        assert!(error.to_string().contains("filters"));
     }
 
     #[test]

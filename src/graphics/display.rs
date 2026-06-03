@@ -250,6 +250,9 @@ impl Canvas {
     #[must_use]
     pub fn normalize_coords(&self, x: i64, y: i64) -> Option<(u32, u32)> {
         let (width, height) = (i64::from(self.width), i64::from(self.height));
+        if width == 0 || height == 0 {
+            return None;
+        }
 
         let (x, y) = if self.wrapped {
             (x.rem_euclid(width), y.rem_euclid(height))
@@ -721,5 +724,15 @@ mod tests {
         assert!((mapped.line_width() - 3.0).abs() < f64::EPSILON);
         assert!(mapped.upper_left_origin);
         assert!(!mapped.wrapped);
+    }
+
+    #[test]
+    fn empty_canvas_coordinates_are_clipped_without_panic() {
+        let mut canvas = Canvas::default();
+
+        assert_eq!(canvas.normalize_coords(0, 0), None);
+        assert_eq!(canvas.get_pixel(0, 0), None);
+        canvas.plot(&Rgb::WHITE, 0, 0);
+        assert!(canvas.is_empty());
     }
 }

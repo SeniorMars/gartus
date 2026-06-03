@@ -290,9 +290,9 @@ impl EdgeMatrix {
     /// Adds a triangle connecting the three given vertices. (Wireframe)
     pub fn add_triangle(&mut self, p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) {
         let mut data = Vec::with_capacity(24);
-        Self::extend_edge_data(&mut data, p0.0, p0.1, p0.2, p1.0, p1.1, p0.2);
-        Self::extend_edge_data(&mut data, p1.0, p1.1, p1.2, p2.0, p2.1, p1.2);
-        Self::extend_edge_data(&mut data, p2.0, p2.1, p2.2, p0.0, p0.1, p2.2);
+        Self::extend_edge_data(&mut data, p0.0, p0.1, p0.2, p1.0, p1.1, p1.2);
+        Self::extend_edge_data(&mut data, p1.0, p1.1, p1.2, p2.0, p2.1, p2.2);
+        Self::extend_edge_data(&mut data, p2.0, p2.1, p2.2, p0.0, p0.1, p0.2);
         self.append_homogeneous_points(&data);
     }
 }
@@ -347,6 +347,20 @@ mod tests {
         assert_eq!(
             matrix.as_matrix().data(),
             &[1.0, 2.0, 5.0, 1.0, 3.0, 4.0, 5.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn add_triangle_preserves_endpoint_z_coordinates() {
+        let mut matrix = EdgeMatrix::new();
+        matrix.add_triangle((1.0, 2.0, 3.0), (4.0, 5.0, 6.0), (7.0, 8.0, 9.0));
+
+        assert_eq!(
+            matrix.as_matrix().data(),
+            &[
+                1.0, 2.0, 3.0, 1.0, 4.0, 5.0, 6.0, 1.0, 4.0, 5.0, 6.0, 1.0, 7.0, 8.0, 9.0, 1.0,
+                7.0, 8.0, 9.0, 1.0, 1.0, 2.0, 3.0, 1.0
+            ]
         );
     }
 }

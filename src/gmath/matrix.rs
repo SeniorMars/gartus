@@ -450,10 +450,13 @@ impl Matrix {
         Some((q_mat, r_mat))
     }
 
-    /// Returns the eigenvalues of a squared [`Matrix`] using the QR algorithm.
+    /// Returns the real eigenvalues of a symmetric squared [`Matrix`] using the QR algorithm.
+    ///
+    /// Returns `None` for non-square or non-symmetric matrices. This method does not model
+    /// complex eigenvalues.
     #[must_use]
     pub fn eigenvalues(&self) -> Option<Vec<f64>> {
-        if self.rows != self.cols {
+        if self.rows != self.cols || !self.is_symmetric() {
             return None;
         }
         let n = self.rows;
@@ -1132,6 +1135,13 @@ mod tests {
         let ev = a.eigenvalues().expect("symmetric matrix");
         assert!((ev[0] - 3.0).abs() < 1e-10);
         assert!((ev[1] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn eigenvalues_rejects_non_symmetric_matrix() {
+        let rotation = Matrix::new(2, 2, vec![0.0, 1.0, -1.0, 0.0]);
+
+        assert!(rotation.eigenvalues().is_none());
     }
 
     #[test]

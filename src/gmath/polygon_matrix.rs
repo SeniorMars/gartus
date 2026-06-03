@@ -286,8 +286,12 @@ impl PolygonMatrix {
     /// Adds a sphere centered at `(cx, cy, cz)` with given `radius` and `steps` precision.
     ///
     /// Implemented as triangles with outward-facing normals for backface culling.
+    ///
+    /// # Panics
+    /// Panics if `steps` is zero.
     #[allow(clippy::cast_precision_loss)]
     pub fn add_sphere(&mut self, center: (f64, f64, f64), radius: f64, steps: usize) {
+        assert!(steps > 0, "sphere steps must be positive");
         let step_by = 1.0 / steps as f64;
         let mut latitudes = Vec::with_capacity(steps + 1);
         for j in 0..=steps {
@@ -346,6 +350,9 @@ impl PolygonMatrix {
     /// Adds a torus centered at `(cx, cy, cz)`.
     ///
     /// Implemented as triangles with outward-facing normals for backface culling.
+    ///
+    /// # Panics
+    /// Panics if `steps` is zero.
     #[allow(
         clippy::cast_precision_loss,
         clippy::many_single_char_names,
@@ -359,6 +366,7 @@ impl PolygonMatrix {
         radius_big: f64,
         steps: usize,
     ) {
+        assert!(steps > 0, "torus steps must be positive");
         let step_by = 1.0 / steps as f64;
         let mut inner_circle = Vec::with_capacity(steps);
         for j in 0..steps {
@@ -417,8 +425,12 @@ impl PolygonMatrix {
     /// # Arguments
     /// * `profile` - A list of (x, y) coordinates defining the 2D shape.
     /// * `steps` - Number of rotation steps around the y-axis.
+    ///
+    /// # Panics
+    /// Panics if `steps` is zero.
     #[allow(clippy::cast_precision_loss)]
     pub fn add_revolution_surface(&mut self, profile: &[(f64, f64)], steps: usize) {
+        assert!(steps > 0, "revolution surface steps must be positive");
         if profile.len() < 2 {
             return;
         }
@@ -622,8 +634,12 @@ impl PolygonMatrix {
     }
 
     /// Adds a cone with base center at `(x, y, z)`, given `radius`, `height`, and `steps` precision.
+    ///
+    /// # Panics
+    /// Panics if `steps` is zero.
     #[allow(clippy::cast_precision_loss)]
     pub fn add_cone(&mut self, (x, y, z): (f64, f64, f64), radius: f64, height: f64, steps: usize) {
+        assert!(steps > 0, "cone steps must be positive");
         let theta_step = 2.0 * PI / steps as f64;
         let top = (x, y, z + height);
         let center = (x, y, z);
@@ -674,8 +690,12 @@ impl PolygonMatrix {
     /// # Arguments
     /// * `controls` - A 4x4 grid of (x, y, z) control points.
     /// * `steps` - Number of steps in u and v directions.
+    ///
+    /// # Panics
+    /// Panics if `steps` is zero.
     #[allow(clippy::cast_precision_loss)]
     pub fn add_bezier_surface(&mut self, controls: [[(f64, f64, f64); 4]; 4], steps: usize) {
+        assert!(steps > 0, "bezier surface steps must be positive");
         let step_by = 1.0 / steps as f64;
 
         let mut data = Vec::with_capacity(steps * steps * 24);
@@ -848,6 +868,36 @@ mod tests {
         test.add_revolution_surface(&profile, 4);
         // 4 steps * 1 quad * 2 triangles/quad * 3 points = 24 columns
         assert_eq!(test.cols(), 24);
+    }
+
+    #[test]
+    #[should_panic(expected = "sphere steps must be positive")]
+    fn add_sphere_rejects_zero_steps() {
+        PolygonMatrix::new().add_sphere((0.0, 0.0, 0.0), 1.0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "torus steps must be positive")]
+    fn add_torus_rejects_zero_steps() {
+        PolygonMatrix::new().add_torus((0.0, 0.0, 0.0), 1.0, 2.0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "cone steps must be positive")]
+    fn add_cone_rejects_zero_steps() {
+        PolygonMatrix::new().add_cone((0.0, 0.0, 0.0), 1.0, 2.0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "revolution surface steps must be positive")]
+    fn add_revolution_surface_rejects_zero_steps() {
+        PolygonMatrix::new().add_revolution_surface(&[(1.0, 0.0), (1.0, 1.0)], 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "bezier surface steps must be positive")]
+    fn add_bezier_surface_rejects_zero_steps() {
+        PolygonMatrix::new().add_bezier_surface([[(0.0, 0.0, 0.0); 4]; 4], 0);
     }
 
     #[test]

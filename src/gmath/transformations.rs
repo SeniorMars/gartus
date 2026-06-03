@@ -250,7 +250,17 @@ impl Matrix {
     /// use gartus::gmath::matrix::Matrix;
     /// let ortho_matrix = Matrix::orthographic_projection(-1.0, 1.0, -1.0, 1.0, 0.1, 100.0);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if any bound is non-finite, or if any axis range has identical endpoints.
     pub fn orthographic_projection(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64) -> Self {
+        assert!(
+            [left, right, bottom, top, near, far].iter().all(|value| value.is_finite()),
+            "orthographic projection bounds must be finite"
+        );
+        assert!((right - left).abs() > f64::EPSILON, "orthographic projection left and right must differ");
+        assert!((top - bottom).abs() > f64::EPSILON, "orthographic projection top and bottom must differ");
+        assert!((far - near).abs() > f64::EPSILON, "orthographic projection near and far must differ");
         Matrix::new(
             4,
             4,
@@ -291,7 +301,19 @@ impl Matrix {
     /// use crate::gartus::gmath::matrix::Matrix;
     /// let perspective_matrix = Matrix::perspective_projection(45.0, 16.0 / 9.0, 0.1, 100.0);
     /// ```
+    ///
+    /// # Panics
+    /// Panics if any parameter is non-finite, if the field of view is not between 0 and 180
+    /// degrees, if the aspect ratio or near plane is not positive, or if `far <= near`.
     pub fn perspective_projection(theta: f64, aspect_ratio: f64, near: f64, far: f64) -> Self {
+        assert!(
+            [theta, aspect_ratio, near, far].iter().all(|value| value.is_finite()),
+            "perspective projection parameters must be finite"
+        );
+        assert!(theta > 0.0 && theta < 180.0, "perspective projection field of view must be between 0 and 180 degrees");
+        assert!(aspect_ratio > 0.0, "perspective projection aspect ratio must be positive");
+        assert!(near > 0.0, "perspective projection near plane must be positive");
+        assert!(far > near, "perspective projection far plane must be greater than near plane");
         let angle = theta.to_radians();
         Matrix::new(
             4,
@@ -805,6 +827,26 @@ mod tests {
             "corner.z should be -1, got {}",
             corner[2]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "orthographic projection left and right must differ")]
+    fn orthographic_projection_rejects_degenerate_width() {
+        let _ = Matrix::orthographic_projection(1.0, 1.0, -1.0, 1.0, 0.1, 100.0);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "perspective projection field of view must be between 0 and 180 degrees"
+    )]
+    fn perspective_projection_rejects_degenerate_fov() {
+        let _ = Matrix::perspective_projection(180.0, 1.0, 0.1, 100.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "perspective projection far plane must be greater than near plane")]
+    fn perspective_projection_rejects_reversed_depth_range() {
+        let _ = Matrix::perspective_projection(45.0, 1.0, 10.0, 1.0);
     }
 
     // 8. viewport center mapping: NDC (0,0) -> screen center (400, 300)
