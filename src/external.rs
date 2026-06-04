@@ -8,7 +8,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
+use crate::gmath::{
+    matrix::Matrix,
+    polygon_matrix::{Bounds3, PolygonMatrix},
+};
 use crate::graphics::{colors::Rgb, display::Canvas};
 
 type ExternalResult<T> = Result<T, Box<dyn Error>>;
@@ -26,6 +29,50 @@ pub struct MeshStats {
     pub triangles: usize,
     /// Axis-aligned bounds of the imported triangles, or `None` for an empty mesh.
     pub bounds: Option<Bounds3>,
+}
+
+/// Source up-axis convention for imported mesh files.
+///
+/// Gartus examples treat `Y` as the vertical axis and `Z` as depth. Many OBJ
+/// files downloaded from modeling tools are `Z`-up, so they need an explicit
+/// axis conversion before they are projected or drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeshUpAxis {
+    /// Mesh vertices already use Gartus' `Y`-up convention.
+    Y,
+    /// Mesh vertices use `Z` as vertical; convert `Z` into Gartus' `Y`.
+    Z,
+}
+
+impl MeshUpAxis {
+    /// Returns the transform that converts this source convention to Gartus `Y`-up space.
+    pub fn to_y_up_transform(self) -> Matrix {
+        match self {
+            Self::Y => Matrix::identity_matrix(4),
+            Self::Z => Matrix::rotate_x(-90.0),
+        }
+    }
+}
+
+/// Builds a transform that centers, orients, and uniformly scales an imported mesh.
+///
+/// This leaves [`meshify`] raw and predictable while giving examples and callers
+/// one place to handle common OBJ/STL up-axis differences.
+///
+/// # Panics
+/// Panics if `mesh` is empty.
+pub fn normalize_mesh_transform(
+    mesh: &PolygonMatrix,
+    target_size: f64,
+    source_up_axis: MeshUpAxis,
+) -> Matrix {
+    let bounds = mesh.bounds().expect("mesh should have bounds");
+    let center = bounds_center(bounds);
+    let span = bounds_span(bounds);
+    let scale = target_size / span.max(1e-9);
+    Matrix::scale(scale, scale, scale)
+        * source_up_axis.to_y_up_transform()
+        * Matrix::translate(-center.0, -center.1, -center.2)
 }
 
 /// Error returned while loading OBJ or ASCII STL meshes.
@@ -91,6 +138,21 @@ pub fn meshify(file_name: &str) -> MeshResult<PolygonMatrix> {
     let mut polygons = PolygonMatrix::new();
     add_mesh(file_name, &mut polygons)?;
     Ok(polygons)
+}
+
+fn bounds_center(bounds: Bounds3) -> Point3 {
+    (
+        (bounds.min.0 + bounds.max.0) * 0.5,
+        (bounds.min.1 + bounds.max.1) * 0.5,
+        (bounds.min.2 + bounds.max.2) * 0.5,
+    )
+}
+
+fn bounds_span(bounds: Bounds3) -> f64 {
+    let x = bounds.max.0 - bounds.min.0;
+    let y = bounds.max.1 - bounds.min.1;
+    let z = bounds.max.2 - bounds.min.2;
+    x.max(y).max(z)
 }
 
 /// Appends an OBJ or ASCII STL mesh file to an existing [`PolygonMatrix`].
@@ -603,7 +665,10 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_mesh, meshify, parse_obj, parse_stl, ppmify, temp_ppm_path};
+    use super::{
+        MeshUpAxis, add_mesh, meshify, normalize_mesh_transform, parse_obj, parse_stl, ppmify,
+        temp_ppm_path,
+    };
     use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
     use crate::graphics::colors::Rgb;
     use std::fs;
@@ -952,6 +1017,37 @@ endsolid bad
                 max: (1.0, 1.0, 1.0),
             })
         );
+    }
+
+    #[test]
+    fn mesh_up_axis_z_converts_source_z_height_to_gartus_y() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((0.0, 0.0, 0.0), (0.0, 0.0, 2.0), (1.0, 0.0, 0.0));
+
+        let transformed = polygons.apply(&MeshUpAxis::Z.to_y_up_transform());
+        let bounds = transformed.bounds().expect("converted mesh bounds");
+
+        assert!((bounds.min.0 - 0.0).abs() < 1e-9);
+        assert!((bounds.min.1 - 0.0).abs() < 1e-9);
+        assert!(bounds.min.2.abs() < 1e-9);
+        assert!((bounds.max.0 - 1.0).abs() < 1e-9);
+        assert!((bounds.max.1 - 2.0).abs() < 1e-9);
+        assert!(bounds.max.2.abs() < 1e-9);
+    }
+
+    #[test]
+    fn normalize_mesh_transform_centers_scales_and_orients_z_up_mesh() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((0.0, 0.0, 0.0), (0.0, 0.0, 2.0), (4.0, 0.0, 0.0));
+
+        let transformed =
+            polygons.apply(&normalize_mesh_transform(&polygons, 200.0, MeshUpAxis::Z));
+        let bounds = transformed.bounds().expect("normalized mesh bounds");
+
+        assert!((bounds.min.0 + 100.0).abs() < 1e-9);
+        assert!((bounds.max.0 - 100.0).abs() < 1e-9);
+        assert!((bounds.min.1 + 50.0).abs() < 1e-9);
+        assert!((bounds.max.1 - 50.0).abs() < 1e-9);
     }
 
     #[test]

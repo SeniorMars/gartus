@@ -49,16 +49,17 @@ pub fn main() {
     img.set_line_pixel(Rgb::new(191, 70, 61));
     img.display().unwrap();
 
-    let back_translation = Matrix::translate(400.0, 400.0, 0.0);
+    let back_translation = Matrix::translate(400.0, 410.0, 0.0);
     let mut recorder = FrameRecorder::new("anim", "geass").with_delay(2);
     for i in 0..180 {
-        let transform = Matrix::rotate_y(i as f64).mult_matrix(&back_translation);
+        let transform = back_translation.mult_matrix(&Matrix::rotate_y(i as f64 * 2.0));
         recorder
             .capture_drawn(&img, &base, &transform)
             .expect("Could not save frame");
     }
     // img.display().expect("Could not display image");
-    let file_name = "./geass.gif";
+    std::fs::create_dir_all("final").expect("could not create final output directory");
+    let file_name = "final/geass.gif";
     utils::animation(&recorder, file_name).expect("Could not make animation");
     // utils::view_animation(file_name)
 }

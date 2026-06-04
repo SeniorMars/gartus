@@ -112,27 +112,28 @@ impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParserError::Io(err) => write!(f, "I/O error: {err}"),
-            ParserError::MatrixError(line_num, line, matrix_type) => write!(
-                f,
-                "There was an error creating the {matrix_type} matrix with line: {line}:{line_num}"
-            ),
+            ParserError::MatrixError(line_num, line, matrix_type) => {
+                write!(
+                    f,
+                    "line {}: invalid {matrix_type} matrix arguments\n  {line}",
+                    line_num + 1
+                )
+            }
             ParserError::CommandError(line_num, line) => {
-                write!(f, "There was an unknown command: {line}:{line_num}")
+                write!(f, "line {}: unknown command `{line}`", line_num + 1)
             }
             ParserError::MeshError(line_num, file_name, err) => {
                 write!(
                     f,
-                    "Could not load mesh `{file_name}` at line {line_num}: {err}"
+                    "line {}: could not load mesh `{file_name}`\n  {err}",
+                    line_num + 1
                 )
             }
             ParserError::ArgumentError(line_num, line) => {
-                write!(
-                    f,
-                    "Read spec. There was an error parsing the arguments in line: {line}:{line_num}"
-                )
+                write!(f, "line {}: invalid arguments\n  {line}", line_num + 1)
             }
             ParserError::StackUnderflow(line_num) => {
-                write!(f, "Stack underflow at line {line_num}")
+                write!(f, "line {}: stack underflow", line_num + 1)
             }
         }
     }
@@ -158,7 +159,7 @@ impl Parser {
     /// use crate::gartus::prelude::{Rgb};
     /// use crate::gartus::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
-    /// let porygon = Parser::new("tests/porygon_script", 512, 512, &purplish);
+    /// let porygon = Parser::new("scripts/porygon_script", 512, 512, &purplish);
     /// ```
     #[must_use]
     pub fn new(file_name: &str, width: u32, height: u32, color: &Rgb) -> Self {
@@ -193,7 +194,7 @@ impl Parser {
     /// use crate::gartus::parser::Parser;
     /// let purplish = Rgb::new(17, 46, 81);
     /// let outline = Rgb::new(235, 219, 178);
-    /// let porygon = Parser::new_with_bg("./tests/porygon_script", 512, 512, &purplish, &outline);
+    /// let porygon = Parser::new_with_bg("./scripts/porygon_script", 512, 512, &purplish, &outline);
     /// ```
     #[must_use]
     pub fn new_with_bg(file_name: &str, width: u32, height: u32, color: &Rgb, bg: &Rgb) -> Self {
@@ -372,16 +373,52 @@ impl Parser {
         expected: usize,
         line_num: usize,
     ) -> Result<Vec<f64>, ParserError> {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != expected {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
         let mut res = Vec::with_capacity(expected);
-        for p in parts {
+        for p in line.split_whitespace() {
+            if res.len() == expected {
+                return Err(ParserError::ArgumentError(line_num, line.to_string()));
+            }
             let val = self.finite_value(p, line_num, line)?;
             res.push(val);
         }
+        if res.len() != expected {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        }
         Ok(res)
+    }
+
+    fn parse_one_token(line: &str, line_num: usize) -> Result<&str, ParserError> {
+        let mut parts = line.split_whitespace();
+        let Some(first) = parts.next() else {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        };
+        if parts.next().is_some() {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        }
+        Ok(first)
+    }
+
+    fn parse_two_tokens(line: &str, line_num: usize) -> Result<(&str, &str), ParserError> {
+        let mut parts = line.split_whitespace();
+        let (Some(first), Some(second)) = (parts.next(), parts.next()) else {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        };
+        if parts.next().is_some() {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        }
+        Ok((first, second))
+    }
+
+    fn parse_three_tokens(line: &str, line_num: usize) -> Result<(&str, &str, &str), ParserError> {
+        let mut parts = line.split_whitespace();
+        let (Some(first), Some(second), Some(third)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        };
+        if parts.next().is_some() {
+            return Err(ParserError::ArgumentError(line_num, line.to_string()));
+        }
+        Ok((first, second, third))
     }
 
     fn handle_command(
@@ -409,27 +446,33 @@ impl Parser {
                 })?;
 
                 let coords_line = Self::next_arg_line(iter, cline_num, "beziern coords")?;
-                let mut coords = Vec::new();
+                let expected_coords = (n_degree + 1) * 2;
+                let mut coords = Vec::with_capacity(expected_coords);
                 for p in coords_line.1.split_whitespace() {
                     let val = self.finite_value(p, coords_line.0, coords_line.1)?;
                     coords.push(val);
                 }
 
-                if coords.len() == (n_degree + 1) * 2 {
+                if coords.len() == expected_coords {
                     let mut x_points = Vec::with_capacity(n_degree + 1);
                     let mut y_points = Vec::with_capacity(n_degree + 1);
                     for i in (0..coords.len()).step_by(2) {
                         x_points.push(coords[i]);
                         y_points.push(coords[i + 1]);
                     }
-                    let mut tmp = EdgeMatrix::new();
-                    tmp.add_beziern(n_degree, &x_points, &y_points);
-                    self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
+                    self.tmp_edge.clear();
+                    self.tmp_edge.add_beziern(n_degree, &x_points, &y_points);
+                    self.draw_tmp_edge_transformed();
                     Ok(())
                 } else {
                     Err(ParserError::ArgumentError(
                         coords_line.0,
-                        coords_line.1.to_string(),
+                        format!(
+                            "beziern degree {n_degree} expects {expected_coords} coordinate values ({} control points), got {}:\n  {}",
+                            n_degree + 1,
+                            coords.len(),
+                            coords_line.1.trim()
+                        ),
                     ))
                 }
             }
@@ -465,24 +508,17 @@ impl Parser {
 
     fn parse_set(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 2 {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
-        let name = parts[0].to_string();
-        let val = self.finite_value(parts[1], line_num, line)?;
+        let (name, value) = Self::parse_two_tokens(line, line_num)?;
+        let val = self.finite_value(value, line_num, line)?;
+        let name = name.to_string();
         self.symbols.insert(name, val);
         Ok(())
     }
 
     fn parse_rotate(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 2 {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
-        let axis = parts[0];
-        let theta = self.finite_value(parts[1], line_num, line)?;
+        let (axis, theta) = Self::parse_two_tokens(line, line_num)?;
+        let theta = self.finite_value(theta, line_num, line)?;
 
         let rotate_matrix = match axis {
             "x" => Matrix::rotate_x(theta),
@@ -502,11 +538,7 @@ impl Parser {
 
     fn parse_reflect(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let args: Vec<&str> = line.split_whitespace().collect();
-        if args.len() != 1 {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
-        let axis = args[0];
+        let axis = Self::parse_one_token(line, line_num)?;
         let reflect_matrix = match axis {
             "x" => Matrix::reflect_xz(),
             "y" => Matrix::reflect_yz(),
@@ -525,13 +557,9 @@ impl Parser {
 
     fn parse_shear(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let args: Vec<&str> = line.split_whitespace().collect();
-        if args.len() != 3 {
-            return Err(ParserError::ArgumentError(line_num, line.to_string()));
-        }
-        let axis = args[0];
-        let sh_factor_one = self.finite_value(args[1], line_num, line)?;
-        let sh_factor_two = self.finite_value(args[2], line_num, line)?;
+        let (axis, sh_factor_one, sh_factor_two) = Self::parse_three_tokens(line, line_num)?;
+        let sh_factor_one = self.finite_value(sh_factor_one, line_num, line)?;
+        let sh_factor_two = self.finite_value(sh_factor_two, line_num, line)?;
 
         let shear_matrix = match axis {
             "x" => Matrix::shearing_x(sh_factor_one, sh_factor_two),
@@ -551,16 +579,16 @@ impl Parser {
 
     fn parse_color(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let args: Vec<&str> = line.split_whitespace().collect();
-        match args.as_slice() {
-            [name] => match Rgb::name_to_const(&name.to_lowercase()) {
+        let mut args = line.split_whitespace();
+        match (args.next(), args.next(), args.next(), args.next()) {
+            (Some(name), None, None, None) => match Rgb::name_to_const(&name.to_lowercase()) {
                 Some(color) => {
                     self.canvas.line = color;
                     Ok(())
                 }
                 None => Err(ParserError::ArgumentError(line_num, line.to_string())),
             },
-            [r_s, g_s, b_s] => {
+            (Some(r_s), Some(g_s), Some(b_s), None) => {
                 let red = self.parse_u8_value(r_s, line_num, line)?;
                 let green = self.parse_u8_value(g_s, line_num, line)?;
                 let blue = self.parse_u8_value(b_s, line_num, line)?;
@@ -577,8 +605,7 @@ impl Parser {
         self.tmp_edge.clear();
         self.tmp_edge
             .add_circle(args[0], args[1], args[2], args[3], 0.001);
-        self.canvas
-            .draw_lines(&self.tmp_edge.apply(&self.trans_matrix));
+        self.draw_tmp_edge_transformed();
         Ok(())
     }
 
@@ -589,9 +616,9 @@ impl Parser {
         let p1 = (args[2], args[3]);
         let r0 = (args[4], args[5]);
         let r1 = (args[6], args[7]);
-        let mut tmp = EdgeMatrix::new();
-        tmp.add_hermite(p0, p1, r0, r1);
-        self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
+        self.tmp_edge.clear();
+        self.tmp_edge.add_hermite(p0, p1, r0, r1);
+        self.draw_tmp_edge_transformed();
         Ok(())
     }
 
@@ -602,9 +629,9 @@ impl Parser {
         let p1 = (args[2], args[3]);
         let p2 = (args[4], args[5]);
         let p3 = (args[6], args[7]);
-        let mut tmp = EdgeMatrix::new();
-        tmp.add_bezier3(p0, p1, p2, p3);
-        self.canvas.draw_lines(&tmp.apply(&self.trans_matrix));
+        self.tmp_edge.clear();
+        self.tmp_edge.add_bezier3(p0, p1, p2, p3);
+        self.draw_tmp_edge_transformed();
         Ok(())
     }
 
@@ -630,8 +657,7 @@ impl Parser {
         self.tmp_edge.clear();
         self.tmp_edge
             .push_edge(args[0], args[1], args[2], args[3], args[4], args[5]);
-        self.canvas
-            .draw_lines(&self.tmp_edge.apply(&self.trans_matrix));
+        self.draw_tmp_edge_transformed();
         Ok(())
     }
 
@@ -677,43 +703,43 @@ impl Parser {
     #[cfg(feature = "filters")]
     fn parse_filter(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line) = line;
-        let args: Vec<&str> = line.split_whitespace().collect();
+        let mut args = line.split_whitespace();
 
-        match args.len() {
-            2 => {
-                self.canvas = match args[0] {
+        match (args.next(), args.next(), args.next()) {
+            (Some(filter), Some(value), None) => {
+                self.canvas = match filter {
                     "solarize" => {
-                        let threshold = args[1]
+                        let threshold = value
                             .parse::<u8>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.solarize(threshold)
                     }
                     "black_and_white" => {
-                        let threshold = args[1]
+                        let threshold = value
                             .parse::<u8>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.black_and_white(threshold)
                     }
                     "brightness" => {
-                        let brightness = args[1]
+                        let brightness = value
                             .parse::<i16>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.adjust_brightness(brightness)
                     }
                     "posterize" => {
-                        let levels = args[1]
+                        let levels = value
                             .parse::<u8>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.posterize(levels)
                     }
                     "gaussian" => {
-                        let radius = args[1]
+                        let radius = value
                             .parse::<f32>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.gaussian_blur(radius)
                     }
                     "contrast" => {
-                        let constrast = args[1]
+                        let constrast = value
                             .parse::<f32>()
                             .map_err(|_| ParserError::ArgumentError(line_num, line.to_string()))?;
                         self.canvas.adjust_contrast(constrast)
@@ -722,8 +748,8 @@ impl Parser {
                 };
                 Ok(())
             }
-            1 => {
-                self.canvas = match args[0] {
+            (Some(filter), None, None) => {
+                self.canvas = match filter {
                     "grayscale" => self.canvas.grayscale(),
                     "sepia" => self.canvas.sepia(),
                     "reflect" => self.canvas.reflect(),
@@ -764,14 +790,23 @@ impl Parser {
         self.symbols.clear();
     }
 
+    fn draw_tmp_edge_transformed(&mut self) {
+        self.tmp_edge.apply_in_place(&self.trans_matrix);
+        self.canvas.draw_lines(&self.tmp_edge);
+    }
+
+    fn draw_tmp_polygon_transformed(&mut self) {
+        self.tmp_polygon.apply_in_place(&self.trans_matrix);
+        self.canvas.draw_polygons(&self.tmp_polygon);
+    }
+
     fn parse_box(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 6, line_num)?;
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_box((args[0], args[1], args[2]), args[3], args[4], args[5]);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -781,8 +816,7 @@ impl Parser {
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_sphere((args[0], args[1], args[2]), args[3], 24);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -792,8 +826,7 @@ impl Parser {
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_torus((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -803,8 +836,7 @@ impl Parser {
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_cylinder((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -814,8 +846,7 @@ impl Parser {
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_cone((args[0], args[1], args[2]), args[3], args[4], 24);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -825,8 +856,7 @@ impl Parser {
         self.tmp_polygon.clear();
         self.tmp_polygon
             .add_pyramid((args[0], args[1], args[2]), args[3], args[4]);
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -856,9 +886,9 @@ impl Parser {
             }
         }
 
-        let mut tmp = PolygonMatrix::new();
-        tmp.add_bezier_surface(controls, steps);
-        self.canvas.draw_polygons(&tmp.apply(&self.trans_matrix));
+        self.tmp_polygon.clear();
+        self.tmp_polygon.add_bezier_surface(controls, steps);
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -870,7 +900,8 @@ impl Parser {
         crate::external::add_mesh(path.to_string_lossy().as_ref(), &mut tmp).map_err(|err| {
             ParserError::MeshError(line_num, path.display().to_string(), err.to_string())
         })?;
-        self.canvas.draw_polygons(&tmp.apply(&self.trans_matrix));
+        tmp.apply_in_place(&self.trans_matrix);
+        self.canvas.draw_polygons(&tmp);
         Ok(())
     }
 
@@ -883,8 +914,7 @@ impl Parser {
             |err| ParserError::MeshError(line_num, path.display().to_string(), err.to_string()),
         )?;
         self.tmp_polygon.reverse_winding();
-        self.canvas
-            .draw_polygons(&self.tmp_polygon.apply(&self.trans_matrix));
+        self.draw_tmp_polygon_transformed();
         Ok(())
     }
 
@@ -965,6 +995,20 @@ mod tests {
 
         assert!(matches!(error, ParserError::ArgumentError(1, _)));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn beziern_coordinate_count_error_is_actionable() {
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        let error = parser
+            .parse_string("beziern\n5\n0 0 1 1 2 2 3 3 4 4 5 5 6 6")
+            .expect_err("wrong coordinate count should fail");
+
+        assert!(matches!(error, ParserError::ArgumentError(2, _)));
+        let message = error.to_string();
+        assert!(message.contains("line 3"));
+        assert!(message.contains("expects 12 coordinate values"));
+        assert!(message.contains("got 14"));
     }
 
     #[test]

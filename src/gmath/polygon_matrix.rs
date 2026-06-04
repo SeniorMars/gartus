@@ -171,6 +171,20 @@ impl PolygonMatrix {
         })
     }
 
+    /// Returns transformed triangle vertex triples without allocating a transformed `PolygonMatrix`.
+    pub fn transformed_triangles<'a>(
+        &'a self,
+        transform: &'a Matrix,
+    ) -> impl Iterator<Item = ([f64; 4], [f64; 4], [f64; 4])> + 'a {
+        self.iter_triangles().map(|(p0, p1, p2)| {
+            (
+                transform.transform_homogeneous_point(p0),
+                transform.transform_homogeneous_point(p1),
+                transform.transform_homogeneous_point(p2),
+            )
+        })
+    }
+
     /// Reverses the winding order of every triangle in place.
     ///
     /// This is useful for imported meshes whose face order is opposite the renderer's
@@ -219,6 +233,12 @@ impl PolygonMatrix {
         Self {
             inner: transform.mult_matrix(&self.inner),
         }
+    }
+
+    /// Applies a 4x4 transformation matrix to all points in place.
+    pub fn apply_in_place(&mut self, transform: &Matrix) {
+        self.inner
+            .apply_homogeneous_transform_from_col(0, transform);
     }
 
     /// Get a reference to the underlying `Matrix`.
@@ -378,11 +398,19 @@ impl PolygonMatrix {
         let first_ring = Self::torus_ring(center, radius_sm, radius_big, 0, step_by, &inner_circle);
         let mut current_ring = first_ring.clone();
         for i in 0..steps {
-            let next_ring = if i + 1 == steps {
-                first_ring.clone()
+            let next_ring_storage = if i + 1 == steps {
+                None
             } else {
-                Self::torus_ring(center, radius_sm, radius_big, i + 1, step_by, &inner_circle)
+                Some(Self::torus_ring(
+                    center,
+                    radius_sm,
+                    radius_big,
+                    i + 1,
+                    step_by,
+                    &inner_circle,
+                ))
             };
+            let next_ring = next_ring_storage.as_deref().unwrap_or(&first_ring);
             for j in 0..steps {
                 let p0 = current_ring[j];
                 let p1 = current_ring[(j + 1) % steps];
@@ -393,7 +421,9 @@ impl PolygonMatrix {
                 Self::extend_polygon_data(&mut data, p0, p3, p2);
                 Self::extend_polygon_data(&mut data, p0, p2, p1);
             }
-            current_ring = next_ring;
+            if let Some(next_ring) = next_ring_storage {
+                current_ring = next_ring;
+            }
         }
         self.append_homogeneous_points(&data);
     }
@@ -442,11 +472,12 @@ impl PolygonMatrix {
         let first_ring = Self::revolution_ring(profile, 0.0);
         let mut current_ring = first_ring.clone();
         for i in 0..steps {
-            let next_ring = if i + 1 == steps {
-                first_ring.clone()
+            let next_ring_storage = if i + 1 == steps {
+                None
             } else {
-                Self::revolution_ring(profile, (i + 1) as f64 * step_by)
+                Some(Self::revolution_ring(profile, (i + 1) as f64 * step_by))
             };
+            let next_ring = next_ring_storage.as_deref().unwrap_or(&first_ring);
             for j in 0..n_profile - 1 {
                 let p0 = current_ring[j];
                 let p1 = current_ring[j + 1];
@@ -458,7 +489,9 @@ impl PolygonMatrix {
                 Self::extend_polygon_data(&mut data, p0, p1, p2);
                 Self::extend_polygon_data(&mut data, p0, p2, p3);
             }
-            current_ring = next_ring;
+            if let Some(next_ring) = next_ring_storage {
+                current_ring = next_ring;
+            }
         }
         self.append_homogeneous_points(&data);
     }

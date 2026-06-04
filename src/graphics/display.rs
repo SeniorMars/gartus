@@ -294,6 +294,24 @@ impl Canvas {
         }
     }
 
+    pub(crate) fn plot_clipped_horizontal_span(&mut self, pixel: Rgb, x0: i64, x1: i64, y: i64) {
+        if x0 > x1 {
+            return;
+        }
+
+        let Some((x0, row)) = self.normalize_coords(x0, y) else {
+            return;
+        };
+        let Some((x1, _)) = self.normalize_coords(x1, y) else {
+            return;
+        };
+
+        let width = self.width as usize;
+        let start = row as usize * width + x0 as usize;
+        let end = row as usize * width + x1 as usize;
+        self.pixels[start..=end].fill(pixel);
+    }
+
     /// Returns a flat representation of all the pixels in the [Canvas].
     ///
     /// # Examples

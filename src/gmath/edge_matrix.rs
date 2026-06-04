@@ -127,12 +127,75 @@ impl EdgeMatrix {
         })
     }
 
+    /// Returns transformed line edges without allocating a transformed `EdgeMatrix`.
+    pub fn transformed_edges<'a>(
+        &'a self,
+        transform: &'a Matrix,
+    ) -> impl Iterator<Item = ([f64; 4], [f64; 4])> + 'a {
+        self.iter_edges().map(|(p0, p1)| {
+            (
+                transform.transform_homogeneous_point(p0),
+                transform.transform_homogeneous_point(p1),
+            )
+        })
+    }
+
     /// Apply a 4×4 transformation matrix to all points. Returns a new `EdgeMatrix`.
     #[must_use]
     pub fn apply(&self, transform: &Matrix) -> Self {
         Self {
             inner: transform.mult_matrix(&self.inner),
         }
+    }
+
+    /// Applies a 4x4 transformation matrix to all points in place.
+    pub fn apply_in_place(&mut self, transform: &Matrix) {
+        self.inner
+            .apply_homogeneous_transform_from_col(0, transform);
+    }
+
+    /// Creates a great-circle edge ring in the XZ plane around the origin.
+    ///
+    /// # Panics
+    /// Panics if `steps` is less than 3.
+    #[must_use]
+    pub fn great_circle(radius: f64, steps: usize) -> Self {
+        let mut edges = Self::with_capacity(steps * 2);
+        edges.add_great_circle(radius, steps);
+        edges
+    }
+
+    /// Adds a great-circle edge ring in the XZ plane around the origin.
+    ///
+    /// # Panics
+    /// Panics if `steps` is less than 3.
+    pub fn add_great_circle(&mut self, radius: f64, steps: usize) {
+        self.add_great_circle_at((0.0, 0.0, 0.0), radius, steps);
+    }
+
+    /// Adds a great-circle edge ring in the XZ plane around `center`.
+    ///
+    /// # Panics
+    /// Panics if `steps` is less than 3.
+    pub fn add_great_circle_at(&mut self, center: (f64, f64, f64), radius: f64, steps: usize) {
+        assert!(steps >= 3, "great circles need at least 3 steps");
+
+        let steps_u32 = u32::try_from(steps).expect("great circle steps must fit in u32");
+        let mut data = Vec::with_capacity(steps * 8);
+        for i in 0..steps_u32 {
+            let a0 = f64::from(i) / f64::from(steps_u32) * PI * 2.0;
+            let a1 = f64::from(i + 1) / f64::from(steps_u32) * PI * 2.0;
+            Self::extend_edge_data(
+                &mut data,
+                center.0 + a0.cos() * radius,
+                center.1,
+                center.2 + a0.sin() * radius,
+                center.0 + a1.cos() * radius,
+                center.1,
+                center.2 + a1.sin() * radius,
+            );
+        }
+        self.append_homogeneous_points(&data);
     }
 
     /// Get a reference to the underlying `Matrix` (for interop with `draw_lines` etc.)

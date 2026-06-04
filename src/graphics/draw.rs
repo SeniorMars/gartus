@@ -5,6 +5,12 @@ use std::collections::HashSet;
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
 
+#[derive(Clone, Copy)]
+struct ScanPoint {
+    x: f64,
+    y: i32,
+}
+
 struct WrappedRestore<'a> {
     wrapped: *mut bool,
     original: bool,
@@ -229,7 +235,7 @@ impl Canvas {
         }
     }
 
-    /// Draws all triangles in `polygons` onto the [`Canvas`] with backface culling.
+    /// Fills all triangles in `polygons` onto the [`Canvas`] with backface culling.
     ///
     /// # Panics
     /// Panics if the polygon matrix does not contain a multiple of 3 points.
@@ -240,15 +246,93 @@ impl Canvas {
             "polygon matrix must contain multiples of 3 points"
         );
 
-        // Loop over raw f64 data; fixed chunk[N] offsets
-        // Triangle layout: [x0,y0,z0,w0, x1,y1,z1,w1, x2,y2,z2,w2]
-        // n⃗ · v⃗ = nz = (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0)   (v⃗ = <0,0,1>)
         for c in data.chunks_exact(12) {
             let vis = (c[4] - c[0]) * (c[9] - c[1]) - (c[5] - c[1]) * (c[8] - c[0]) > 0.0;
             if vis {
-                self.draw_line(self.line, c[0], c[1], c[4], c[5]);
-                self.draw_line(self.line, c[4], c[5], c[8], c[9]);
-                self.draw_line(self.line, c[8], c[9], c[0], c[1]);
+                self.draw_scanline_triangle(c[0], c[1], c[4], c[5], c[8], c[9]);
+            }
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn draw_scanline_triangle(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64) {
+        if ![x0, y0, x1, y1, x2, y2]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return;
+        }
+
+        let mut points = [
+            ScanPoint {
+                x: x0.round(),
+                y: y0.round() as i32,
+            },
+            ScanPoint {
+                x: x1.round(),
+                y: y1.round() as i32,
+            },
+            ScanPoint {
+                x: x2.round(),
+                y: y2.round() as i32,
+            },
+        ];
+        points.sort_by_key(|point| point.y);
+
+        let [bottom, middle, top] = points;
+        if bottom.y == top.y {
+            let min_x = bottom.x.min(middle.x).min(top.x);
+            let max_x = bottom.x.max(middle.x).max(top.x);
+            self.draw_horizontal_span(self.line, min_x, max_x, bottom.y);
+            return;
+        }
+
+        for y in bottom.y..=top.y {
+            let x0 = x_on_edge(bottom, top, y);
+            let x1 = if y <= middle.y {
+                x_on_edge(bottom, middle, y)
+            } else {
+                x_on_edge(middle, top, y)
+            };
+            self.draw_horizontal_span(self.line, x0, x1, y);
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn draw_horizontal_span(&mut self, color: Rgb, x0: f64, x1: f64, y: i32) {
+        let (mut x0, mut x1) = (x0.round() as i64, x1.round() as i64);
+        if x0 > x1 {
+            std::mem::swap(&mut x0, &mut x1);
+        }
+
+        let line_radius = self.line_radius();
+        let y = i64::from(y);
+
+        if !self.wrapped {
+            let width = i64::from(self.width());
+            let height = i64::from(self.height());
+            if width == 0 || height == 0 || y + line_radius < 0 || y - line_radius >= height {
+                return;
+            }
+            x0 = x0.max(0);
+            x1 = x1.min(width - 1);
+            if x0 > x1 {
+                return;
+            }
+
+            for dy in -line_radius..=line_radius {
+                let y = y + dy;
+                if y >= 0 && y < height {
+                    self.plot_clipped_horizontal_span(color, x0, x1, y);
+                }
+            }
+            return;
+        }
+
+        for dy in -line_radius..=line_radius {
+            let y = y + dy;
+            for x in x0..=x1 {
+                self.plot(&color, x, y);
             }
         }
     }
@@ -363,6 +447,16 @@ fn perspective_xy(point: &[f64]) -> Option<(f64, f64)> {
         return None;
     }
     Some((point[0] / w, point[1] / w))
+}
+
+fn x_on_edge(start: ScanPoint, end: ScanPoint, y: i32) -> f64 {
+    let dy = end.y - start.y;
+    if dy == 0 {
+        return end.x;
+    }
+
+    let t = f64::from(y - start.y) / f64::from(dy);
+    start.x + (end.x - start.x) * t
 }
 
 #[cfg(test)]
@@ -518,6 +612,86 @@ mod tests {
         canvas.draw_transformed(&edges, &Matrix::translate(1.0, 2.0, 0.0));
 
         assert_eq!(black_points(&canvas), points([(1, 2), (2, 2)]));
+    }
+
+    #[test]
+    fn draw_polygons_scanline_fills_flat_bottom_triangle() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((1.0, 1.0, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
+
+        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+        canvas.line = Rgb::BLACK;
+        canvas.draw_polygons(&polygons);
+
+        assert_eq!(
+            black_points(&canvas),
+            points([
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (4, 1),
+                (5, 1),
+                (2, 2),
+                (3, 2),
+                (4, 2),
+                (5, 2),
+                (2, 3),
+                (3, 3),
+                (4, 3),
+                (3, 4),
+                (4, 4),
+                (3, 5)
+            ])
+        );
+    }
+
+    #[test]
+    fn draw_polygons_scanline_fills_flat_top_triangle() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((3.0, 1.0, 0.0), (5.0, 5.0, 0.0), (1.0, 5.0, 0.0));
+
+        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+        canvas.line = Rgb::BLACK;
+        canvas.draw_polygons(&polygons);
+
+        assert_eq!(
+            black_points(&canvas),
+            points([
+                (3, 1),
+                (3, 2),
+                (4, 2),
+                (2, 3),
+                (3, 3),
+                (4, 3),
+                (2, 4),
+                (3, 4),
+                (4, 4),
+                (5, 4),
+                (1, 5),
+                (2, 5),
+                (3, 5),
+                (4, 5),
+                (5, 5)
+            ])
+        );
+    }
+
+    #[test]
+    fn draw_polygons_scanline_keeps_backface_culling() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((1.0, 1.0, 0.0), (3.0, 5.0, 0.0), (5.0, 1.0, 0.0));
+
+        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+        canvas.line = Rgb::BLACK;
+        canvas.draw_polygons(&polygons);
+
+        assert!(black_points(&canvas).is_empty());
     }
 
     #[test]

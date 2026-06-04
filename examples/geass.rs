@@ -1,7 +1,4 @@
-use gartus::{
-    prelude::{Canvas, EdgeMatrix, FrameRecorder, Matrix, Rgb},
-    utils,
-};
+use gartus::prelude::{Canvas, EdgeMatrix, FrameRecorder, Matrix, Rgb};
 
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, Rgb::new(24, 26, 27));
@@ -39,19 +36,19 @@ fn geass() {
     img.fill(406, 413, white, white);
     img.set_line_pixel(Rgb::new(191, 70, 61));
 
-    let back_translation = Matrix::translate(400.0, 400.0, 0.0);
+    let back_translation = Matrix::translate(400.0, 410.0, 0.0);
     let mut recorder = FrameRecorder::new("anim", "geass").with_delay(2);
     for i in 0..180 {
-        let transform = Matrix::rotate_y(i as f64).mult_matrix(&back_translation);
+        let transform = back_translation.mult_matrix(&Matrix::rotate_y(i as f64 * 2.0));
         recorder
             .capture_drawn(&img, &combined, &transform)
             .expect("Could not save frame");
     }
-    let file_name = "./geass.gif";
+    std::fs::create_dir_all("final").expect("could not create final output directory");
+    let file_name = "final/geass.gif";
     recorder
         .encode_gif(file_name)
         .expect("Could not make animation");
-    utils::view_animation(file_name)
 }
 
 pub fn main() {

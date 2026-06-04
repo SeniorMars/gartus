@@ -18,6 +18,8 @@ pub mod quaternion;
 /// Hosts the [Ray] struct for path/ray tracing
 #[cfg(feature = "fancy_math")]
 pub mod ray;
+/// Hosts a coordinate-system stack for hierarchical 3D transforms.
+pub mod stack;
 /// Hosts all the functions needed to start applying 3D transformations to matrices.
 pub mod transformations;
 /// Hosts the [Vector] struct for ray tracing

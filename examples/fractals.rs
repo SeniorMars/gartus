@@ -1,327 +1,317 @@
-use gartus::prelude::{Canvas, Rgb};
+use gartus::{
+    graphics::colors::Hsl,
+    prelude::{Canvas, Rgb},
+};
+use num::complex::Complex;
+use std::{error::Error, f32::consts::PI, fs};
 
-fn main() {
-    let mut img = Canvas::new(256, 256, Rgb::default());
-    let (width, height) = (img.width(), img.height());
-    let mut data: Vec<Rgb> = Vec::with_capacity((width * height) as usize);
-    (0..height).rev().for_each(|j| {
-        eprintln!("Scanlines reminaing: {}", height - j - 1);
-        (0..width).for_each(|i| {
-            data.push(Rgb {
-                red: (255.99 * (i as f64 / (width - 1) as f64)) as u8,
-                green: (255.99 * (j as f64 / (height - 1) as f64)) as u8,
-                blue: (255.99 * 0.25) as u8,
-            })
-        });
-    });
-    eprintln!("Done.");
-    img.fill_canvas(data);
-    img.display().expect("Could not render image")
+const WIDTH: u32 = 1000;
+const HEIGHT: u32 = 1000;
+const MAX_ITERATIONS: u16 = 420;
+const BAILOUT2: f32 = 16.0;
+
+#[derive(Clone, Copy)]
+struct View {
+    x_min: f32,
+    x_max: f32,
+    y_min: f32,
+    y_max: f32,
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use gartus::graphics::colors::Hsl;
-    use num::complex::Complex;
-    use std::f32::consts::PI;
+#[derive(Clone, Copy)]
+struct Escape {
+    smooth: f32,
+    escaped: bool,
+}
 
-    #[test]
-    fn mandelcos() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-        let max_iterations = 256u16;
-        let cxmin = -2f32;
-        let cxmax = 1f32;
-        let cymin = -1.5f32;
-        let cymax = 1.5f32;
-        let scalex = (cxmax - cxmin) / WIDTH as f32;
-        let scaley = (cymax - cymin) / HEIGHT as f32;
-        let mut mandelcos = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        (0..WIDTH).for_each(|x| {
-            let cx = cxmin + x as f32 * scalex;
-            (0..HEIGHT).for_each(|y| {
-                let cy = cymin + y as f32 * scaley;
+fn main() -> Result<(), Box<dyn Error>> {
+    fs::create_dir_all("final/fractals")?;
 
-                let c = Complex::new(cx, cy);
-                let mut z = Complex::new(0f32, 0f32);
+    let renders = [
+        ("mandelcos", render_mandelcos()),
+        ("nfam", render_nfam()),
+        ("mandelbrot_nebula", render_mandelbrot_nebula()),
+        ("burning_ship_radar", render_burning_ship_radar()),
+        ("julia_lantern", render_julia_lantern()),
+        ("domain_lattice", render_domain_lattice()),
+    ];
 
-                let mut i = 0;
-                for n in 0..max_iterations {
-                    if z.norm() > 2.0 {
-                        break;
-                    }
-                    z = (z.cos()).powu(n.into()) + c;
-                    i = n;
-                }
-                let red = (i << 3) as u8;
-                let green = (i << 5) as u8;
-                let blue = (i << 4) as u8;
-                data.push(Rgb { red, green, blue })
-            });
-        });
-        mandelcos.fill_canvas(data);
-        // let cos = mandelcos.sobel();
-        mandelcos.display().expect("Could not render image");
-        mandelcos
-            .save_extension("./pics/sobel_cos.png")
-            .expect("Could not save image");
+    for (name, canvas) in renders {
+        let path = format!("final/fractals/{name}.png");
+        canvas.save_extension(&path)?;
+        println!("saved {path}");
     }
 
-    #[test]
-    fn nfam() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-        let max_iterations = 256u16;
-        let cxmin = -2f32;
-        let cxmax = 1f32;
-        let cymin = -1.5f32;
-        let cymax = 1.5f32;
-        let scalex = (cxmax - cxmin) / HEIGHT as f32;
-        let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut nfam = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        (0..WIDTH).for_each(|x| {
-            (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
-                let cy = cymin + y as f32 * scaley;
+    Ok(())
+}
 
-                let c = Complex::new(cx, cy);
-                let mut z = Complex::new(0f32, 0f32);
-
-                let mut i = 0;
-                for n in 0..max_iterations {
-                    if z.norm() > 2.0 {
-                        break;
-                    }
-                    z = (z.inv().powi(n.into())) + c;
-                    i = n;
+fn render_mandelcos() -> Canvas {
+    render_escape_fractal(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -1.95,
+            x_max: 1.15,
+            y_min: -1.55,
+            y_max: 1.55,
+        },
+        MAX_ITERATIONS,
+        |c| {
+            let mut z = Complex::new(0.0, 0.0);
+            for n in 0..MAX_ITERATIONS {
+                if z.norm_sqr() > BAILOUT2 {
+                    return escaped(n, z);
                 }
-                let red = (i << 3) as u8;
-                let green = (i << 5) as u8;
-                let blue = (i << 4) as u8;
-                data.push(Rgb { red, green, blue })
-            });
-        });
-        nfam.fill_canvas(data);
-        nfam.display().expect("Could not render image");
-        nfam.save_extension("./pics/nfam.png")
-            .expect("Could not save image");
-    }
-
-    #[test]
-    fn mandel() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-        let max_iterations = 256u16;
-        let cxmin = -2f32;
-        let cxmax = 1f32;
-        let cymin = -1.5f32;
-        let cymax = 1.5f32;
-        let scalex = (cxmax - cxmin) / HEIGHT as f32;
-        let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut mandel = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        (0..WIDTH).for_each(|x| {
-            let cx = cxmin + x as f32 * scalex;
-            (0..HEIGHT).for_each(|y| {
-                let cy = cymin + y as f32 * scaley;
-
-                let c = Complex::new(cx, cy);
-                let mut z = Complex::new(0f32, 0f32);
-
-                let mut i = 0;
-                for n in 0..max_iterations {
-                    if z.norm() > 2.0 {
-                        break;
-                    }
-                    z = z * z + c;
-                    i = n;
-                }
-                let red = (i << 3) as u8;
-                let green = (i << 5) as u8;
-                let blue = (i << 4) as u8;
-                data.push(Rgb { red, green, blue })
-            });
-        });
-        mandel.fill_canvas(data);
-        mandel.display().expect("Could not render image");
-        let brot = mandel.sobel();
-        brot.save_extension("./pics/mandel.png")
-            .expect("Could not save image")
-    }
-
-    #[test]
-    fn ship_rgb() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-
-        let max_iterations = 256u16;
-        let cxmin = -2f32;
-        let cxmax = 1f32;
-        let cymin = -1.5f32;
-        let cymax = 1.5f32;
-        let scalex = (cxmax - cxmin) / HEIGHT as f32;
-        let scaley = (cymax - cymin) / WIDTH as f32;
-        let mut ship = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        (0..WIDTH).for_each(|x| {
-            (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
-                let cy = cymin + y as f32 * scaley;
-
-                let c = Complex::new(cx, cy);
-                let mut z = Complex::new(0f32, 0f32);
-
-                let mut i = 0;
-                for n in 0..max_iterations {
-                    if z.norm() > 2.0 {
-                        break;
-                    }
-                    let tempz = Complex::new(z.re.abs(), 0.0) + Complex::new(0.0, (z.im).abs());
-                    z = (tempz.powi(2)) + c;
-                    i = n;
-                }
-                // let red = i as u8;
-                // let green = i as u8;
-                // let blue = i as u8;
-                let red = (i << 5) as u8;
-                let green = (i << 3) as u8;
-                let blue = (i << 4) as u8;
-                data.push(Rgb { red, green, blue })
-            });
-        });
-        ship.fill_canvas(data);
-        let ship = ship.sobel();
-        ship.display().expect("Could not render image");
-        ship.save_extension("./pics/red_ship.png")
-            .expect("Could not render image")
-    }
-
-    #[test]
-    fn ship_hsl() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-        const ZOOM: f64 = 700.0;
-
-        let max_iterations = 1000u16;
-        let cxmin = -2f32;
-        let cxmax = 1f32;
-        let cymin = -1.8f32;
-        let cymax = 1.8f32;
-        let scalex = (cxmax - cxmin) / ZOOM as f32;
-        let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut ship = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        ship.upper_left_origin = true;
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        (0..WIDTH).for_each(|x| {
-            (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
-                let cy = cymin + y as f32 * scaley;
-
-                let c = Complex::new(cx, cy);
-                let mut z = Complex::new(0f32, 0f32);
-
-                let mut i = 0;
-                for n in 0..max_iterations {
-                    if z.norm() > 2.0 {
-                        break;
-                    }
-                    let tempz = Complex::new(z.re.abs(), 0.0) + Complex::new(0.0, (z.im).abs());
-                    z = (tempz.powi(2)) + c;
-                    i = n;
-                }
-                let hue = i % 360;
-                let saturation = 100;
-                let light = 75;
-                data.push(Rgb::from(Hsl {
-                    hue,
-                    saturation,
-                    light,
-                }))
-            });
-        });
-        ship.fill_canvas(data);
-        ship.display().expect("Could not render image")
-    }
-
-    #[test]
-    fn domain_coloring_plot() {
-        const HEIGHT: u32 = 800;
-        const WIDTH: u32 = 800;
-        const ZOOM: u16 = 800;
-
-        let max_iterations = 16;
-        let cxmin = -5f32;
-        let cxmax = 5f32;
-        let cymin = -5f32;
-        let cymax = 5f32;
-        let scalex = (cxmax - cxmin) / ZOOM as f32;
-        let scaley = (cymax - cymin) / ZOOM as f32;
-        let mut color_domain = Canvas::new(WIDTH, HEIGHT, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((WIDTH * HEIGHT) as usize);
-        let unit = Complex::new(1.0, 0.0);
-        let four = Complex::new(4.0, 0.0);
-        let lattes = |z: Complex<f32>| ((z + unit).powi(2)) / ((four * z) * (z.powi(2) - unit));
-        (0..WIDTH).for_each(|x| {
-            (0..HEIGHT).for_each(|y| {
-                let cx = cxmin + x as f32 * scalex;
-                let cy = cymin + y as f32 * scaley;
-                let mut z = Complex::new(cx, cy);
-                for _ in 0..max_iterations {
-                    z = lattes(z);
-                }
-                let hue = (z.arg() * 180.0 / PI).round() as u16;
-                let saturation = 100;
-                let light = 50;
-                data.push(Rgb::from(Hsl {
-                    hue,
-                    saturation,
-                    light,
-                }))
-            })
-        });
-        color_domain.fill_canvas(data);
-        color_domain.display().expect("Could not render image");
-        color_domain
-            .save_extension("./pics/failed_domain20.png")
-            .expect("Could not render image")
-    }
-
-    #[test]
-    fn julia() {
-        let width = 800;
-        let height = 600;
-        let mut julia = Canvas::new(height, width, Rgb::default());
-        let mut data: Vec<Rgb> = Vec::with_capacity((width * height) as usize);
-        let cx = -0.9;
-        let cy = 0.27015;
-        let interations = 110;
-        for x in 0..width {
-            for y in 0..height {
-                let mut zx = 3.0 * (x as f32 - 0.5 * width as f32) / (width as f32);
-                let mut zy = 2.0 * (y as f32 - 0.5 * height as f32) / (height as f32);
-                let mut i = interations;
-                while zx * zx + zy * zy < 4.0 && i > 1 {
-                    let temp = zx * zx - zy * zy + cx;
-                    zy = 2.0 * zx * zy + cy;
-                    zx = temp;
-                    i -= 1;
-                }
-                data.push(Rgb {
-                    red: (i << 3) as u8,
-                    green: (i << 5) as u8,
-                    blue: (i << 4) as u8,
-                })
-                // write!(writer, "{} {} {} ", i as u8, i as u8, i as u8)?;
+                z = z.cos().powu(u32::from(n.max(1))) + c;
             }
+            bounded(MAX_ITERATIONS)
+        },
+        classic_shift_palette,
+    )
+}
+
+fn render_nfam() -> Canvas {
+    render_escape_fractal(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -1.85,
+            x_max: 1.25,
+            y_min: -1.55,
+            y_max: 1.55,
+        },
+        MAX_ITERATIONS,
+        |c| {
+            let mut z = c;
+            for n in 0..MAX_ITERATIONS {
+                if z.norm_sqr() > BAILOUT2 {
+                    return escaped(n, z);
+                }
+                let denominator = z * z + Complex::new(0.018, -0.011);
+                if denominator.norm_sqr() <= f32::EPSILON {
+                    return escaped(n, z);
+                }
+                z = denominator.inv().powi(i32::from(n.max(1))) + c;
+            }
+            bounded(MAX_ITERATIONS)
+        },
+        classic_shift_palette,
+    )
+}
+
+fn render_mandelbrot_nebula() -> Canvas {
+    render_escape_fractal(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -0.95,
+            x_max: -0.42,
+            y_min: 0.37,
+            y_max: 0.82,
+        },
+        900,
+        |c| {
+            let mut z = Complex::new(0.0, 0.0);
+            for n in 0..900 {
+                if z.norm_sqr() > BAILOUT2 {
+                    return escaped(n, z);
+                }
+                z = z * z + c;
+            }
+            bounded(900)
+        },
+        nebula_palette,
+    )
+}
+
+fn render_burning_ship_radar() -> Canvas {
+    render_escape_fractal(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -1.9,
+            x_max: -1.65,
+            y_min: -0.08,
+            y_max: 0.12,
+        },
+        650,
+        |c| {
+            let mut z = Complex::new(0.0, 0.0);
+            for n in 0..650 {
+                if z.norm_sqr() > BAILOUT2 {
+                    return escaped(n, z);
+                }
+                z = Complex::new(z.re.abs(), z.im.abs());
+                z = z * z + c;
+            }
+            bounded(650)
+        },
+        radar_palette,
+    )
+}
+
+fn render_julia_lantern() -> Canvas {
+    render_escape_fractal(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -1.65,
+            x_max: 1.65,
+            y_min: -1.65,
+            y_max: 1.65,
+        },
+        520,
+        |point| {
+            let c = Complex::new(-0.74543, 0.11301);
+            let mut z = point;
+            for n in 0..520 {
+                if z.norm_sqr() > BAILOUT2 {
+                    return escaped(n, z);
+                }
+                z = z * z + c;
+            }
+            bounded(520)
+        },
+        lantern_palette,
+    )
+}
+
+fn render_domain_lattice() -> Canvas {
+    let unit = Complex::new(1.0, 0.0);
+    let four = Complex::new(4.0, 0.0);
+    render_domain(
+        WIDTH,
+        HEIGHT,
+        View {
+            x_min: -3.6,
+            x_max: 3.6,
+            y_min: -3.6,
+            y_max: 3.6,
+        },
+        |mut z| {
+            for _ in 0..18 {
+                let denom = (four * z) * (z.powi(2) - unit);
+                if denom.norm_sqr() <= f32::EPSILON {
+                    break;
+                }
+                z = ((z + unit).powi(2)) / denom;
+            }
+            domain_palette(z)
+        },
+    )
+}
+
+fn render_escape_fractal<F, P>(
+    width: u32,
+    height: u32,
+    view: View,
+    max_iterations: u16,
+    mut iterate: F,
+    palette: P,
+) -> Canvas
+where
+    F: FnMut(Complex<f32>) -> Escape,
+    P: Fn(Escape, u16) -> Rgb,
+{
+    render_domain(width, height, view, |point| {
+        palette(iterate(point), max_iterations)
+    })
+}
+
+fn render_domain<F>(width: u32, height: u32, view: View, mut pixel: F) -> Canvas
+where
+    F: FnMut(Complex<f32>) -> Rgb,
+{
+    let width_usize = usize::try_from(width).expect("width fits in usize");
+    let height_usize = usize::try_from(height).expect("height fits in usize");
+    let mut data = Vec::with_capacity(width_usize * height_usize);
+    let scale_x = (view.x_max - view.x_min) / width as f32;
+    let scale_y = (view.y_max - view.y_min) / height as f32;
+
+    for y in 0..height {
+        let cy = view.y_max - y as f32 * scale_y;
+        for x in 0..width {
+            let cx = view.x_min + x as f32 * scale_x;
+            data.push(pixel(Complex::new(cx, cy)));
         }
-        julia.fill_canvas(data);
-        let julia = julia.sobel();
-        julia.display().expect("Could not render image");
-        julia
-            .save_extension("./pics/juila.png")
-            .expect("Could not render image")
     }
+
+    let mut canvas = Canvas::new(width, height, Rgb::BLACK);
+    canvas.upper_left_origin = true;
+    canvas.fill_canvas(data);
+    canvas
+}
+
+fn escaped(iteration: u16, z: Complex<f32>) -> Escape {
+    Escape {
+        smooth: smooth_escape(iteration, z),
+        escaped: true,
+    }
+}
+
+fn bounded(max_iterations: u16) -> Escape {
+    Escape {
+        smooth: f32::from(max_iterations),
+        escaped: false,
+    }
+}
+
+fn smooth_escape(iteration: u16, z: Complex<f32>) -> f32 {
+    let radius = z.norm_sqr().sqrt().max(1.000_001);
+    f32::from(iteration) + 1.0 - radius.ln().ln() / 2.0_f32.ln()
+}
+
+fn classic_shift_palette(escape: Escape, _max_iterations: u16) -> Rgb {
+    let i = escape.smooth.round() as u16;
+    Rgb::new((i << 3) as u8, (i << 5) as u8, (i << 4) as u8)
+}
+
+fn nebula_palette(escape: Escape, max_iterations: u16) -> Rgb {
+    if !escape.escaped {
+        return Rgb::new(0, 1, 6);
+    }
+    let t = escape.smooth / f32::from(max_iterations);
+    let edge = t.powf(0.22);
+    hsl(
+        205 + (95.0 * (1.0 - edge)).round() as u16,
+        92,
+        8 + (70.0 * edge).round() as u16,
+    )
+}
+
+fn radar_palette(escape: Escape, max_iterations: u16) -> Rgb {
+    if !escape.escaped {
+        return Rgb::new(0, 7, 5);
+    }
+    let t = escape.smooth / f32::from(max_iterations);
+    let rings = ((escape.smooth * 0.33).sin().abs() * 24.0).round() as u16;
+    let glow = t.powf(0.35);
+    hsl(112 + rings, 100, 8 + (68.0 * glow).round() as u16)
+}
+
+fn lantern_palette(escape: Escape, max_iterations: u16) -> Rgb {
+    if !escape.escaped {
+        return Rgb::new(8, 4, 2);
+    }
+    let t = escape.smooth / f32::from(max_iterations);
+    hsl(
+        18 + (58.0 * t.sqrt()).round() as u16,
+        98,
+        10 + (70.0 * t.powf(0.45)).round() as u16,
+    )
+}
+
+fn domain_palette(z: Complex<f32>) -> Rgb {
+    let angle = ((z.arg() + PI) / (2.0 * PI) * 360.0).round() as u16;
+    let modulus = z.norm().ln_1p();
+    let rings = (modulus * 18.0).sin().abs();
+    hsl(angle, 92, 28 + (rings * 44.0).round() as u16)
+}
+
+fn hsl(hue: u16, saturation: u16, light: u16) -> Rgb {
+    Rgb::from(Hsl {
+        hue: hue % 360,
+        saturation,
+        light: light.min(90),
+    })
 }

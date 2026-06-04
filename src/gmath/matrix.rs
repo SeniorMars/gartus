@@ -592,6 +592,25 @@ impl Matrix {
         self.data.as_ref()
     }
 
+    /// Applies this 4x4 matrix to one homogeneous point without allocating a matrix.
+    ///
+    /// # Panics
+    /// Panics if this matrix is not 4x4 or if `point` has fewer than 4 values.
+    #[must_use]
+    pub fn transform_homogeneous_point(&self, point: &[f64]) -> [f64; 4] {
+        assert_eq!(self.rows, 4, "transform must have 4 rows");
+        assert_eq!(self.cols, 4, "transform must have 4 columns");
+        assert!(point.len() >= 4, "homogeneous point must have 4 values");
+
+        let (x, y, z, w) = (point[0], point[1], point[2], point[3]);
+        [
+            self[(0, 0)] * x + self[(0, 1)] * y + self[(0, 2)] * z + self[(0, 3)] * w,
+            self[(1, 0)] * x + self[(1, 1)] * y + self[(1, 2)] * z + self[(1, 3)] * w,
+            self[(2, 0)] * x + self[(2, 1)] * y + self[(2, 2)] * z + self[(2, 3)] * w,
+            self[(3, 0)] * x + self[(3, 1)] * y + self[(3, 2)] * z + self[(3, 3)] * w,
+        ]
+    }
+
     pub(crate) fn append_column(&mut self, column: &[f64]) -> Result<(), &'static str> {
         if self.rows != column.len() {
             return Err("new column length must match matrix rows");

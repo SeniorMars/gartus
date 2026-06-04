@@ -3,6 +3,8 @@
 
 /// Explicit frame recording and GIF encoding.
 pub mod animation;
+/// Perspective projection helpers for simple 3D scenes.
+pub mod camera;
 /// Includes the [Pixel] and [HSL] struts, which are the basic foundation to color
 pub mod colors;
 /// Includes the [Canvas] strut, which represents your "drawing board".

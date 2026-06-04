@@ -10,10 +10,9 @@ fn main() {
     println!("Loading Utah Teapot mesh...");
     let matrix = external::meshify("examples/data/meshes/teapot.obj").expect("Could not load mesh");
 
-    let transform = Matrix::translate(375.0, 240.0, 0.0)
-        * Matrix::rotate_x(-90.0)
+    let transform = Matrix::translate(f64::from(width) * 0.5, f64::from(height) * 0.5, 0.0)
         * Matrix::rotate_y(15.0)
-        * Matrix::scale(100.0, 100.0, 100.0);
+        * external::normalize_mesh_transform(&matrix, 560.0, external::MeshUpAxis::Z);
 
     let final_matrix = matrix.apply(&transform);
 

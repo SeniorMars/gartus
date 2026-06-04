@@ -12,26 +12,7 @@ fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
         .all(|(p, q)| p == q)
 }
 
-#[test]
-fn script_cstack() {
-    let green = Rgb::new(0, 255, 0);
-    const W: u32 = 500;
-    const H: u32 = 500;
-
-    // --- parser side ---
-    let mut dw = Parser::new("./tests/script_cstack", W, H, &green);
-    dw.set_display_enabled(false);
-    dw.parse_file().expect("Script is valid");
-    assert!(
-        std::path::Path::new("robot.png").exists(),
-        "script should save robot.png"
-    );
-    let _ = std::fs::remove_file("robot.png");
-
-    // --- manual side: replicate every CS step from script_cstack ---
-    // Parser::new uses Canvas::new(w, h, color) → line=green, bg=black(default)
-    let mut manual = Canvas::new(W, H, green);
-
+fn draw_manual_cstack_robot(manual: &mut Canvas) {
     // script starts at identity; first command is push (saves identity), then body CS:
     //   move 250 250 0  → T(250,250,0)
     //   rotate y -30    → * Ry(-30)
@@ -85,6 +66,52 @@ fn script_cstack() {
     let mut pm = PolygonMatrix::new();
     pm.add_box((-50.0, 0.0, 40.0), 50.0, 120.0, 80.0);
     manual.draw_polygons(&pm.apply(&right_leg));
+}
+
+#[test]
+fn script_solid() {
+    let green = Rgb::new(0, 255, 0);
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    let mut dw = Parser::new("./tests/script_solid", W, H, &green);
+    dw.set_display_enabled(false);
+    dw.parse_file().expect("Script is valid");
+    assert!(
+        std::path::Path::new("solid.png").exists(),
+        "script should save solid.png"
+    );
+    let _ = std::fs::remove_file("solid.png");
+
+    let mut manual = Canvas::new(W, H, green);
+    draw_manual_cstack_robot(&mut manual);
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "script_solid final canvas should match manual robot after clear/pop sequence"
+    );
+}
+
+#[test]
+fn script_cstack() {
+    let green = Rgb::new(0, 255, 0);
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    // --- parser side ---
+    let mut dw = Parser::new("./tests/script_cstack", W, H, &green);
+    dw.set_display_enabled(false);
+    dw.parse_file().expect("Script is valid");
+    assert!(
+        std::path::Path::new("robot.png").exists(),
+        "script should save robot.png"
+    );
+    let _ = std::fs::remove_file("robot.png");
+
+    // --- manual side: replicate every CS step from script_cstack ---
+    // Parser::new uses Canvas::new(w, h, color) → line=green, bg=black(default)
+    let mut manual = Canvas::new(W, H, green);
+    draw_manual_cstack_robot(&mut manual);
 
     assert!(
         pixels_eq(dw.canvas(), &manual),
@@ -102,7 +129,7 @@ fn script_polygons() {
     const H: u32 = 500;
 
     // --- parser side ---
-    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    let mut dw = Parser::new_with_bg("script_polygons", W, H, &color, &bg);
     dw.set_display_enabled(false);
     dw.parse_string(
         "box\n0 0 0 200 100 400\nrotate\nx 20\nrotate\ny 20\nmove\n150 200 0\nsphere\n0 0 0 200\nclear\ntorus\n0 0 0 25 150",
