@@ -3,7 +3,8 @@ use crate::gmath::matrix::Matrix;
 use crate::gmath::polygon_matrix::PolygonMatrix;
 use crate::graphics::{
     colors::Rgb,
-    display::{Canvas, PolygonColorMode},
+    display::{Canvas, PolygonColorMode, ShadingMode},
+    lighting::Lighting,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -234,6 +235,16 @@ impl Parser {
     /// Sets how filled polygon triangles choose colors.
     pub fn set_polygon_color_mode(&mut self, mode: PolygonColorMode) {
         self.canvas.set_polygon_color_mode(mode);
+    }
+
+    /// Sets how polygon surfaces are shaded.
+    pub fn set_shading_mode(&mut self, mode: ShadingMode) {
+        self.canvas.set_shading_mode(mode);
+    }
+
+    /// Sets the flat Phong reflection lighting configuration.
+    pub fn set_lighting(&mut self, lighting: Lighting) {
+        self.canvas.set_lighting(lighting);
     }
 
     /// Parses and runs through the commands in `self.file_name`

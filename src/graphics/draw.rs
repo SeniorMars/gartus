@@ -1,7 +1,12 @@
 use super::colors::{Hsl, Rgb};
-use crate::gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix};
-use crate::graphics::display::{Canvas, PolygonColorMode};
-use std::collections::HashSet;
+use crate::gmath::{
+    edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix, vector::Vector,
+};
+use crate::graphics::{
+    display::{Canvas, PolygonColorMode, ShadingMode, ZSpan},
+    lighting::PreparedLighting,
+};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
 
@@ -10,6 +15,22 @@ struct ScanPoint {
     x: f64,
     y: i32,
     z: f64,
+}
+
+#[derive(Clone, Copy)]
+struct ColorScanPoint {
+    x: f64,
+    y: i32,
+    z: f64,
+    color: [f64; 3],
+}
+
+#[derive(Clone, Copy)]
+struct NormalScanPoint {
+    x: f64,
+    y: i32,
+    z: f64,
+    normal: Vector,
 }
 
 struct WrappedRestore<'a> {
@@ -247,15 +268,112 @@ impl Canvas {
             "polygon matrix must contain multiples of 3 points"
         );
 
+        let shading_mode = self.shading_mode();
+        let color_mode = self.polygon_color_mode();
+        let line_color = self.line;
+        let lighting = if matches!(
+            (shading_mode, color_mode),
+            (
+                ShadingMode::Gouraud | ShadingMode::Phong | ShadingMode::Toon,
+                _
+            ) | (_, PolygonColorMode::PhongReflection)
+        ) {
+            Some(self.lighting().prepare())
+        } else {
+            None
+        };
+        let vertex_normals = if matches!(
+            shading_mode,
+            ShadingMode::Gouraud | ShadingMode::Phong | ShadingMode::Toon
+        ) {
+            Some(vertex_normals_by_point(data))
+        } else {
+            None
+        };
+
         for (index, c) in data.chunks_exact(12).enumerate() {
-            let vis = (c[4] - c[0]) * (c[9] - c[1]) - (c[5] - c[1]) * (c[8] - c[0]) > 0.0;
-            if vis {
-                self.draw_scanline_triangle(
-                    triangle_color(self.polygon_color_mode(), self.line, index),
-                    (c[0], c[1], c[2]),
-                    (c[4], c[5], c[6]),
-                    (c[8], c[9], c[10]),
-                );
+            let p0 = (c[0], c[1], c[2]);
+            let p1 = (c[4], c[5], c[6]);
+            let p2 = (c[8], c[9], c[10]);
+            if shading_mode == ShadingMode::Wireframe {
+                self.draw_polygon_edges(line_color, p0, p1, p2);
+                continue;
+            }
+
+            let normal = triangle_normal(p0, p1, p2);
+            if normal[2] <= 0.0 {
+                continue;
+            }
+
+            match shading_mode {
+                ShadingMode::Wireframe => unreachable!("wireframe handled before culling"),
+                ShadingMode::Flat => {
+                    let color = match lighting {
+                        Some(lighting) => lighting.illuminate(normal),
+                        None => triangle_color(color_mode, line_color, index),
+                    };
+                    self.draw_scanline_triangle(color, p0, p1, p2);
+                }
+                ShadingMode::Gouraud | ShadingMode::Phong | ShadingMode::Toon => self
+                    .draw_smooth_triangle(
+                        shading_mode,
+                        lighting.expect("lighting prepared for smooth shading"),
+                        vertex_normals
+                            .as_ref()
+                            .expect("vertex normals prepared for smooth shading"),
+                        index,
+                        [p0, p1, p2],
+                    ),
+            }
+        }
+    }
+
+    fn draw_polygon_edges(
+        &mut self,
+        color: Rgb,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        self.draw_line_z(color, p0, p1);
+        self.draw_line_z(color, p1, p2);
+        self.draw_line_z(color, p2, p0);
+    }
+
+    fn draw_smooth_triangle(
+        &mut self,
+        shading_mode: ShadingMode,
+        lighting: PreparedLighting,
+        vertex_normals: &[Vector],
+        triangle_index: usize,
+        points: [(f64, f64, f64); 3],
+    ) {
+        let normal_index = triangle_index * 3;
+        let normals = [
+            vertex_normals[normal_index],
+            vertex_normals[normal_index + 1],
+            vertex_normals[normal_index + 2],
+        ];
+
+        match shading_mode {
+            ShadingMode::Gouraud => self.draw_gouraud_triangle(
+                points[0],
+                points[1],
+                points[2],
+                [
+                    lighting.illuminate_unit(normals[0]),
+                    lighting.illuminate_unit(normals[1]),
+                    lighting.illuminate_unit(normals[2]),
+                ],
+            ),
+            ShadingMode::Phong => {
+                self.draw_phong_triangle(lighting, points[0], points[1], points[2], normals);
+            }
+            ShadingMode::Toon => {
+                self.draw_toon_triangle(lighting, points[0], points[1], points[2], normals);
+            }
+            ShadingMode::Wireframe | ShadingMode::Flat => {
+                unreachable!("smooth triangle helper only handles smooth shading")
             }
         }
     }
@@ -352,6 +470,366 @@ impl Canvas {
             for x in x0..=x1 {
                 self.plot_z(&color, x, y, z);
                 z += dz;
+            }
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn draw_gouraud_triangle(
+        &mut self,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+        colors: [Rgb; 3],
+    ) {
+        if !triangle_points_are_finite([p0, p1, p2]) {
+            return;
+        }
+
+        let mut points = [
+            ColorScanPoint {
+                x: p0.0.round(),
+                y: p0.1.round() as i32,
+                z: p0.2,
+                color: rgb_to_f64(colors[0]),
+            },
+            ColorScanPoint {
+                x: p1.0.round(),
+                y: p1.1.round() as i32,
+                z: p1.2,
+                color: rgb_to_f64(colors[1]),
+            },
+            ColorScanPoint {
+                x: p2.0.round(),
+                y: p2.1.round() as i32,
+                z: p2.2,
+                color: rgb_to_f64(colors[2]),
+            },
+        ];
+        if !points.iter().all(ColorScanPoint::is_finite) {
+            return;
+        }
+        points.sort_by_key(|point| point.y);
+
+        let [bottom, middle, top] = points;
+        if bottom.y == top.y {
+            points.sort_by(|a, b| a.x.total_cmp(&b.x));
+            self.draw_gouraud_scanline(points[0], points[2], bottom.y);
+            return;
+        }
+
+        for y in bottom.y..=top.y {
+            let p0 = color_point_on_edge(bottom, top, y);
+            let p1 = if y <= middle.y {
+                color_point_on_edge(bottom, middle, y)
+            } else {
+                color_point_on_edge(middle, top, y)
+            };
+            self.draw_gouraud_scanline(p0, p1, y);
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn draw_gouraud_scanline(&mut self, mut p0: ColorScanPoint, mut p1: ColorScanPoint, y: i32) {
+        if p0.x > p1.x {
+            std::mem::swap(&mut p0, &mut p1);
+        }
+
+        let x0 = p0.x.round() as i64;
+        let x1 = p1.x.round() as i64;
+        if x0 > x1 {
+            return;
+        }
+
+        let steps = x1 - x0;
+        let dz = if steps == 0 {
+            0.0
+        } else {
+            (p1.z - p0.z) / steps as f64
+        };
+        let dcolor = if steps == 0 {
+            [0.0; 3]
+        } else {
+            [
+                (p1.color[0] - p0.color[0]) / steps as f64,
+                (p1.color[1] - p0.color[1]) / steps as f64,
+                (p1.color[2] - p0.color[2]) / steps as f64,
+            ]
+        };
+        let line_radius = self.line_radius();
+        let y = i64::from(y);
+
+        if !self.wrapped {
+            let height = i64::from(self.height());
+            if height == 0 || y + line_radius < 0 || y - line_radius >= height {
+                return;
+            }
+            for dy in -line_radius..=line_radius {
+                self.plot_z_span_clipped_with(
+                    ZSpan {
+                        x0,
+                        x1,
+                        y: y + dy,
+                        z: p0.z,
+                        dz,
+                    },
+                    p0.color,
+                    |color, step| add_scaled3(color, dcolor, step),
+                    |color| rgb_from_f64(*color),
+                );
+            }
+            return;
+        }
+
+        for dy in -line_radius..=line_radius {
+            let mut z = p0.z;
+            let mut color = p0.color;
+            for x in x0..=x1 {
+                self.plot_z(&rgb_from_f64(color), x, y + dy, z);
+                z += dz;
+                add3(&mut color, dcolor);
+            }
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn draw_phong_triangle(
+        &mut self,
+        lighting: PreparedLighting,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+        normals: [Vector; 3],
+    ) {
+        if !triangle_points_are_finite([p0, p1, p2]) {
+            return;
+        }
+
+        let mut points = [
+            NormalScanPoint {
+                x: p0.0.round(),
+                y: p0.1.round() as i32,
+                z: p0.2,
+                normal: normals[0],
+            },
+            NormalScanPoint {
+                x: p1.0.round(),
+                y: p1.1.round() as i32,
+                z: p1.2,
+                normal: normals[1],
+            },
+            NormalScanPoint {
+                x: p2.0.round(),
+                y: p2.1.round() as i32,
+                z: p2.2,
+                normal: normals[2],
+            },
+        ];
+        if !points.iter().all(NormalScanPoint::is_finite) {
+            return;
+        }
+        points.sort_by_key(|point| point.y);
+
+        let [bottom, middle, top] = points;
+        if bottom.y == top.y {
+            points.sort_by(|a, b| a.x.total_cmp(&b.x));
+            self.draw_phong_scanline(lighting, points[0], points[2], bottom.y);
+            return;
+        }
+
+        for y in bottom.y..=top.y {
+            let p0 = normal_point_on_edge(bottom, top, y);
+            let p1 = if y <= middle.y {
+                normal_point_on_edge(bottom, middle, y)
+            } else {
+                normal_point_on_edge(middle, top, y)
+            };
+            self.draw_phong_scanline(lighting, p0, p1, y);
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn draw_toon_triangle(
+        &mut self,
+        lighting: PreparedLighting,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+        normals: [Vector; 3],
+    ) {
+        if !triangle_points_are_finite([p0, p1, p2]) {
+            return;
+        }
+
+        let mut points = [
+            NormalScanPoint {
+                x: p0.0.round(),
+                y: p0.1.round() as i32,
+                z: p0.2,
+                normal: normals[0],
+            },
+            NormalScanPoint {
+                x: p1.0.round(),
+                y: p1.1.round() as i32,
+                z: p1.2,
+                normal: normals[1],
+            },
+            NormalScanPoint {
+                x: p2.0.round(),
+                y: p2.1.round() as i32,
+                z: p2.2,
+                normal: normals[2],
+            },
+        ];
+        if !points.iter().all(NormalScanPoint::is_finite) {
+            return;
+        }
+        points.sort_by_key(|point| point.y);
+
+        let [bottom, middle, top] = points;
+        if bottom.y == top.y {
+            points.sort_by(|a, b| a.x.total_cmp(&b.x));
+            self.draw_toon_scanline(lighting, points[0], points[2], bottom.y);
+            return;
+        }
+
+        for y in bottom.y..=top.y {
+            let p0 = normal_point_on_edge(bottom, top, y);
+            let p1 = if y <= middle.y {
+                normal_point_on_edge(bottom, middle, y)
+            } else {
+                normal_point_on_edge(middle, top, y)
+            };
+            self.draw_toon_scanline(lighting, p0, p1, y);
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn draw_phong_scanline(
+        &mut self,
+        lighting: PreparedLighting,
+        mut p0: NormalScanPoint,
+        mut p1: NormalScanPoint,
+        y: i32,
+    ) {
+        if p0.x > p1.x {
+            std::mem::swap(&mut p0, &mut p1);
+        }
+
+        let x0 = p0.x.round() as i64;
+        let x1 = p1.x.round() as i64;
+        if x0 > x1 {
+            return;
+        }
+
+        let steps = x1 - x0;
+        let dz = if steps == 0 {
+            0.0
+        } else {
+            (p1.z - p0.z) / steps as f64
+        };
+        let dnormal = if steps == 0 {
+            Vector::default()
+        } else {
+            (p1.normal - p0.normal) / steps as f64
+        };
+        let line_radius = self.line_radius();
+        let y = i64::from(y);
+
+        if !self.wrapped {
+            let height = i64::from(self.height());
+            if height == 0 || y + line_radius < 0 || y - line_radius >= height {
+                return;
+            }
+            for dy in -line_radius..=line_radius {
+                self.plot_z_span_clipped_with(
+                    ZSpan {
+                        x0,
+                        x1,
+                        y: y + dy,
+                        z: p0.z,
+                        dz,
+                    },
+                    p0.normal,
+                    |normal, step| *normal += dnormal * step,
+                    |normal| lighting.illuminate(*normal),
+                );
+            }
+            return;
+        }
+
+        for dy in -line_radius..=line_radius {
+            let mut z = p0.z;
+            let mut normal = p0.normal;
+            for x in x0..=x1 {
+                self.plot_z(&lighting.illuminate(normal), x, y + dy, z);
+                z += dz;
+                normal += dnormal;
+            }
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn draw_toon_scanline(
+        &mut self,
+        lighting: PreparedLighting,
+        mut p0: NormalScanPoint,
+        mut p1: NormalScanPoint,
+        y: i32,
+    ) {
+        if p0.x > p1.x {
+            std::mem::swap(&mut p0, &mut p1);
+        }
+
+        let x0 = p0.x.round() as i64;
+        let x1 = p1.x.round() as i64;
+        if x0 > x1 {
+            return;
+        }
+
+        let steps = x1 - x0;
+        let dz = if steps == 0 {
+            0.0
+        } else {
+            (p1.z - p0.z) / steps as f64
+        };
+        let dnormal = if steps == 0 {
+            Vector::default()
+        } else {
+            (p1.normal - p0.normal) / steps as f64
+        };
+        let line_radius = self.line_radius();
+        let y = i64::from(y);
+
+        if !self.wrapped {
+            let height = i64::from(self.height());
+            if height == 0 || y + line_radius < 0 || y - line_radius >= height {
+                return;
+            }
+            for dy in -line_radius..=line_radius {
+                self.plot_z_span_clipped_with(
+                    ZSpan {
+                        x0,
+                        x1,
+                        y: y + dy,
+                        z: p0.z,
+                        dz,
+                    },
+                    p0.normal,
+                    |normal, step| *normal += dnormal * step,
+                    |normal| lighting.illuminate_toon(*normal),
+                );
+            }
+            return;
+        }
+
+        for dy in -line_radius..=line_radius {
+            let mut z = p0.z;
+            let mut normal = p0.normal;
+            for x in x0..=x1 {
+                self.plot_z(&lighting.illuminate_toon(normal), x, y + dy, z);
+                z += dz;
+                normal += dnormal;
             }
         }
     }
@@ -520,9 +998,189 @@ fn point_on_edge(start: ScanPoint, end: ScanPoint, y: i32) -> ScanPoint {
     }
 }
 
-fn triangle_color(mode: PolygonColorMode, base: Rgb, index: usize) -> Rgb {
+impl ColorScanPoint {
+    fn is_finite(&self) -> bool {
+        self.x.is_finite()
+            && self.z.is_finite()
+            && self.color.iter().all(|channel| channel.is_finite())
+    }
+}
+
+impl NormalScanPoint {
+    fn is_finite(&self) -> bool {
+        self.x.is_finite()
+            && self.z.is_finite()
+            && self.normal[0].is_finite()
+            && self.normal[1].is_finite()
+            && self.normal[2].is_finite()
+    }
+}
+
+fn color_point_on_edge(start: ColorScanPoint, end: ColorScanPoint, y: i32) -> ColorScanPoint {
+    let dy = end.y - start.y;
+    if dy == 0 {
+        return end;
+    }
+
+    let t = f64::from(y - start.y) / f64::from(dy);
+    ColorScanPoint {
+        x: start.x + (end.x - start.x) * t,
+        y,
+        z: start.z + (end.z - start.z) * t,
+        color: [
+            start.color[0] + (end.color[0] - start.color[0]) * t,
+            start.color[1] + (end.color[1] - start.color[1]) * t,
+            start.color[2] + (end.color[2] - start.color[2]) * t,
+        ],
+    }
+}
+
+fn normal_point_on_edge(start: NormalScanPoint, end: NormalScanPoint, y: i32) -> NormalScanPoint {
+    let dy = end.y - start.y;
+    if dy == 0 {
+        return end;
+    }
+
+    let t = f64::from(y - start.y) / f64::from(dy);
+    NormalScanPoint {
+        x: start.x + (end.x - start.x) * t,
+        y,
+        z: start.z + (end.z - start.z) * t,
+        normal: start.normal + (end.normal - start.normal) * t,
+    }
+}
+
+fn triangle_normal(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
+    let a = Vector::new(p1.0 - p0.0, p1.1 - p0.1, p1.2 - p0.2);
+    let b = Vector::new(p2.0 - p0.0, p2.1 - p0.1, p2.2 - p0.2);
+    a.cross(b)
+}
+
+fn triangle_points_are_finite(points: [(f64, f64, f64); 3]) -> bool {
+    points
+        .into_iter()
+        .all(|point| point.0.is_finite() && point.1.is_finite() && point.2.is_finite())
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct VertexKey([u64; 3]);
+
+fn vertex_key(point: (f64, f64, f64)) -> VertexKey {
+    VertexKey([point.0.to_bits(), point.1.to_bits(), point.2.to_bits()])
+}
+
+#[cfg(test)]
+pub(super) fn vertex_normals(data: &[f64]) -> HashMap<VertexKey, Vector> {
+    let mut normals = HashMap::<VertexKey, Vector>::with_capacity(data.len() / 4);
+
+    for c in data.chunks_exact(12) {
+        let p0 = (c[0], c[1], c[2]);
+        let p1 = (c[4], c[5], c[6]);
+        let p2 = (c[8], c[9], c[10]);
+        let normal = triangle_normal(p0, p1, p2);
+        if normal.length() < f64::EPSILON {
+            continue;
+        }
+
+        for point in [p0, p1, p2] {
+            normals
+                .entry(vertex_key(point))
+                .and_modify(|accumulated| *accumulated += normal)
+                .or_insert(normal);
+        }
+    }
+
+    for normal in normals.values_mut() {
+        *normal = normal.normalized();
+    }
+
+    normals
+}
+
+fn vertex_normals_by_point(data: &[f64]) -> Vec<Vector> {
+    let point_count = data.len() / 4;
+    let mut normal_indices = Vec::with_capacity(point_count);
+    let mut normal_by_vertex = HashMap::<VertexKey, usize>::with_capacity(point_count);
+    let mut accumulated = Vec::<Vector>::new();
+
+    for c in data.chunks_exact(12) {
+        let points = [(c[0], c[1], c[2]), (c[4], c[5], c[6]), (c[8], c[9], c[10])];
+        let normal = triangle_normal(points[0], points[1], points[2]);
+        let has_surface_normal = normal.dot(normal) >= f64::EPSILON * f64::EPSILON;
+
+        for point in points {
+            let next_index = normal_by_vertex.len();
+            let normal_index = match normal_by_vertex.entry(vertex_key(point)) {
+                Entry::Occupied(entry) => *entry.get(),
+                Entry::Vacant(entry) => {
+                    accumulated.push(Vector::default());
+                    *entry.insert(next_index)
+                }
+            };
+            if has_surface_normal {
+                accumulated[normal_index] += normal;
+            }
+            normal_indices.push(normal_index);
+        }
+    }
+
+    for normal in &mut accumulated {
+        *normal = if normal.dot(*normal) < f64::EPSILON * f64::EPSILON {
+            Vector::new(0.0, 0.0, 1.0)
+        } else {
+            normal.normalized()
+        };
+    }
+
+    normal_indices
+        .into_iter()
+        .map(|normal_index| accumulated[normal_index])
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn vertex_normal(
+    normals: &HashMap<VertexKey, Vector>,
+    point: (f64, f64, f64),
+) -> Vector {
+    normals
+        .get(&vertex_key(point))
+        .copied()
+        .unwrap_or(Vector::new(0.0, 0.0, 1.0))
+}
+
+fn rgb_to_f64(color: Rgb) -> [f64; 3] {
+    [
+        f64::from(color.red),
+        f64::from(color.green),
+        f64::from(color.blue),
+    ]
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn rgb_from_f64(color: [f64; 3]) -> Rgb {
+    Rgb::new(
+        color[0].round().clamp(0.0, 255.0) as u8,
+        color[1].round().clamp(0.0, 255.0) as u8,
+        color[2].round().clamp(0.0, 255.0) as u8,
+    )
+}
+
+fn add3(value: &mut [f64; 3], delta: [f64; 3]) {
+    value[0] += delta[0];
+    value[1] += delta[1];
+    value[2] += delta[2];
+}
+
+fn add_scaled3(value: &mut [f64; 3], delta: [f64; 3], scale: f64) {
+    value[0] += delta[0] * scale;
+    value[1] += delta[1] * scale;
+    value[2] += delta[2] * scale;
+}
+
+pub(super) fn triangle_color(mode: PolygonColorMode, base: Rgb, index: usize) -> Rgb {
     match mode {
-        PolygonColorMode::LineColor => base,
+        PolygonColorMode::LineColor | PolygonColorMode::PhongReflection => base,
         PolygonColorMode::DeterministicRandom => random_triangle_color(index),
         PolygonColorMode::TintedFromLine => tinted_triangle_color(base, index),
     }
@@ -566,347 +1224,4 @@ fn triangle_color_seed(index: usize) -> u32 {
     x ^= x >> 15;
     x = x.wrapping_mul(0x846c_a68b);
     x ^ (x >> 16)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graphics::animation::FrameRecorder;
-    use std::collections::BTreeSet;
-    use std::fs;
-
-    fn line_points(x0: f64, y0: f64, x1: f64, y1: f64) -> BTreeSet<(i64, i64)> {
-        let mut canvas = Canvas::new_with_bg(8, 8, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.draw_line(Rgb::BLACK, x0, y0, x1, y1);
-        black_points(&canvas)
-    }
-
-    fn black_points(canvas: &Canvas) -> BTreeSet<(i64, i64)> {
-        let mut points = BTreeSet::new();
-        for y in 0..canvas.height() {
-            for x in 0..canvas.width() {
-                if canvas.get_pixel(x.into(), y.into()) == Some(&Rgb::BLACK) {
-                    points.insert((x.into(), y.into()));
-                }
-            }
-        }
-        points
-    }
-
-    fn non_background_points(canvas: &Canvas, background: Rgb) -> BTreeSet<(i64, i64)> {
-        let mut points = BTreeSet::new();
-        for y in 0..canvas.height() {
-            for x in 0..canvas.width() {
-                if canvas.get_pixel(x.into(), y.into()) != Some(&background) {
-                    points.insert((x.into(), y.into()));
-                }
-            }
-        }
-        points
-    }
-
-    fn points<const N: usize>(items: [(i64, i64); N]) -> BTreeSet<(i64, i64)> {
-        BTreeSet::from(items)
-    }
-
-    #[test]
-    fn draw_line_covers_horizontal_vertical_and_single_point() {
-        assert_eq!(
-            line_points(1.0, 2.0, 5.0, 2.0),
-            points([(1, 2), (2, 2), (3, 2), (4, 2), (5, 2)])
-        );
-        assert_eq!(
-            line_points(3.0, 1.0, 3.0, 5.0),
-            points([(3, 1), (3, 2), (3, 3), (3, 4), (3, 5)])
-        );
-        assert_eq!(line_points(4.0, 4.0, 4.0, 4.0), points([(4, 4)]));
-    }
-
-    #[test]
-    fn draw_line_covers_shallow_and_steep_octants() {
-        assert_eq!(
-            line_points(1.0, 1.0, 5.0, 3.0),
-            points([(1, 1), (2, 1), (3, 2), (4, 2), (5, 3)])
-        );
-        assert_eq!(
-            line_points(1.0, 5.0, 5.0, 3.0),
-            points([(1, 5), (2, 5), (3, 4), (4, 4), (5, 3)])
-        );
-        assert_eq!(
-            line_points(1.0, 1.0, 3.0, 5.0),
-            points([(1, 1), (1, 2), (2, 3), (2, 4), (3, 5)])
-        );
-        assert_eq!(
-            line_points(1.0, 5.0, 3.0, 1.0),
-            points([(1, 5), (1, 4), (2, 3), (2, 2), (3, 1)])
-        );
-    }
-
-    #[test]
-    fn draw_line_reverse_directions_match_forward_lines() {
-        assert_eq!(
-            line_points(5.0, 3.0, 1.0, 1.0),
-            line_points(1.0, 1.0, 5.0, 3.0)
-        );
-        assert_eq!(
-            line_points(5.0, 3.0, 1.0, 5.0),
-            line_points(1.0, 5.0, 5.0, 3.0)
-        );
-        assert_eq!(
-            line_points(3.0, 5.0, 1.0, 1.0),
-            line_points(1.0, 1.0, 3.0, 5.0)
-        );
-        assert_eq!(
-            line_points(3.0, 1.0, 1.0, 5.0),
-            line_points(1.0, 5.0, 3.0, 1.0)
-        );
-    }
-
-    #[test]
-    fn draw_line_uses_odd_width_radius() {
-        let mut canvas = Canvas::new_with_bg(5, 5, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.set_line_width(2.0);
-        canvas.draw_line(Rgb::BLACK, 2.0, 2.0, 2.0, 2.0);
-
-        assert_eq!(black_points(&canvas), points([(2, 1), (2, 2), (2, 3)]));
-    }
-
-    #[test]
-    fn draw_line_z_interpolates_depth_along_driving_axis() {
-        let mut canvas = Canvas::new_with_bg(5, 1, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-
-        canvas.draw_line_z(Rgb::BLACK, (0.0, 0.0, 0.0), (4.0, 0.0, 8.0));
-
-        assert_eq!(canvas.get_zbuffer(0, 0), Some(0.0));
-        assert_eq!(canvas.get_zbuffer(2, 0), Some(4.0));
-        assert_eq!(canvas.get_zbuffer(4, 0), Some(8.0));
-    }
-
-    #[test]
-    fn thick_steep_lines_use_horizontal_brush() {
-        let mut canvas = Canvas::new_with_bg(5, 5, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.set_line_width(3.0);
-        canvas.draw_line(Rgb::BLACK, 2.0, 1.0, 2.0, 3.0);
-
-        assert_eq!(
-            black_points(&canvas),
-            points([
-                (1, 1),
-                (2, 1),
-                (3, 1),
-                (1, 2),
-                (2, 2),
-                (3, 2),
-                (1, 3),
-                (2, 3),
-                (3, 3)
-            ])
-        );
-    }
-
-    #[test]
-    fn fill_uses_clipped_coordinates_even_when_canvas_wraps() {
-        let mut canvas = Canvas::new_with_bg(3, 1, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = true;
-        canvas.plot(&Rgb::BLACK, 1, 0);
-        canvas.fill(2, 0, Rgb::new(255, 0, 0), Rgb::BLACK);
-
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::WHITE));
-        assert_eq!(canvas.get_pixel(1, 0), Some(&Rgb::BLACK));
-        assert_eq!(canvas.get_pixel(2, 0), Some(&Rgb::new(255, 0, 0)));
-        assert!(canvas.wrapped);
-    }
-
-    #[test]
-    #[should_panic(expected = "edge matrix must contain pairs of points")]
-    fn draw_lines_rejects_odd_point_count() {
-        let mut edges = EdgeMatrix::new();
-        edges.push_point(1.0, 1.0, 0.0);
-        let mut canvas = Canvas::new_with_bg(4, 4, Rgb::WHITE);
-        canvas.draw_lines(&edges);
-    }
-
-    #[test]
-    fn draw_transformed_applies_matrix_before_drawing() {
-        let mut edges = EdgeMatrix::new();
-        edges.push_edge(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-
-        let mut canvas = Canvas::new_with_bg(4, 4, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.draw_transformed(&edges, &Matrix::translate(1.0, 2.0, 0.0));
-
-        assert_eq!(black_points(&canvas), points([(1, 2), (2, 2)]));
-    }
-
-    #[test]
-    fn draw_polygons_scanline_fills_flat_bottom_triangle() {
-        let mut polygons = PolygonMatrix::new();
-        polygons.add_polygon((1.0, 1.0, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
-
-        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.line = Rgb::BLACK;
-        canvas.draw_polygons(&polygons);
-
-        assert_eq!(
-            non_background_points(&canvas, Rgb::WHITE),
-            points([
-                (1, 1),
-                (2, 1),
-                (3, 1),
-                (4, 1),
-                (5, 1),
-                (2, 2),
-                (3, 2),
-                (4, 2),
-                (5, 2),
-                (2, 3),
-                (3, 3),
-                (4, 3),
-                (3, 4),
-                (4, 4),
-                (3, 5)
-            ])
-        );
-    }
-
-    #[test]
-    fn draw_polygons_scanline_fills_flat_top_triangle() {
-        let mut polygons = PolygonMatrix::new();
-        polygons.add_polygon((3.0, 1.0, 0.0), (5.0, 5.0, 0.0), (1.0, 5.0, 0.0));
-
-        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.line = Rgb::BLACK;
-        canvas.draw_polygons(&polygons);
-
-        assert_eq!(
-            non_background_points(&canvas, Rgb::WHITE),
-            points([
-                (3, 1),
-                (3, 2),
-                (4, 2),
-                (2, 3),
-                (3, 3),
-                (4, 3),
-                (2, 4),
-                (3, 4),
-                (4, 4),
-                (5, 4),
-                (1, 5),
-                (2, 5),
-                (3, 5),
-                (4, 5),
-                (5, 5)
-            ])
-        );
-    }
-
-    #[test]
-    fn draw_polygons_scanline_keeps_backface_culling() {
-        let mut polygons = PolygonMatrix::new();
-        polygons.add_polygon((1.0, 1.0, 0.0), (3.0, 5.0, 0.0), (5.0, 1.0, 0.0));
-
-        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-        canvas.line = Rgb::BLACK;
-        canvas.draw_polygons(&polygons);
-
-        assert!(black_points(&canvas).is_empty());
-    }
-
-    #[test]
-    fn draw_polygons_uses_zbuffer_for_overlapping_triangles() {
-        let mut near = PolygonMatrix::new();
-        near.add_polygon((1.0, 1.0, 10.0), (5.0, 1.0, 10.0), (3.0, 5.0, 10.0));
-        let mut far = PolygonMatrix::new();
-        far.add_polygon((1.0, 1.0, 1.0), (5.0, 1.0, 1.0), (3.0, 5.0, 1.0));
-
-        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-
-        canvas.line = Rgb::BLUE;
-        canvas.draw_polygons(&near);
-        canvas.line = Rgb::RED;
-        canvas.draw_polygons(&far);
-
-        assert_eq!(canvas.get_pixel(3, 3), Some(&Rgb::BLUE));
-        assert_eq!(canvas.get_zbuffer(3, 3), Some(10.0));
-    }
-
-    #[test]
-    fn triangle_color_modes_are_stable_and_varied() {
-        let base = Rgb::GREEN;
-        let colors: Vec<_> = (0..12)
-            .map(|index| triangle_color(PolygonColorMode::DeterministicRandom, base, index))
-            .collect();
-        let unique: BTreeSet<_> = colors.iter().map(Rgb::values).collect();
-
-        assert_eq!(triangle_color(PolygonColorMode::LineColor, base, 7), base);
-        assert_eq!(
-            triangle_color(PolygonColorMode::DeterministicRandom, base, 7),
-            colors[7]
-        );
-        assert_eq!(
-            triangle_color(PolygonColorMode::TintedFromLine, base, 0),
-            base
-        );
-        assert!(unique.len() > 8);
-    }
-
-    #[test]
-    fn draw_lines_no_longer_saves_animation_frames() {
-        fs::create_dir_all("anim").expect("create animation dir");
-        let prefix = format!("test-frame-count-{}-", std::process::id());
-        let mut edges = EdgeMatrix::new();
-        edges.push_edge(0.0, 0.0, 0.0, 1.0, 1.0, 0.0);
-        edges.push_edge(1.0, 1.0, 0.0, 2.0, 2.0, 0.0);
-
-        let mut canvas = Canvas::new_with_bg(4, 4, Rgb::WHITE);
-        canvas.try_draw_lines(&edges);
-
-        assert!(!std::path::Path::new(&format!("anim/{prefix}00000000.ppm")).exists());
-    }
-
-    #[test]
-    fn frame_recorder_captures_explicit_frames() {
-        let prefix = format!("test-recorder-{}-", std::process::id());
-        let mut recorder = FrameRecorder::new("anim", prefix.clone());
-        let canvas = Canvas::new_with_bg(2, 2, Rgb::WHITE);
-
-        recorder.capture(&canvas).expect("capture frame");
-
-        assert_eq!(recorder.frame_index(), 1);
-        let _ = fs::remove_file(format!("anim/{prefix}00000000.ppm"));
-    }
-
-    #[test]
-    fn frame_recorder_can_capture_drawn_transformed_edges() {
-        let prefix = format!("test-recorder-drawn-{}-", std::process::id());
-        let mut recorder = FrameRecorder::new("anim", prefix.clone());
-        let canvas = Canvas::new_with_bg(3, 3, Rgb::WHITE);
-        let mut edges = EdgeMatrix::new();
-        edges.push_edge(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-
-        recorder
-            .capture_drawn(&canvas, &edges, &Matrix::translate(1.0, 1.0, 0.0))
-            .expect("capture transformed frame");
-
-        assert_eq!(recorder.frame_index(), 1);
-        let _ = fs::remove_file(format!("anim/{prefix}00000000.ppm"));
-    }
 }

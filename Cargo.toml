@@ -46,6 +46,10 @@ name = "mesh_joltik"
 required-features = ["external"]
 
 [[example]]
+name = "mesh_kirby_lighting"
+required-features = ["external"]
+
+[[example]]
 name = "mesh_spot_dragon"
 required-features = ["external"]
 

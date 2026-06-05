@@ -14,6 +14,12 @@ pub mod draw;
 /// Some preset filters that can be applied to a Canvas
 #[cfg(feature = "filters")]
 pub mod filters;
+/// Flat Phong reflection lighting helpers.
+pub mod lighting;
+/// Small 2D primitives and bitmap text helpers.
+pub mod primitives;
+#[cfg(test)]
+mod tests;
 /// An agent that can move throughout the [Canvas]
 #[cfg(feature = "turtle")]
 pub mod turtle;

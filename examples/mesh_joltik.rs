@@ -170,7 +170,7 @@ fn web_spoke_point(
 }
 
 fn web_color(ring: usize, brightness: f64) -> Rgb {
-    let pulse = if ring % 2 == 0 { 1.0 } else { 0.72 };
+    let pulse = if ring.is_multiple_of(2) { 1.0 } else { 0.72 };
     dim(Rgb::new(58, 183, 210), brightness * pulse)
 }
 

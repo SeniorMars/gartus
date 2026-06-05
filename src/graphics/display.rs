@@ -1,4 +1,4 @@
-use crate::graphics::colors::Rgb;
+use crate::graphics::{colors::Rgb, lighting::Lighting};
 
 use core::slice;
 use std::{
@@ -14,10 +14,39 @@ pub enum PolygonColorMode {
     /// Use the canvas line color for every triangle.
     #[default]
     LineColor,
+    /// Calculate one flat Phong reflection color per triangle.
+    PhongReflection,
     /// Generate a stable pseudo-random color from each triangle index.
     DeterministicRandom,
     /// Generate stable color variation blended from the canvas line color.
     TintedFromLine,
+}
+
+/// Controls how polygon surfaces are rendered.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ShadingMode {
+    /// Draw only triangle edges.
+    Wireframe,
+    /// Calculate one color per polygon and fill the whole polygon with it.
+    ///
+    /// Use [`PolygonColorMode::PhongReflection`] for lit flat shading.
+    #[default]
+    Flat,
+    /// Calculate one lit color per vertex and interpolate colors across each polygon.
+    Gouraud,
+    /// Interpolate vertex normals and calculate lighting at each plotted pixel.
+    Phong,
+    /// Interpolate vertex normals and calculate quantized banded lighting per pixel.
+    Toon,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ZSpan {
+    pub x0: i64,
+    pub x1: i64,
+    pub y: i64,
+    pub z: f64,
+    pub dz: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -38,6 +67,8 @@ pub struct Canvas {
     /// Width of drawn lines in pixels. Default 1.0.
     line_width: f64,
     polygon_color_mode: PolygonColorMode,
+    shading_mode: ShadingMode,
+    lighting: Lighting,
 }
 
 impl Default for Canvas {
@@ -52,6 +83,8 @@ impl Default for Canvas {
             line: Rgb::default(),
             line_width: 1.0,
             polygon_color_mode: PolygonColorMode::default(),
+            shading_mode: ShadingMode::default(),
+            lighting: Lighting::default(),
         }
     }
 }
@@ -131,6 +164,8 @@ impl Canvas {
             line: Rgb::default(),
             line_width: 1.0,
             polygon_color_mode: PolygonColorMode::default(),
+            shading_mode: ShadingMode::default(),
+            lighting: Lighting::default(),
         }
     }
 
@@ -150,6 +185,8 @@ impl Canvas {
             line: self.line,
             line_width: self.line_width,
             polygon_color_mode: self.polygon_color_mode,
+            shading_mode: self.shading_mode,
+            lighting: self.lighting,
         }
     }
 
@@ -380,6 +417,57 @@ impl Canvas {
         }
     }
 
+    /// Draws a clipped, non-wrapping horizontal z-buffered span with per-pixel state.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    pub(crate) fn plot_z_span_clipped_with<State, Advance, Color>(
+        &mut self,
+        span: ZSpan,
+        mut state: State,
+        mut advance: Advance,
+        mut color: Color,
+    ) where
+        Advance: FnMut(&mut State, f64),
+        Color: FnMut(&State) -> Rgb,
+    {
+        let (mut x0, mut x1, y, mut z, dz) = (span.x0, span.x1, span.y, span.z, span.dz);
+        let width = i64::from(self.width);
+        let height = i64::from(self.height);
+        if width == 0 || height == 0 || y < 0 || y >= height || x0 > x1 || !z.is_finite() {
+            return;
+        }
+
+        if x1 < 0 || x0 >= width {
+            return;
+        }
+
+        if x0 < 0 {
+            let skipped = (-x0) as f64;
+            z += dz * skipped;
+            advance(&mut state, skipped);
+            x0 = 0;
+        }
+        x1 = x1.min(width - 1);
+
+        let storage_y = if self.upper_left_origin {
+            y
+        } else {
+            height - 1 - y
+        };
+        let start = storage_y as usize * self.width as usize + x0 as usize;
+        for (index, _) in (start..).zip(x0..=x1) {
+            if z > self.zbuffer[index] {
+                self.pixels[index] = color(&state);
+                self.zbuffer[index] = z;
+            }
+            z += dz;
+            advance(&mut state, 1.0);
+        }
+    }
+
     /// Returns a flat representation of all the pixels in the [Canvas].
     ///
     /// # Examples
@@ -539,6 +627,28 @@ impl Canvas {
     #[must_use]
     pub fn polygon_color_mode(&self) -> PolygonColorMode {
         self.polygon_color_mode
+    }
+
+    /// Sets how polygon surfaces are shaded.
+    pub fn set_shading_mode(&mut self, mode: ShadingMode) {
+        self.shading_mode = mode;
+    }
+
+    /// Returns how polygon surfaces are shaded.
+    #[must_use]
+    pub fn shading_mode(&self) -> ShadingMode {
+        self.shading_mode
+    }
+
+    /// Sets the Phong reflection lighting configuration.
+    pub fn set_lighting(&mut self, lighting: Lighting) {
+        self.lighting = lighting;
+    }
+
+    /// Returns the Phong reflection lighting configuration.
+    #[must_use]
+    pub fn lighting(&self) -> Lighting {
+        self.lighting
     }
 
     /// Sets the current drawing line width.
@@ -742,6 +852,8 @@ pub struct CanvasBuilder {
     line_color: Rgb,
     line_width: f64,
     polygon_color_mode: PolygonColorMode,
+    shading_mode: ShadingMode,
+    lighting: Lighting,
     upper_left_origin: bool,
     wrapped: bool,
 }
@@ -756,6 +868,8 @@ impl CanvasBuilder {
             line_color: Rgb::default(),
             line_width: 1.0,
             polygon_color_mode: PolygonColorMode::default(),
+            shading_mode: ShadingMode::default(),
+            lighting: Lighting::default(),
             upper_left_origin: false,
             wrapped: true,
         }
@@ -785,6 +899,18 @@ impl CanvasBuilder {
         self
     }
 
+    /// Sets how polygon surfaces are shaded.
+    pub fn shading_mode(mut self, mode: ShadingMode) -> Self {
+        self.shading_mode = mode;
+        self
+    }
+
+    /// Sets the Phong reflection lighting configuration.
+    pub fn lighting(mut self, lighting: Lighting) -> Self {
+        self.lighting = lighting;
+        self
+    }
+
     /// Sets whether the origin is at the top-left (true) or bottom-left (false).
     pub fn upper_left_origin(mut self, upper_left: bool) -> Self {
         self.upper_left_origin = upper_left;
@@ -811,95 +937,8 @@ impl CanvasBuilder {
             line: self.line_color,
             line_width: self.line_width,
             polygon_color_mode: self.polygon_color_mode,
+            shading_mode: self.shading_mode,
+            lighting: self.lighting,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn from_pixels_preserves_exact_pixel_data() {
-        let canvas = Canvas::from_pixels(2, 1, vec![Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
-
-        assert_eq!(canvas.width(), 2);
-        assert_eq!(canvas.height(), 1);
-        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
-    }
-
-    #[test]
-    fn map_pixels_preserves_canvas_metadata() {
-        let canvas = Canvas::builder(1, 1)
-            .background(Rgb::new(10, 20, 30))
-            .line_color(Rgb::new(40, 50, 60))
-            .line_width(3.0)
-            .polygon_color_mode(PolygonColorMode::DeterministicRandom)
-            .upper_left_origin(true)
-            .wrapped(false)
-            .build();
-
-        let mapped = canvas.map_pixels(|pixel| Rgb::new(pixel.blue, pixel.green, pixel.red));
-
-        assert_eq!(mapped.pixels(), &[Rgb::new(30, 20, 10)]);
-        assert_eq!(mapped.line_color(), Rgb::new(40, 50, 60));
-        assert!((mapped.line_width() - 3.0).abs() < f64::EPSILON);
-        assert_eq!(
-            mapped.polygon_color_mode(),
-            PolygonColorMode::DeterministicRandom
-        );
-        assert!(mapped.upper_left_origin);
-        assert!(!mapped.wrapped);
-    }
-
-    #[test]
-    fn polygon_color_mode_defaults_to_line_color_and_can_change() {
-        let mut canvas = Canvas::new(1, 1, Rgb::WHITE);
-
-        assert_eq!(canvas.polygon_color_mode(), PolygonColorMode::LineColor);
-        canvas.set_polygon_color_mode(PolygonColorMode::TintedFromLine);
-        assert_eq!(
-            canvas.polygon_color_mode(),
-            PolygonColorMode::TintedFromLine
-        );
-    }
-
-    #[test]
-    fn empty_canvas_coordinates_are_clipped_without_panic() {
-        let mut canvas = Canvas::default();
-
-        assert_eq!(canvas.normalize_coords(0, 0), None);
-        assert_eq!(canvas.get_pixel(0, 0), None);
-        canvas.plot(&Rgb::WHITE, 0, 0);
-        assert!(canvas.is_empty());
-    }
-
-    #[test]
-    fn plot_z_only_replaces_farther_pixels() {
-        let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-
-        canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
-        canvas.plot_z(&Rgb::BLUE, 0, 0, 4.0);
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::RED));
-        assert_eq!(canvas.get_zbuffer(0, 0), Some(5.0));
-
-        canvas.plot_z(&Rgb::GREEN, 0, 0, 6.0);
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::GREEN));
-        assert_eq!(canvas.get_zbuffer(0, 0), Some(6.0));
-    }
-
-    #[test]
-    fn clear_canvas_resets_zbuffer() {
-        let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
-        canvas.upper_left_origin = true;
-        canvas.wrapped = false;
-
-        canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
-        canvas.clear_canvas();
-
-        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::BLACK));
-        assert_eq!(canvas.get_zbuffer(0, 0), Some(f64::NEG_INFINITY));
     }
 }

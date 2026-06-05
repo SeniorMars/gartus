@@ -2,7 +2,7 @@ use gartus::gmath::edge_matrix::EdgeMatrix;
 use gartus::gmath::matrix::*;
 use gartus::gmath::polygon_matrix::PolygonMatrix;
 use gartus::graphics::colors::*;
-use gartus::graphics::display::{Canvas, PolygonColorMode};
+use gartus::graphics::display::{Canvas, PolygonColorMode, ShadingMode};
 use gartus::parser::Parser;
 
 fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
@@ -66,6 +66,34 @@ fn draw_manual_cstack_robot(manual: &mut Canvas) {
     let mut pm = PolygonMatrix::new();
     pm.add_box((-50.0, 0.0, 40.0), 50.0, 120.0, 80.0);
     manual.draw_polygons(&pm.apply(&right_leg));
+}
+
+#[test]
+fn script_light() {
+    let color = Rgb::new(0, 255, 0);
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    let mut dw = Parser::new("./tests/script_light", W, H, &color);
+    dw.set_display_enabled(false);
+    dw.set_shading_mode(ShadingMode::Flat);
+    dw.set_polygon_color_mode(PolygonColorMode::PhongReflection);
+    dw.parse_file().expect("Script is valid");
+    assert!(
+        std::path::Path::new("light.png").exists(),
+        "script should save light.png"
+    );
+    let _ = std::fs::remove_file("light.png");
+
+    let mut manual = Canvas::new(W, H, color);
+    manual.set_shading_mode(ShadingMode::Flat);
+    manual.set_polygon_color_mode(PolygonColorMode::PhongReflection);
+    draw_manual_cstack_robot(&mut manual);
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "script_light final canvas should match manually drawn flat-lit robot"
+    );
 }
 
 #[test]
