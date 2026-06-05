@@ -1,26 +1,23 @@
 use std::{
+    collections::HashMap,
     error::Error,
-    fmt, fs,
+    fmt,
     fs::File,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use crate::gmath::{
     matrix::Matrix,
     polygon_matrix::{Bounds3, PolygonMatrix},
 };
-use crate::graphics::{colors::Rgb, display::Canvas};
+use crate::graphics::colors::Rgb;
 
-type ExternalResult<T> = Result<T, Box<dyn Error>>;
 type MeshResult<T> = Result<T, MeshError>;
 type Point3 = (f64, f64, f64);
 type Triangle = [Point3; 3];
 
 const MESH_TRIANGLE_BATCH: usize = 4096;
-static TEMP_PPM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Summary of triangles imported from a mesh file.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,6 +26,64 @@ pub struct MeshStats {
     pub triangles: usize,
     /// Axis-aligned bounds of the imported triangles, or `None` for an empty mesh.
     pub bounds: Option<Bounds3>,
+}
+
+/// Mesh triangles grouped by OBJ material.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialMesh {
+    /// Triangle groups in source order.
+    pub groups: Vec<MaterialMeshGroup>,
+    /// Axis-aligned bounds of all imported triangles, or `None` for an empty mesh.
+    pub bounds: Option<Bounds3>,
+}
+
+impl MaterialMesh {
+    /// Returns the total number of imported triangles.
+    #[must_use]
+    pub fn triangle_count(&self) -> usize {
+        self.groups
+            .iter()
+            .map(|group| group.polygons.triangle_count())
+            .sum()
+    }
+
+    /// Returns true if at least one group has a material diffuse color.
+    #[must_use]
+    pub fn has_material_colors(&self) -> bool {
+        self.groups
+            .iter()
+            .any(|group| group.diffuse_color.is_some())
+    }
+}
+
+/// One material-colored chunk of a mesh.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialMeshGroup {
+    /// OBJ material name from `usemtl`, if present.
+    pub material_name: Option<String>,
+    /// Material coefficients from the referenced MTL file, if available.
+    pub material: Option<MeshMaterial>,
+    /// Diffuse `Kd` color from the referenced MTL file, if available.
+    pub diffuse_color: Option<Rgb>,
+    /// Triangles assigned to this material group.
+    pub polygons: PolygonMatrix,
+}
+
+/// Material coefficients parsed from an MTL file.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeshMaterial {
+    /// Ambient `Ka` coefficients.
+    pub ambient: Option<[f64; 3]>,
+    /// Diffuse `Kd` coefficients.
+    pub diffuse: Option<[f64; 3]>,
+    /// Specular `Ks` coefficients.
+    pub specular: Option<[f64; 3]>,
+}
+
+impl MeshMaterial {
+    fn diffuse_color(self) -> Option<Rgb> {
+        self.diffuse.map(rgb_from_unit_color)
+    }
 }
 
 /// Source up-axis convention for imported mesh files.
@@ -138,6 +193,48 @@ pub fn meshify(file_name: &str) -> MeshResult<PolygonMatrix> {
     let mut polygons = PolygonMatrix::new();
     add_mesh(file_name, &mut polygons)?;
     Ok(polygons)
+}
+
+/// Converts an OBJ or STL mesh file into material-grouped triangles.
+///
+/// OBJ `mtllib`, `usemtl`, and MTL `Kd` diffuse colors are preserved. STL files are returned as a
+/// single uncolored group.
+///
+/// # Errors
+/// Returns an error if the mesh cannot be read, has an unsupported extension, or contains malformed
+/// mesh or material data.
+pub fn meshify_with_materials(file_name: &str) -> MeshResult<MaterialMesh> {
+    let path = Path::new(file_name);
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| MeshError::at_path(path, "invalid file extension"))?;
+
+    match ext.as_str() {
+        "obj" => {
+            let file = File::open(path)
+                .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+            parse_obj_with_materials(BufReader::new(file), path)
+        }
+        "stl" => {
+            let polygons = meshify(file_name)?;
+            let bounds = polygons.bounds();
+            Ok(MaterialMesh {
+                groups: vec![MaterialMeshGroup {
+                    material_name: None,
+                    material: None,
+                    diffuse_color: None,
+                    polygons,
+                }],
+                bounds,
+            })
+        }
+        _ => Err(MeshError::at_path(
+            path,
+            format!("unsupported mesh extension {ext}"),
+        )),
+    }
 }
 
 fn bounds_center(bounds: Bounds3) -> Point3 {
@@ -270,6 +367,264 @@ fn parse_obj<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix)
 
     polygons.push_polygons(triangle_batch.as_slice());
     Ok(())
+}
+
+#[derive(Debug)]
+struct MaterialGroupBuilder {
+    material_name: Option<String>,
+    polygons: PolygonMatrix,
+    triangle_batch: Vec<Triangle>,
+}
+
+impl MaterialGroupBuilder {
+    fn new(material_name: Option<String>) -> Self {
+        Self {
+            material_name,
+            polygons: PolygonMatrix::new(),
+            triangle_batch: Vec::with_capacity(MESH_TRIANGLE_BATCH),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.polygons.cols() == 0 && self.triangle_batch.is_empty()
+    }
+
+    fn push_triangle(&mut self, triangle: Triangle) {
+        self.triangle_batch.push(triangle);
+        if self.triangle_batch.len() >= MESH_TRIANGLE_BATCH {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        self.polygons.push_polygons(self.triangle_batch.as_slice());
+        self.triangle_batch.clear();
+    }
+
+    fn finish(mut self, materials: &HashMap<String, MeshMaterial>) -> MaterialMeshGroup {
+        self.flush();
+        let material = self
+            .material_name
+            .as_ref()
+            .and_then(|name| materials.get(name).copied());
+        let diffuse_color = material.and_then(MeshMaterial::diffuse_color);
+        MaterialMeshGroup {
+            material_name: self.material_name,
+            material,
+            diffuse_color,
+            polygons: self.polygons,
+        }
+    }
+}
+
+fn parse_obj_with_materials<R: BufRead>(reader: R, source: &Path) -> MeshResult<MaterialMesh> {
+    let mut vertices = Vec::new();
+    let mut materials = HashMap::new();
+    let mut groups = Vec::new();
+    let mut current_group = MaterialGroupBuilder::new(None);
+
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line_num = line_idx + 1;
+        let line = line.map_err(|err| {
+            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
+        })?;
+        let line = strip_obj_comment(&line).trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut parts = line.split_whitespace();
+        match parts.next() {
+            Some("mtllib") => {
+                let filename = parts.collect::<Vec<_>>().join(" ");
+                if filename.is_empty() {
+                    return Err(MeshError::at_line(source, line_num, "missing MTL filename"));
+                }
+                let path = resolve_sibling_path(source, &filename);
+                materials.extend(load_mtl_materials(&path)?);
+            }
+            Some("usemtl") => {
+                let name = parts.collect::<Vec<_>>().join(" ");
+                if name.is_empty() {
+                    return Err(MeshError::at_line(
+                        source,
+                        line_num,
+                        "missing OBJ material name",
+                    ));
+                }
+                if !current_group.is_empty() {
+                    groups.push(current_group.finish(&materials));
+                }
+                current_group = MaterialGroupBuilder::new(Some(name));
+            }
+            Some("v") => {
+                let x = parse_f64_arg(parts.next(), source, line_num, "x")?;
+                let y = parse_f64_arg(parts.next(), source, line_num, "y")?;
+                let z = parse_f64_arg(parts.next(), source, line_num, "z")?;
+                let w = parts
+                    .next()
+                    .map(|token| parse_f64_arg(Some(token), source, line_num, "w"))
+                    .transpose()?
+                    .unwrap_or(1.0);
+                if w == 0.0 {
+                    return Err(MeshError::at_line(
+                        source,
+                        line_num,
+                        "OBJ vertex weight cannot be zero",
+                    ));
+                }
+                vertices.push((x / w, y / w, z / w));
+            }
+            Some("f") => {
+                let face = parts
+                    .map(|part| parse_obj_vertex_index(part, vertices.len(), source, line_num))
+                    .collect::<MeshResult<Vec<_>>>()?;
+                if face.len() < 3 {
+                    return Err(MeshError::at_line(
+                        source,
+                        line_num,
+                        "OBJ face has fewer than 3 vertices",
+                    ));
+                }
+
+                let first = vertices[face[0]];
+                for indices in face[1..].windows(2) {
+                    current_group.push_triangle([
+                        first,
+                        vertices[indices[0]],
+                        vertices[indices[1]],
+                    ]);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !current_group.is_empty() {
+        groups.push(current_group.finish(&materials));
+    }
+
+    let bounds = bounds_for_material_groups(&groups);
+    Ok(MaterialMesh { groups, bounds })
+}
+
+fn bounds_for_material_groups(groups: &[MaterialMeshGroup]) -> Option<Bounds3> {
+    groups
+        .iter()
+        .filter_map(|group| group.polygons.bounds())
+        .reduce(|mut acc, bounds| {
+            acc.min.0 = acc.min.0.min(bounds.min.0);
+            acc.min.1 = acc.min.1.min(bounds.min.1);
+            acc.min.2 = acc.min.2.min(bounds.min.2);
+            acc.max.0 = acc.max.0.max(bounds.max.0);
+            acc.max.1 = acc.max.1.max(bounds.max.1);
+            acc.max.2 = acc.max.2.max(bounds.max.2);
+            acc
+        })
+}
+
+fn resolve_sibling_path(source: &Path, filename: &str) -> PathBuf {
+    let path = Path::new(filename);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        source
+            .parent()
+            .map_or_else(|| path.to_path_buf(), |dir| dir.join(path))
+    }
+}
+
+fn load_mtl_materials(path: &Path) -> MeshResult<HashMap<String, MeshMaterial>> {
+    let file = File::open(path)
+        .map_err(|err| MeshError::at_path(path, format!("could not open material file: {err}")))?;
+    parse_mtl(BufReader::new(file), path)
+}
+
+fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String, MeshMaterial>> {
+    let mut materials = HashMap::new();
+    let mut current_material = None::<String>;
+
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line_num = line_idx + 1;
+        let line = line.map_err(|err| {
+            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
+        })?;
+        let line = strip_obj_comment(&line).trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut parts = line.split_whitespace();
+        match parts.next() {
+            Some("newmtl") => {
+                let name = parts.collect::<Vec<_>>().join(" ");
+                if name.is_empty() {
+                    return Err(MeshError::at_line(
+                        source,
+                        line_num,
+                        "missing MTL material name",
+                    ));
+                }
+                current_material = Some(name);
+            }
+            Some("Kd") => {
+                if let Some(name) = current_material.as_ref() {
+                    materials
+                        .entry(name.clone())
+                        .or_insert(empty_mesh_material())
+                        .diffuse = Some(parse_mtl_color(parts, source, line_num)?);
+                }
+            }
+            Some("Ka") => {
+                if let Some(name) = current_material.as_ref() {
+                    materials
+                        .entry(name.clone())
+                        .or_insert(empty_mesh_material())
+                        .ambient = Some(parse_mtl_color(parts, source, line_num)?);
+                }
+            }
+            Some("Ks") => {
+                if let Some(name) = current_material.as_ref() {
+                    materials
+                        .entry(name.clone())
+                        .or_insert(empty_mesh_material())
+                        .specular = Some(parse_mtl_color(parts, source, line_num)?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(materials)
+}
+
+fn empty_mesh_material() -> MeshMaterial {
+    MeshMaterial {
+        ambient: None,
+        diffuse: None,
+        specular: None,
+    }
+}
+
+fn parse_mtl_color<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<[f64; 3]> {
+    Ok([
+        parse_f64_arg(parts.next(), source, line_num, "red")?.clamp(0.0, 1.0),
+        parse_f64_arg(parts.next(), source, line_num, "green")?.clamp(0.0, 1.0),
+        parse_f64_arg(parts.next(), source, line_num, "blue")?.clamp(0.0, 1.0),
+    ])
+}
+
+fn rgb_from_unit_color(color: [f64; 3]) -> Rgb {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Rgb::new(
+        (color[0] * 255.0).round() as u8,
+        (color[1] * 255.0).round() as u8,
+        (color[2] * 255.0).round() as u8,
+    )
 }
 
 fn strip_obj_comment(line: &str) -> &str {
@@ -527,241 +882,11 @@ fn parse_f64_arg(
     }
 }
 
-/// Converts an image to a [`Canvas`], converting non-PPM images to a sibling `.ppm` file first.
-///
-/// # Arguments
-/// * `file_name` - The name of the file to load.
-/// * `pos_glitch` - Whether to swap the parsed canvas dimensions after loading.
-///
-/// # Note
-/// Non-PPM inputs are converted through a temporary `.ppm` file that is removed after parsing.
-///
-/// # Errors
-/// todo!()
-///
-/// # Examples
-///
-/// Basic usage:
-///```no_run
-/// use crate::gartus::prelude::{Canvas, Rgb};
-/// use crate::gartus::external;
-/// let colors = vec![
-///     Rgb::GREEN,
-///     Rgb::BLUE,
-///     Rgb::RED,
-///     Rgb::GREEN,
-///     Rgb::BLUE,
-///     Rgb::RED,
-///     Rgb::GREEN,
-///     Rgb::BLUE,
-///     Rgb::RED,
-/// ];
-/// let mut canvas = Canvas::new(3, 3, Rgb::BLACK);
-/// canvas.fill_canvas(colors);
-/// canvas.save_binary("./works.ppm").expect("Works");
-/// let other = external::ppmify("./works.ppm", false).expect("Life is wrong");
-/// assert_eq!(canvas.pixels(), other.pixels());
-/// ```
-pub fn ppmify(file_name: &str, pos_glitch: bool) -> ExternalResult<Canvas> {
-    let path = Path::new(file_name);
-    if !path.exists() {
-        return Err(format!("File does not exist: {file_name}").into());
-    }
-
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or("Invalid file extension")?;
-
-    let canvas = if ext == "ppm" {
-        parse_ppm(path)?
-    } else {
-        let converted = temp_ppm_path(path)?;
-        let status = Command::new("magick").arg(path).arg(&converted).status()?;
-        if !status.success() {
-            let _ = fs::remove_file(&converted);
-            return Err("ImageMagick `magick` failed to convert image to ppm".into());
-        }
-
-        let parsed = parse_ppm(&converted);
-        let _ = fs::remove_file(&converted);
-        parsed?
-    };
-
-    Ok(if pos_glitch {
-        dimension_glitch(&canvas)
-    } else {
-        canvas
-    })
-}
-
-fn temp_ppm_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or("Invalid file name")?;
-    let counter = TEMP_PPM_COUNTER.fetch_add(1, Ordering::Relaxed);
-    Ok(std::env::temp_dir().join(format!(
-        "gartus-ppmify-{stem}-{}-{counter}.ppm",
-        std::process::id()
-    )))
-}
-
-fn dimension_glitch(canvas: &Canvas) -> Canvas {
-    let mut glitched = Canvas::new(canvas.height(), canvas.width(), canvas.line);
-    glitched.fill_canvas(canvas.pixels().to_vec());
-    glitched
-}
-
-fn next_token(buffer: &[u8], cursor: &mut usize) -> Option<String> {
-    loop {
-        while *cursor < buffer.len() && buffer[*cursor].is_ascii_whitespace() {
-            *cursor += 1;
-        }
-
-        if *cursor < buffer.len() && buffer[*cursor] == b'#' {
-            while *cursor < buffer.len() && buffer[*cursor] != b'\n' {
-                *cursor += 1;
-            }
-            continue;
-        }
-
-        break;
-    }
-
-    if *cursor >= buffer.len() {
-        return None;
-    }
-
-    let start = *cursor;
-    while *cursor < buffer.len()
-        && !buffer[*cursor].is_ascii_whitespace()
-        && buffer[*cursor] != b'#'
-    {
-        *cursor += 1;
-    }
-
-    Some(String::from_utf8_lossy(&buffer[start..*cursor]).into_owned())
-}
-
-fn scale_channel(value: u16, maxval: u16) -> Result<u8, Box<dyn Error>> {
-    if value > maxval {
-        return Err(format!("PPM channel value {value} exceeds maxval {maxval}").into());
-    }
-
-    Ok(
-        u8::try_from((u32::from(value) * 255 + u32::from(maxval) / 2) / u32::from(maxval))
-            .unwrap_or(255),
-    )
-}
-
-fn consume_p6_separator(buffer: &[u8], cursor: &mut usize) -> Result<(), Box<dyn Error>> {
-    if *cursor >= buffer.len() || !buffer[*cursor].is_ascii_whitespace() {
-        return Err("Invalid PPM file: missing binary data separator".into());
-    }
-
-    let separator = buffer[*cursor];
-    *cursor += 1;
-    if separator == b'\r' && *cursor < buffer.len() && buffer[*cursor] == b'\n' {
-        *cursor += 1;
-    }
-    Ok(())
-}
-
-fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
-    let buffer = fs::read(path)?;
-    let mut cursor = 0;
-
-    let magic = next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing magic")?;
-    let width = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing width")?
-        .parse::<u32>()?;
-    let height = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing height")?
-        .parse::<u32>()?;
-    let maxval = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing maxval")?
-        .parse::<u16>()?;
-
-    if maxval == 0 {
-        return Err("unsupported PPM maxval 0; maxval must be 1..=65535".into());
-    }
-
-    let pixel_count = u64::from(width) * u64::from(height);
-    let pixel_count = usize::try_from(pixel_count).map_err(|_| "PPM image too large")?;
-    let mut pixels = Vec::with_capacity(pixel_count);
-
-    match magic.as_str() {
-        "P3" => {
-            for _ in 0..pixel_count {
-                let red = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing red channel")?
-                    .parse::<u16>()?;
-                let green = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing green channel")?
-                    .parse::<u16>()?;
-                let blue = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing blue channel")?
-                    .parse::<u16>()?;
-
-                pixels.push(Rgb::new(
-                    scale_channel(red, maxval)?,
-                    scale_channel(green, maxval)?,
-                    scale_channel(blue, maxval)?,
-                ));
-            }
-        }
-        "P6" => {
-            consume_p6_separator(&buffer, &mut cursor)?;
-
-            let bytes_per_sample = if maxval < 256 { 1 } else { 2 };
-            let needed = pixel_count
-                .checked_mul(3)
-                .and_then(|count| count.checked_mul(bytes_per_sample))
-                .ok_or("PPM image data is too large")?;
-            if buffer.len().saturating_sub(cursor) < needed {
-                return Err(format!(
-                    "Invalid PPM file: expected {needed} bytes of pixel data, found {}",
-                    buffer.len().saturating_sub(cursor)
-                )
-                .into());
-            }
-
-            if bytes_per_sample == 1 {
-                for chunk in buffer[cursor..cursor + needed].chunks_exact(3) {
-                    pixels.push(Rgb::new(
-                        scale_channel(u16::from(chunk[0]), maxval)?,
-                        scale_channel(u16::from(chunk[1]), maxval)?,
-                        scale_channel(u16::from(chunk[2]), maxval)?,
-                    ));
-                }
-            } else {
-                for chunk in buffer[cursor..cursor + needed].chunks_exact(6) {
-                    let red = u16::from_be_bytes([chunk[0], chunk[1]]);
-                    let green = u16::from_be_bytes([chunk[2], chunk[3]]);
-                    let blue = u16::from_be_bytes([chunk[4], chunk[5]]);
-                    pixels.push(Rgb::new(
-                        scale_channel(red, maxval)?,
-                        scale_channel(green, maxval)?,
-                        scale_channel(blue, maxval)?,
-                    ));
-                }
-            }
-        }
-        _ => return Err(format!("Invalid PPM file: unsupported magic {magic}").into()),
-    }
-
-    let mut canvas = Canvas::new(width, height, Rgb::default());
-    canvas.fill_canvas(pixels);
-    Ok(canvas)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        MeshUpAxis, add_mesh, meshify, normalize_mesh_transform, parse_obj, parse_stl, ppmify,
-        temp_ppm_path,
+        MeshUpAxis, add_mesh, meshify, meshify_with_materials, normalize_mesh_transform, parse_obj,
+        parse_stl,
     };
     use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
     use crate::graphics::colors::Rgb;
@@ -774,97 +899,6 @@ mod tests {
             std::process::id(),
             extension
         ))
-    }
-
-    #[test]
-    fn parses_p3_comments_whitespace_and_scaled_maxval() {
-        let path = temp_file("comments", "ppm");
-        fs::write(
-            &path,
-            b"P3
-# exported in 2026
-2   1
-# max value
-100
-100 0 50   0 100 25
-",
-        )
-        .expect("write temp ppm");
-
-        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-
-        assert_eq!(canvas.width(), 2);
-        assert_eq!(canvas.height(), 1);
-        assert_eq!(canvas.pixels()[0], Rgb::new(255, 0, 128));
-        assert_eq!(canvas.pixels()[1], Rgb::new(0, 255, 64));
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn parses_uppercase_ppm_extension_without_conversion() {
-        let path = temp_file("uppercase", "PPM");
-        fs::write(&path, b"P6\n1 1\n255\n\x01\x02\x03").expect("write temp ppm");
-
-        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-
-        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3)]);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn parses_p6_with_crlf_header_separator() {
-        let path = temp_file("crlf", "ppm");
-        fs::write(&path, b"P6\r\n1 1\r\n255\r\n\x01\x02\x03").expect("write temp ppm");
-
-        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-
-        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3)]);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn parses_p6_sixteen_bit_samples() {
-        let path = temp_file("sixteen-bit", "ppm");
-        fs::write(&path, b"P6\n1 1\n1023\n\x03\xff\x02\x00\x00\x00").expect("write temp ppm");
-
-        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-
-        assert_eq!(canvas.pixels(), &[Rgb::new(255, 128, 0)]);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn temp_ppm_paths_are_unique_per_call() {
-        let path = Path::new("/tmp/source.png");
-
-        let first = temp_ppm_path(path).expect("temp path");
-        let second = temp_ppm_path(path).expect("temp path");
-
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn truncated_p6_returns_error() {
-        let path = temp_file("truncated", "ppm");
-        fs::write(&path, b"P6\n2 1\n255\n\x01\x02\x03").expect("write temp ppm");
-
-        let error = ppmify(path.to_str().expect("utf8 path"), false).expect_err("should fail");
-
-        assert!(error.to_string().contains("expected 6 bytes"));
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn pos_glitch_is_applied_after_parsing() {
-        let path = temp_file("glitch", "ppm");
-        fs::write(&path, b"P3\n2 1\n255\n1 2 3 4 5 6\n").expect("write temp ppm");
-
-        let canvas = ppmify(path.to_str().expect("utf8 path"), true).expect("parse ppm");
-
-        assert_eq!(canvas.width(), 1);
-        assert_eq!(canvas.height(), 2);
-        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
-        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -1098,6 +1132,56 @@ endsolid bad
     }
 
     #[test]
+    fn loads_obj_material_groups_with_diffuse_colors() {
+        let obj_path = temp_file("materials", "obj");
+        let mtl_path = obj_path.with_extension("mtl");
+        let mtl_name = mtl_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("utf8 mtl filename");
+
+        fs::write(
+            &mtl_path,
+            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nnewmtl green\nKd 0 0.5 0\n",
+        )
+        .expect("write temp mtl");
+        fs::write(
+            &obj_path,
+            format!(
+                "\
+mtllib {mtl_name}
+v 0 0 0
+v 1 0 0
+v 0 1 0
+v 1 1 0
+usemtl red
+f 1 2 3
+usemtl green
+f 2 4 3
+"
+            ),
+        )
+        .expect("write temp obj");
+
+        let mesh = meshify_with_materials(obj_path.to_str().expect("utf8 path"))
+            .expect("load material mesh");
+
+        assert_eq!(mesh.triangle_count(), 2);
+        assert_eq!(mesh.groups.len(), 2);
+        assert_eq!(mesh.groups[0].material_name.as_deref(), Some("red"));
+        assert_eq!(mesh.groups[0].diffuse_color, Some(Rgb::RED));
+        let red_material = mesh.groups[0].material.expect("red material");
+        assert_eq!(red_material.ambient, Some([0.1, 0.2, 0.3]));
+        assert_eq!(red_material.diffuse, Some([1.0, 0.0, 0.0]));
+        assert_eq!(red_material.specular, Some([0.4, 0.5, 0.6]));
+        assert_eq!(mesh.groups[1].material_name.as_deref(), Some("green"));
+        assert_eq!(mesh.groups[1].diffuse_color, Some(Rgb::new(0, 128, 0)));
+        assert!(mesh.has_material_colors());
+        let _ = fs::remove_file(obj_path);
+        let _ = fs::remove_file(mtl_path);
+    }
+
+    #[test]
     fn loads_fixture_ascii_stl_with_case_and_spacing_variants() {
         let polygons = meshify("examples/data/meshes/fixture_weird_ascii.stl")
             .expect("load weird stl fixture");
@@ -1253,42 +1337,4 @@ endsolid bad
         assert!(obj.cols().is_multiple_of(3));
         assert!(stl.cols().is_multiple_of(3));
     }
-}
-
-#[test]
-#[ignore = "requires external files and a display"]
-fn external_fun() {
-    let pos_glitch = true;
-    let canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.display().expect("Could not display image");
-    let sobel = canvas.sobel();
-    sobel.display().expect("Could not display image");
-    sobel
-        .save_extension("pics/corro.png")
-        .expect("Could not save image");
-}
-
-#[test]
-#[ignore = "requires external files and a display"]
-fn command_block() {
-    let pos_glitch = true;
-    let canvas = ppmify("./CAR.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.display().expect("Could not display image");
-    let sobel = canvas.sobel();
-    sobel.display().expect("Could not display image");
-    sobel
-        .save_extension("pics/corro.png")
-        .expect("Could not save image");
-}
-
-#[test]
-#[ignore = "requires external files and a display"]
-fn parse_and_display() {
-    let canvas = ppmify("./stop_1.ppm", false).expect("Implmentation is wrong");
-    // let blur = canvas.blur();
-    // let sobel = canvas.sobel();
-    let edge = canvas.laplacian_edge_detection();
-    // blur.display().expect("Could not display image");
-    // sobel.display().expect("Could not display image");
-    edge.display().expect("Could not display image");
 }

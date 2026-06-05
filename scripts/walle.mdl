@@ -1,0 +1,50 @@
+constants steam 0.23 0.23 1 0.45 0.10 .92 0.45 0.06 0.65
+constants beam 0.31 0.13 0.82 0.19 0.08 0.66 0.09 0.04 0.41
+constants background .87 .87 .87 .77 .77 .77 .53 .53 .53
+constants floor 0.45 0.45 0.45 0.40 0.35 0.25 0.20 0.18 0.15
+constants shadow 0.18 0.18 0.18 0.16 0.12 0.08 0.05 0.04 0.03
+constants walle 0.25 0.25 1 0.50 0.34 0.18 0.45 0.35 0.20 181 154 77
+box background 0 500 -999999 500 500 0
+box floor 0 95 -9999 95 500 0
+push
+move 90 250 99999
+rotate z 90
+torus beam 0 0 0 40 500
+pop
+push
+move 0 400 0
+torus beam 0 30 0 12 500
+torus beam 0 -10 0 10 500
+torus beam 0 -40 0 5 500
+pop
+push
+move 425 250 -99999
+rotate z -90
+torus beam 0 0 0 10 500
+pop
+push
+move 480 250 0
+rotate z 90
+torus beam 0 0 0 30 500
+pop
+push
+move 180 380 999
+rotate z 60
+torus beam 0 0 0 12 150
+pop
+push
+move 0 500 -99999
+rotate z 90
+torus beam 0 0 0 50 1000
+pop
+push
+move 250 40 -50
+scale 2.1 0.32 0.08
+sphere shadow 0 0 0 36
+pop
+move 250 60 0
+scale 40 40 40 
+rotate y -90
+mesh walle :../examples/data/meshes/scotty/ysato.obj
+display
+save walle.png

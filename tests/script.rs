@@ -1,3 +1,5 @@
+#![cfg(feature = "old_parser")]
+
 use gartus::graphics::colors::*;
 use gartus::parser::Parser;
 

@@ -4,6 +4,9 @@ use std::f64::consts::PI;
 use std::fmt;
 use std::iter::once;
 
+/// Default curve increment matching the `10_mdl` reference parser's `step = 100`.
+pub const DEFAULT_CURVE_STEP: f64 = 0.01;
+
 /// A dynamically-growing list of 4D homogeneous points stored as a 4×N column-major matrix.
 /// Used for edge lists and drawing.
 #[derive(Debug, Default, Clone)]
@@ -265,7 +268,7 @@ impl EdgeMatrix {
             |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
             |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
             0.0,
-            0.001,
+            DEFAULT_CURVE_STEP,
         );
     }
 
@@ -286,7 +289,7 @@ impl EdgeMatrix {
             |t: f64| ax * t * t * t + bx * t * t + cx * t + dx,
             |t: f64| ay * t * t * t + by * t * t + cy * t + dy,
             0.0,
-            0.001,
+            DEFAULT_CURVE_STEP,
         );
     }
 
@@ -337,7 +340,7 @@ impl EdgeMatrix {
                 .enumerate()
                 .fold(0.0, |acc, (i, coeff)| acc + coeff * t.powi(i as i32))
         };
-        self.add_parametric_curve(x_func, y_func, 0.0, 0.001);
+        self.add_parametric_curve(x_func, y_func, 0.0, DEFAULT_CURVE_STEP);
     }
 
     /// Adds a circle centered at `(cx, cy, cz)` with radius `r` and precision `step`.

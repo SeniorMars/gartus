@@ -54,6 +54,12 @@ impl MatrixStack {
         self.stack[top] = self.stack[top].clone() * transform;
     }
 
+    /// Replaces the current top transform.
+    pub fn replace_top(&mut self, transform: Matrix) {
+        let top = self.stack.len() - 1;
+        self.stack[top] = transform;
+    }
+
     /// Returns the current transform.
     ///
     /// # Panics

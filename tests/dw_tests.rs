@@ -1,15 +1,42 @@
-use gartus::gmath::edge_matrix::EdgeMatrix;
+#![cfg(feature = "old_parser")]
+
+use gartus::gmath::edge_matrix::{DEFAULT_CURVE_STEP, EdgeMatrix};
 use gartus::gmath::matrix::*;
 use gartus::gmath::polygon_matrix::PolygonMatrix;
+use gartus::gmath::vector::Vector;
 use gartus::graphics::colors::*;
 use gartus::graphics::display::{Canvas, PolygonColorMode, ShadingMode};
+use gartus::graphics::lighting::{Lighting, PointLight, ReflectionConstants};
 use gartus::parser::Parser;
+
+const REFERENCE_3D_STEPS: usize = 100;
 
 fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
     a.pixels()
         .iter()
         .zip(b.pixels().iter())
         .all(|(p, q)| p == q)
+}
+
+fn course_lighting_values() -> Lighting {
+    Lighting {
+        view: Vector::new(0.0, 0.0, 1.0),
+        ambient: Rgb::new(50, 50, 50),
+        point_light: PointLight::new(Vector::new(0.75, 0.75, 1.0), Rgb::WHITE),
+        point_lights: Vec::new(),
+        ambient_reflection: ReflectionConstants::new(0.1, 0.1, 0.1),
+        diffuse_reflection: ReflectionConstants::new(0.75, 0.25, 0.25),
+        specular_reflection: ReflectionConstants::new(0.25, 0.25, 0.75),
+        specular_exponent: gartus::graphics::lighting::DEFAULT_SPECULAR_EXPONENT,
+    }
+}
+
+fn old_parser_reference_canvas(width: u32, height: u32, line: Rgb, bg: Rgb) -> Canvas {
+    let mut canvas = Canvas::new_with_bg(width, height, bg);
+    canvas.line = line;
+    canvas.set_shading_mode(ShadingMode::Flat);
+    canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
+    canvas
 }
 
 fn draw_manual_cstack_robot(manual: &mut Canvas) {
@@ -27,7 +54,7 @@ fn draw_manual_cstack_robot(manual: &mut Canvas) {
     // HEAD: body * T(0,175,0) * Ry(90)
     let head = &body * &(&Matrix::translate(0.0, 175.0, 0.0) * &Matrix::rotate_y(90.0));
     let mut pm = PolygonMatrix::new();
-    pm.add_sphere((0.0, 0.0, 0.0), 50.0, 24);
+    pm.add_sphere((0.0, 0.0, 0.0), 50.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&head));
 
     // LEFT ARM: body * T(-100,125,0) * Rx(-45)
@@ -69,6 +96,85 @@ fn draw_manual_cstack_robot(manual: &mut Canvas) {
 }
 
 #[test]
+fn course_lighting_face_scene() {
+    let color = Rgb::new(0, 255, 0);
+    let bg = Rgb::WHITE;
+    let lighting = course_lighting_values();
+    const W: u32 = 500;
+    const H: u32 = 500;
+
+    let script = "\
+push
+move
+250 300 0
+push
+rotate
+x 30
+rotate
+y -20
+box
+-37 37 37 75 75 75
+pop
+sphere
+-125 130 0 60
+sphere
+125 130 0 60
+push
+rotate
+x 30
+rotate
+y 20
+scale
+1.5 1 1
+torus
+0 -200 0 25 125
+pop
+pop
+display";
+
+    let mut dw = Parser::new_with_bg("test", W, H, &color, &bg);
+    dw.set_display_enabled(false);
+    // The 10_mdl C/Python reference computes Phong reflection once per triangle
+    // normal, then fills the triangle. That maps to our flat shading mode plus
+    // PhongReflection color mode; our ShadingMode::Phong is smooth per-pixel
+    // normal interpolation and makes box faces look too shiny for this fixture.
+    dw.set_shading_mode(ShadingMode::Flat);
+    dw.set_polygon_color_mode(PolygonColorMode::PhongReflection);
+    dw.set_lighting(lighting.clone());
+    dw.parse_string(script)
+        .expect("course lighting script valid");
+
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
+    manual.set_lighting(lighting);
+
+    let base = Matrix::translate(250.0, 300.0, 0.0);
+
+    let cube_cs = &base * &(&Matrix::rotate_x(30.0) * &Matrix::rotate_y(-20.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_box((-37.0, 37.0, 37.0), 75.0, 75.0, 75.0);
+    manual.draw_polygons(&pm.apply(&cube_cs));
+
+    let mut pm = PolygonMatrix::new();
+    pm.add_sphere((-125.0, 130.0, 0.0), 60.0, REFERENCE_3D_STEPS);
+    manual.draw_polygons(&pm.apply(&base));
+
+    let mut pm = PolygonMatrix::new();
+    pm.add_sphere((125.0, 130.0, 0.0), 60.0, REFERENCE_3D_STEPS);
+    manual.draw_polygons(&pm.apply(&base));
+
+    let torus_cs = &base
+        * &(&(&Matrix::rotate_x(30.0) * &Matrix::rotate_y(20.0)) * &Matrix::scale(1.5, 1.0, 1.0));
+    let mut pm = PolygonMatrix::new();
+    pm.add_torus((0.0, -200.0, 0.0), 25.0, 125.0, REFERENCE_3D_STEPS);
+    manual.draw_polygons(&pm.apply(&torus_cs));
+
+    assert!(
+        pixels_eq(dw.canvas(), &manual),
+        "old parser should render the course lighting face scene with the provided lighting values"
+    );
+}
+
+#[test]
 fn script_light() {
     let color = Rgb::new(0, 255, 0);
     const W: u32 = 500;
@@ -85,9 +191,7 @@ fn script_light() {
     );
     let _ = std::fs::remove_file("light.png");
 
-    let mut manual = Canvas::new(W, H, color);
-    manual.set_shading_mode(ShadingMode::Flat);
-    manual.set_polygon_color_mode(PolygonColorMode::PhongReflection);
+    let mut manual = old_parser_reference_canvas(W, H, color, Rgb::BLACK);
     draw_manual_cstack_robot(&mut manual);
 
     assert!(
@@ -112,7 +216,7 @@ fn script_solid() {
     );
     let _ = std::fs::remove_file("solid.png");
 
-    let mut manual = Canvas::new(W, H, green);
+    let mut manual = old_parser_reference_canvas(W, H, green, Rgb::BLACK);
     manual.set_polygon_color_mode(PolygonColorMode::DeterministicRandom);
     draw_manual_cstack_robot(&mut manual);
 
@@ -139,8 +243,8 @@ fn script_cstack() {
     let _ = std::fs::remove_file("robot.png");
 
     // --- manual side: replicate every CS step from script_cstack ---
-    // Parser::new uses Canvas::new(w, h, color) → line=green, bg=black(default)
-    let mut manual = Canvas::new(W, H, green);
+    // Parser::new uses the old-parser reference render state with black background.
+    let mut manual = old_parser_reference_canvas(W, H, green, Rgb::BLACK);
     draw_manual_cstack_robot(&mut manual);
 
     assert!(
@@ -167,13 +271,12 @@ fn script_polygons() {
     .unwrap();
 
     // --- manual side: only torus survives the clear ---
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     // CS = Rx(20) * Ry(20) * T(150,200,0)
     let cs = &(&Matrix::rotate_x(20.0) * &Matrix::rotate_y(20.0))
         * &Matrix::translate(150.0, 200.0, 0.0);
     let mut pm = PolygonMatrix::new();
-    pm.add_torus((0.0, 0.0, 0.0), 25.0, 150.0, 24);
+    pm.add_torus((0.0, 0.0, 0.0), 25.0, 150.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&cs));
 
     assert!(
@@ -222,8 +325,7 @@ fn script_transform() {
     dw.parse_string(&script).unwrap();
 
     // --- manual side ---
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs1 = &Matrix::identity_matrix(4) * &Matrix::translate(250.0, 250.0, 0.0);
     let cs2 = &cs1 * &Matrix::scale(2.0, 2.0, 2.0);
 
@@ -281,13 +383,12 @@ fn curve_script() {
     let _ = std::fs::remove_file("face.png");
 
     // --- manual side: only the post-clear batch survives ---
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = Matrix::identity_matrix(4);
     let mut em = EdgeMatrix::new();
-    em.add_circle(250.0, 250.0, 0.0, 200.0, 0.001);
-    em.add_circle(175.0, 325.0, 0.0, 50.0, 0.001);
-    em.add_circle(325.0, 325.0, 0.0, 50.0, 0.001);
+    em.add_circle(250.0, 250.0, 0.0, 200.0, DEFAULT_CURVE_STEP);
+    em.add_circle(175.0, 325.0, 0.0, 50.0, DEFAULT_CURVE_STEP);
+    em.add_circle(325.0, 325.0, 0.0, 50.0, DEFAULT_CURVE_STEP);
     em.add_hermite(
         (150.0, 150.0),
         (350.0, 150.0),
@@ -326,7 +427,7 @@ fn script_3d() {
     let _ = std::fs::remove_file("scene_3d.png");
 
     // --- manual side ---
-    let mut manual = Canvas::new(W, H, color);
+    let mut manual = old_parser_reference_canvas(W, H, color, Rgb::BLACK);
 
     // box: T(130,350,0) * Ry(20) * Rx(15)
     let box_cs = &(&Matrix::translate(130.0, 350.0, 0.0) * &Matrix::rotate_y(20.0))
@@ -338,13 +439,13 @@ fn script_3d() {
     // sphere: T(250,250,0)
     let sphere_cs = Matrix::translate(250.0, 250.0, 0.0);
     let mut pm = PolygonMatrix::new();
-    pm.add_sphere((0.0, 0.0, 0.0), 80.0, 24);
+    pm.add_sphere((0.0, 0.0, 0.0), 80.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&sphere_cs));
 
     // torus: T(370,150,0) * Rx(60)
     let torus_cs = &Matrix::translate(370.0, 150.0, 0.0) * &Matrix::rotate_x(60.0);
     let mut pm = PolygonMatrix::new();
-    pm.add_torus((0.0, 0.0, 0.0), 20.0, 60.0, 24);
+    pm.add_torus((0.0, 0.0, 0.0), 20.0, 60.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&torus_cs));
 
     assert!(
@@ -368,8 +469,7 @@ fn parity_line_identity_cs() {
     dw.set_display_enabled(false);
     dw.parse_string("line\n10 10 0 150 180 0").unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = Matrix::identity_matrix(4);
     let mut em = EdgeMatrix::new();
     em.push_edge(10.0, 10.0, 0.0, 150.0, 180.0, 0.0);
@@ -393,8 +493,7 @@ fn parity_line_after_translate() {
     dw.parse_string("move\n50 80 0\nline\n0 0 0 100 100 0")
         .unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = &Matrix::identity_matrix(4) * &Matrix::translate(50.0, 80.0, 0.0);
     let mut em = EdgeMatrix::new();
     em.push_edge(0.0, 0.0, 0.0, 100.0, 100.0, 0.0);
@@ -417,8 +516,7 @@ fn parity_box_identity_cs() {
     dw.set_display_enabled(false);
     dw.parse_string("box\n50 50 0 100 80 60").unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = Matrix::identity_matrix(4);
     let mut pm = PolygonMatrix::new();
     pm.add_box((50.0, 50.0, 0.0), 100.0, 80.0, 60.0);
@@ -442,11 +540,10 @@ fn parity_sphere_after_translate() {
     dw.parse_string("move\n200 200 0\nsphere\n0 0 0 100")
         .unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = &Matrix::identity_matrix(4) * &Matrix::translate(200.0, 200.0, 0.0);
     let mut pm = PolygonMatrix::new();
-    pm.add_sphere((0.0, 0.0, 0.0), 100.0, 24);
+    pm.add_sphere((0.0, 0.0, 0.0), 100.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&cs));
 
     assert!(
@@ -467,11 +564,10 @@ fn parity_torus_after_translate() {
     dw.parse_string("move\n200 200 0\ntorus\n0 0 0 30 100")
         .unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = &Matrix::identity_matrix(4) * &Matrix::translate(200.0, 200.0, 0.0);
     let mut pm = PolygonMatrix::new();
-    pm.add_torus((0.0, 0.0, 0.0), 30.0, 100.0, 24);
+    pm.add_torus((0.0, 0.0, 0.0), 30.0, 100.0, REFERENCE_3D_STEPS);
     manual.draw_polygons(&pm.apply(&cs));
 
     assert!(
@@ -496,8 +592,7 @@ fn parity_push_pop_two_boxes() {
     )
     .unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs1 = &Matrix::identity_matrix(4) * &Matrix::translate(30.0, 30.0, 0.0);
     let mut pm1 = PolygonMatrix::new();
     pm1.add_box((0.0, 0.0, 0.0), 60.0, 60.0, 1.0);
@@ -527,8 +622,7 @@ fn parity_rotate_then_box() {
     dw.parse_string("move\n150 150 0\nrotate\ny 45\nbox\n-50 -50 -50 100 100 100")
         .unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = &(&Matrix::identity_matrix(4) * &Matrix::translate(150.0, 150.0, 0.0))
         * &Matrix::rotate_y(45.0);
     let mut pm = PolygonMatrix::new();
@@ -552,11 +646,10 @@ fn parity_circle_identity_cs() {
     dw.set_display_enabled(false);
     dw.parse_string("circle\n200 200 0 150").unwrap();
 
-    let mut manual = Canvas::new_with_bg(W, H, bg);
-    manual.line = color;
+    let mut manual = old_parser_reference_canvas(W, H, color, bg);
     let cs = Matrix::identity_matrix(4);
     let mut em = EdgeMatrix::new();
-    em.add_circle(200.0, 200.0, 0.0, 150.0, 0.001);
+    em.add_circle(200.0, 200.0, 0.0, 150.0, DEFAULT_CURVE_STEP);
     manual.draw_lines(&em.apply(&cs));
 
     assert!(

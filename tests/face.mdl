@@ -1,0 +1,20 @@
+// Note: This uses the light values in the provided source code.
+constants shiny_purple 0.3 0.2 1 0.3 0 1 0.3 0.2 1
+constants shiny_teal 0.3 0.0 0.0 0.3 0.2 0.8 0.3 0.2 0.8
+constants dull_yellow 0.3 0.8 0.2 0.3 0.8 0.2 0 0 0
+push
+move 250 300 0
+push
+rotate x 30
+rotate y -20
+box -40 40 40 80 80 80
+pop
+sphere shiny_purple -125 130 0 60
+sphere shiny_teal 125 130 0 60
+push
+rotate x 30
+rotate y 20
+scale 1.5 1 1
+torus dull_yellow 0 -200 0 25 125
+display
+save face.png

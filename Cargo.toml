@@ -28,6 +28,7 @@ external = ["filters"]
 filters = []
 turtle = []
 fancy_math = []
+old_parser = []
 
 [[example]]
 name = "frac_tree"
@@ -56,6 +57,18 @@ required-features = ["external"]
 [[example]]
 name = "cstack_model_theater"
 required-features = ["external"]
+
+[[example]]
+name = "walle_mdl"
+required-features = ["external"]
+
+[[example]]
+name = "it_takes_two"
+required-features = ["external"]
+
+[[example]]
+name = "curve_cathedral"
+required-features = ["old_parser"]
 
 # [[bench]]
 # name = "derp"

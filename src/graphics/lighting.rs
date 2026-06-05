@@ -46,14 +46,16 @@ impl PointLight {
 }
 
 /// Lighting inputs for Phong reflection.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Lighting {
     /// View vector from the surface to the viewer.
     pub view: Vector,
     /// Ambient light color.
     pub ambient: Rgb,
-    /// Point light source.
+    /// Point light source used when `point_lights` is empty.
     pub point_light: PointLight,
+    /// Explicit point light sources. When empty, `point_light` is used for compatibility.
+    pub point_lights: Vec<PointLight>,
     /// Ambient reflection constants.
     pub ambient_reflection: ReflectionConstants,
     /// Diffuse reflection constants.
@@ -69,10 +71,11 @@ impl Default for Lighting {
         Self {
             view: Vector::new(0.0, 0.0, 1.0),
             ambient: Rgb::new(50, 50, 50),
-            point_light: PointLight::new(Vector::new(0.75, 0.75, 1.0), Rgb::WHITE),
+            point_light: PointLight::new(Vector::new(0.5, 0.75, 1.0), Rgb::WHITE),
+            point_lights: Vec::new(),
             ambient_reflection: ReflectionConstants::new(0.1, 0.1, 0.1),
-            diffuse_reflection: ReflectionConstants::new(0.75, 0.25, 0.25),
-            specular_reflection: ReflectionConstants::new(0.25, 0.25, 0.75),
+            diffuse_reflection: ReflectionConstants::new(0.5, 0.5, 0.5),
+            specular_reflection: ReflectionConstants::new(0.5, 0.5, 0.5),
             specular_exponent: DEFAULT_SPECULAR_EXPONENT,
         }
     }
@@ -81,81 +84,117 @@ impl Default for Lighting {
 impl Lighting {
     /// Calculates one flat-shaded color for a polygon surface normal.
     #[must_use]
-    pub fn illuminate(self, normal: Vector) -> Rgb {
+    pub fn illuminate(&self, normal: Vector) -> Rgb {
         self.prepare().illuminate(normal)
     }
 
-    pub(crate) fn prepare(self) -> PreparedLighting {
+    pub(crate) fn prepare(&self) -> PreparedLighting {
         let ambient = rgb_values(self.ambient);
-        let point = rgb_values(self.point_light.color);
         let ambient_reflection = self.ambient_reflection.values();
         let diffuse_reflection = self.diffuse_reflection.values();
         let specular_reflection = self.specular_reflection.values();
+        let source_lights = if self.point_lights.is_empty() {
+            std::slice::from_ref(&self.point_light)
+        } else {
+            &self.point_lights
+        };
+        let point_lights = source_lights
+            .iter()
+            .copied()
+            .map(|point_light| {
+                let point = rgb_values(point_light.color);
+                PreparedPointLight {
+                    light: point_light.location.normalized(),
+                    diffuse: [
+                        point[0] * diffuse_reflection[0],
+                        point[1] * diffuse_reflection[1],
+                        point[2] * diffuse_reflection[2],
+                    ],
+                    specular: [
+                        point[0] * specular_reflection[0],
+                        point[1] * specular_reflection[1],
+                        point[2] * specular_reflection[2],
+                    ],
+                }
+            })
+            .collect();
 
         PreparedLighting {
             view: self.view.normalized(),
-            light: self.point_light.location.normalized(),
             ambient: [
                 ambient[0] * ambient_reflection[0],
                 ambient[1] * ambient_reflection[1],
                 ambient[2] * ambient_reflection[2],
             ],
-            diffuse: [
-                point[0] * diffuse_reflection[0],
-                point[1] * diffuse_reflection[1],
-                point[2] * diffuse_reflection[2],
-            ],
-            specular: [
-                point[0] * specular_reflection[0],
-                point[1] * specular_reflection[1],
-                point[2] * specular_reflection[2],
-            ],
+            point_lights,
             specular_exponent: i32::try_from(self.specular_exponent).unwrap_or(i32::MAX),
         }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PreparedLighting {
-    view: Vector,
+struct PreparedPointLight {
     light: Vector,
-    ambient: [f64; 3],
     diffuse: [f64; 3],
     specular: [f64; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedLighting {
+    view: Vector,
+    ambient: [f64; 3],
+    point_lights: Vec<PreparedPointLight>,
     specular_exponent: i32,
 }
 
 impl PreparedLighting {
-    pub(crate) fn illuminate(self, normal: Vector) -> Rgb {
+    pub(crate) fn illuminate(&self, normal: Vector) -> Rgb {
         self.illuminate_unit(normal.normalized())
     }
 
-    pub(crate) fn illuminate_unit(self, normal: Vector) -> Rgb {
-        let (diffuse_factor, specular_factor) = self.reflection_factors_unit(normal);
+    pub(crate) fn illuminate_unit(&self, normal: Vector) -> Rgb {
+        self.illuminate_unit_with(normal, false)
+    }
+
+    pub(crate) fn illuminate_toon(&self, normal: Vector) -> Rgb {
+        self.illuminate_unit_with(normal.normalized(), true)
+    }
+
+    fn illuminate_unit_with(&self, normal: Vector, toon: bool) -> Rgb {
+        let mut channels = self.ambient;
+
+        for point_light in &self.point_lights {
+            let (diffuse_factor, specular_factor) =
+                self.reflection_factors_unit(normal, point_light.light);
+            let diffuse_factor = if toon {
+                quantize_diffuse(diffuse_factor)
+            } else {
+                diffuse_factor
+            };
+            let specular_factor = if toon && specular_factor < 0.45 {
+                0.0
+            } else if toon {
+                1.0
+            } else {
+                specular_factor
+            };
+            for (channel, value) in channels.iter_mut().enumerate() {
+                *value += point_light.diffuse[channel] * diffuse_factor
+                    + point_light.specular[channel] * specular_factor;
+            }
+        }
 
         Rgb::new(
-            self.channel_intensity(0, diffuse_factor, specular_factor),
-            self.channel_intensity(1, diffuse_factor, specular_factor),
-            self.channel_intensity(2, diffuse_factor, specular_factor),
+            channel_intensity(channels[0]),
+            channel_intensity(channels[1]),
+            channel_intensity(channels[2]),
         )
     }
 
-    pub(crate) fn illuminate_toon(self, normal: Vector) -> Rgb {
-        let (diffuse_factor, specular_factor) = self.reflection_factors_unit(normal.normalized());
-        let diffuse_factor = quantize_diffuse(diffuse_factor);
-        let specular_factor = if specular_factor >= 0.45 { 1.0 } else { 0.0 };
+    fn reflection_factors_unit(&self, normal: Vector, light: Vector) -> (f64, f64) {
+        let normal_dot_light = normal.dot(light).max(0.0);
 
-        Rgb::new(
-            self.channel_intensity(0, diffuse_factor, specular_factor),
-            self.channel_intensity(1, diffuse_factor, specular_factor),
-            self.channel_intensity(2, diffuse_factor, specular_factor),
-        )
-    }
-
-    fn reflection_factors_unit(self, normal: Vector) -> (f64, f64) {
-        let normal_dot_light = normal.dot(self.light).max(0.0);
-
-        let reflection = normal * (2.0 * normal_dot_light) - self.light;
+        let reflection = normal * (2.0 * normal_dot_light) - light;
         let specular_factor = if normal_dot_light > 0.0 {
             reflection
                 .dot(self.view)
@@ -166,15 +205,6 @@ impl PreparedLighting {
         };
 
         (normal_dot_light, specular_factor)
-    }
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn channel_intensity(self, channel: usize, diffuse_factor: f64, specular_factor: f64) -> u8 {
-        let ambient = self.ambient[channel];
-        let diffuse = self.diffuse[channel] * diffuse_factor;
-        let specular = self.specular[channel] * specular_factor;
-
-        (ambient + diffuse + specular).round().clamp(0.0, 255.0) as u8
     }
 }
 
@@ -198,6 +228,11 @@ fn rgb_values(color: Rgb) -> [f64; 3] {
     ]
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn channel_intensity(value: f64) -> u8 {
+    value.round().clamp(0.0, 255.0) as u8
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,19 +245,20 @@ mod tests {
         assert_eq!(lighting.ambient, Rgb::new(50, 50, 50));
         assert_eq!(
             lighting.point_light,
-            PointLight::new(Vector::new(0.75, 0.75, 1.0), Rgb::WHITE)
+            PointLight::new(Vector::new(0.5, 0.75, 1.0), Rgb::WHITE)
         );
+        assert!(lighting.point_lights.is_empty());
         assert_eq!(
             lighting.ambient_reflection,
             ReflectionConstants::new(0.1, 0.1, 0.1)
         );
         assert_eq!(
             lighting.diffuse_reflection,
-            ReflectionConstants::new(0.75, 0.25, 0.25)
+            ReflectionConstants::new(0.5, 0.5, 0.5)
         );
         assert_eq!(
             lighting.specular_reflection,
-            ReflectionConstants::new(0.25, 0.25, 0.75)
+            ReflectionConstants::new(0.5, 0.5, 0.5)
         );
         assert_eq!(lighting.specular_exponent, DEFAULT_SPECULAR_EXPONENT);
     }
@@ -231,7 +267,7 @@ mod tests {
     fn illuminate_adds_ambient_diffuse_and_specular() {
         let color = Lighting::default().illuminate(Vector::new(0.0, 0.0, 1.0));
 
-        assert_eq!(color, Rgb::new(150, 63, 91));
+        assert_eq!(color, Rgb::new(139, 139, 139));
     }
 
     #[test]
@@ -252,7 +288,27 @@ mod tests {
         let lighting = Lighting::default().prepare();
         let normal = Vector::new(0.0, 0.0, 1.0);
 
-        assert_eq!(lighting.illuminate(normal), Rgb::new(150, 63, 91));
-        assert_eq!(lighting.illuminate_toon(normal), Rgb::new(143, 51, 51));
+        assert_eq!(lighting.illuminate(normal), Rgb::new(139, 139, 139));
+        assert_eq!(lighting.illuminate_toon(normal), Rgb::new(97, 97, 97));
+    }
+
+    #[test]
+    fn illuminate_accumulates_multiple_point_lights() {
+        let lighting = Lighting {
+            ambient: Rgb::BLACK,
+            point_lights: vec![
+                PointLight::new(Vector::new(0.0, 0.0, 1.0), Rgb::new(80, 0, 0)),
+                PointLight::new(Vector::new(0.0, 0.0, 1.0), Rgb::new(0, 60, 0)),
+            ],
+            ambient_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            diffuse_reflection: ReflectionConstants::new(1.0, 1.0, 1.0),
+            specular_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            ..Lighting::default()
+        };
+
+        assert_eq!(
+            lighting.illuminate(Vector::new(0.0, 0.0, 1.0)),
+            Rgb::new(80, 60, 0)
+        );
     }
 }

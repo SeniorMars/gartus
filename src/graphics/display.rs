@@ -186,7 +186,7 @@ impl Canvas {
             line_width: self.line_width,
             polygon_color_mode: self.polygon_color_mode,
             shading_mode: self.shading_mode,
-            lighting: self.lighting,
+            lighting: self.lighting.clone(),
         }
     }
 
@@ -503,6 +503,17 @@ impl Canvas {
         self.clear_zbuffer();
     }
 
+    /// Restores canvas pixels from a same-sized baseline without reallocating.
+    pub(crate) fn restore_pixels(&mut self, pixels: &[Rgb]) {
+        assert_eq!(
+            pixels.len(),
+            self.pixels.len(),
+            "baseline pixel data must match canvas size"
+        );
+        self.pixels.copy_from_slice(pixels);
+        self.clear_zbuffer();
+    }
+
     /// Returns a new canvas with every pixel transformed by `f`.
     pub fn map_pixels<F>(&self, mut f: F) -> Self
     where
@@ -648,7 +659,12 @@ impl Canvas {
     /// Returns the Phong reflection lighting configuration.
     #[must_use]
     pub fn lighting(&self) -> Lighting {
-        self.lighting
+        self.lighting.clone()
+    }
+
+    /// Returns the Phong reflection lighting configuration mutably.
+    pub fn lighting_mut(&mut self) -> &mut Lighting {
+        &mut self.lighting
     }
 
     /// Sets the current drawing line width.

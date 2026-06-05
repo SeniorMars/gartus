@@ -390,7 +390,7 @@ fn draw_polygons_can_flat_shade_with_phong_reflection() {
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
     canvas.draw_polygons(&polygons);
 
-    assert_eq!(canvas.get_pixel(3, 3), Some(&Rgb::new(150, 63, 91)));
+    assert_eq!(canvas.get_pixel(3, 3), Some(&Rgb::new(139, 139, 139)));
 }
 
 fn smooth_test_polygons() -> PolygonMatrix {

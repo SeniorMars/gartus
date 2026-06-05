@@ -1,4 +1,4 @@
-use crate::gmath::edge_matrix::EdgeMatrix;
+use crate::gmath::edge_matrix::{DEFAULT_CURVE_STEP, EdgeMatrix};
 use crate::gmath::matrix::Matrix;
 use crate::gmath::polygon_matrix::PolygonMatrix;
 use crate::graphics::{
@@ -13,6 +13,8 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+const DEFAULT_3D_STEPS: usize = 100;
 
 /**
 ```text
@@ -167,12 +169,15 @@ impl Parser {
     /// ```
     #[must_use]
     pub fn new(file_name: &str, width: u32, height: u32, color: &Rgb) -> Self {
+        let mut canvas = Canvas::new(width, height, *color);
+        canvas.set_shading_mode(ShadingMode::Flat);
+        canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
         Self {
             file_name: file_name.to_string(),
             trans_matrix: Matrix::identity_matrix(4),
             trans_stack: Vec::new(),
             symbols: HashMap::new(),
-            canvas: Canvas::new(width, height, *color),
+            canvas,
             display_enabled: true,
             source_dirs: Vec::new(),
             tmp_edge: EdgeMatrix::new(),
@@ -204,6 +209,8 @@ impl Parser {
     pub fn new_with_bg(file_name: &str, width: u32, height: u32, color: &Rgb, bg: &Rgb) -> Self {
         let mut canvas = Canvas::new_with_bg(width, height, *bg);
         canvas.line = *color;
+        canvas.set_shading_mode(ShadingMode::Flat);
+        canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
         Self {
             file_name: file_name.to_string(),
             trans_matrix: Matrix::identity_matrix(4),
@@ -623,7 +630,7 @@ impl Parser {
         let args = self.parse_args_resolved(line_str, 4, line_num)?;
         self.tmp_edge.clear();
         self.tmp_edge
-            .add_circle(args[0], args[1], args[2], args[3], 0.001);
+            .add_circle(args[0], args[1], args[2], args[3], DEFAULT_CURVE_STEP);
         self.draw_tmp_edge_transformed();
         Ok(())
     }
@@ -834,7 +841,7 @@ impl Parser {
         let args = self.parse_args_resolved(line_str, 4, line_num)?;
         self.tmp_polygon.clear();
         self.tmp_polygon
-            .add_sphere((args[0], args[1], args[2]), args[3], 24);
+            .add_sphere((args[0], args[1], args[2]), args[3], DEFAULT_3D_STEPS);
         self.draw_tmp_polygon_transformed();
         Ok(())
     }
@@ -843,8 +850,12 @@ impl Parser {
         let (line_num, line_str) = line;
         let args = self.parse_args_resolved(line_str, 5, line_num)?;
         self.tmp_polygon.clear();
-        self.tmp_polygon
-            .add_torus((args[0], args[1], args[2]), args[3], args[4], 24);
+        self.tmp_polygon.add_torus(
+            (args[0], args[1], args[2]),
+            args[3],
+            args[4],
+            DEFAULT_3D_STEPS,
+        );
         self.draw_tmp_polygon_transformed();
         Ok(())
     }

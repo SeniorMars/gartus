@@ -1,0 +1,11 @@
+frames 50
+basename simple_50
+push
+move 250 250 0
+scale 2 2 2 bigenator
+rotate y 360 spinny
+rotate z 360 spinny
+torus 0 0 0 75 125
+vary spinny 0 49 0 1
+vary bigenator 0 24 0 1
+vary bigenator 25 49 1 0

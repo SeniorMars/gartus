@@ -308,7 +308,7 @@ impl Canvas {
             match shading_mode {
                 ShadingMode::Wireframe => unreachable!("wireframe handled before culling"),
                 ShadingMode::Flat => {
-                    let color = match lighting {
+                    let color = match &lighting {
                         Some(lighting) => lighting.illuminate(normal),
                         None => triangle_color(color_mode, line_color, index),
                     };
@@ -317,7 +317,9 @@ impl Canvas {
                 ShadingMode::Gouraud | ShadingMode::Phong | ShadingMode::Toon => self
                     .draw_smooth_triangle(
                         shading_mode,
-                        lighting.expect("lighting prepared for smooth shading"),
+                        lighting
+                            .as_ref()
+                            .expect("lighting prepared for smooth shading"),
                         vertex_normals
                             .as_ref()
                             .expect("vertex normals prepared for smooth shading"),
@@ -343,7 +345,7 @@ impl Canvas {
     fn draw_smooth_triangle(
         &mut self,
         shading_mode: ShadingMode,
-        lighting: PreparedLighting,
+        lighting: &PreparedLighting,
         vertex_normals: &[Vector],
         triangle_index: usize,
         points: [(f64, f64, f64); 3],
@@ -595,7 +597,7 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation)]
     fn draw_phong_triangle(
         &mut self,
-        lighting: PreparedLighting,
+        lighting: &PreparedLighting,
         p0: (f64, f64, f64),
         p1: (f64, f64, f64),
         p2: (f64, f64, f64),
@@ -651,7 +653,7 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation)]
     fn draw_toon_triangle(
         &mut self,
-        lighting: PreparedLighting,
+        lighting: &PreparedLighting,
         p0: (f64, f64, f64),
         p1: (f64, f64, f64),
         p2: (f64, f64, f64),
@@ -707,7 +709,7 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     fn draw_phong_scanline(
         &mut self,
-        lighting: PreparedLighting,
+        lighting: &PreparedLighting,
         mut p0: NormalScanPoint,
         mut p1: NormalScanPoint,
         y: i32,
@@ -772,7 +774,7 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     fn draw_toon_scanline(
         &mut self,
-        lighting: PreparedLighting,
+        lighting: &PreparedLighting,
         mut p0: NormalScanPoint,
         mut p1: NormalScanPoint,
         y: i32,
