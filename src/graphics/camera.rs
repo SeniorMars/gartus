@@ -1,9 +1,13 @@
 use super::colors::Rgb;
 #[cfg(feature = "fancy_math")]
-use crate::gmath::{
-    ray::Ray,
-    vector::{Point, Vector},
+use crate::gmath::ray::Ray;
+use crate::gmath::vector::{Point, Vector};
+#[cfg(feature = "fancy_math")]
+use crate::graphics::raytracing::{
+    Hittable, INFINITY, Interval, SampleRng, degrees_to_radians, sky_gradient,
 };
+#[cfg(feature = "fancy_math")]
+use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, linear_color_to_rgb, normal_scene_color};
 use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
@@ -20,6 +24,9 @@ pub struct Camera3D {
     focal_length: f64,
     center_y_factor: f64,
     near_depth: f64,
+    lookfrom: Option<Point>,
+    lookat: Point,
+    vup: Vector,
 }
 
 /// A projected 2D point plus its camera-space depth.
@@ -48,12 +55,40 @@ pub struct ProjectedSegment {
 #[cfg(feature = "fancy_math")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RayCamera {
+    aspect_ratio: f64,
     image_width: u32,
     image_height: u32,
+    samples_per_pixel: u32,
+    max_depth: u32,
+    rng_seed: u64,
+    vertical_fov: f64,
+    lookfrom: Point,
+    lookat: Point,
+    view_up: Vector,
+    defocus_angle: f64,
+    focus_distance: f64,
     camera_center: Point,
     pixel00_loc: Point,
     pixel_delta_u: Vector,
     pixel_delta_v: Vector,
+    defocus_disk_u: Vector,
+    defocus_disk_v: Vector,
+}
+
+#[cfg(feature = "fancy_math")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RayCameraParams {
+    image_width: u32,
+    aspect_ratio: f64,
+    samples_per_pixel: u32,
+    max_depth: u32,
+    rng_seed: u64,
+    vertical_fov: f64,
+    lookfrom: Point,
+    lookat: Point,
+    view_up: Vector,
+    defocus_angle: f64,
+    focus_distance: f64,
 }
 
 impl Camera3D {
@@ -67,6 +102,9 @@ impl Camera3D {
             focal_length: 700.0,
             center_y_factor: 0.5,
             near_depth: 80.0,
+            lookfrom: None,
+            lookat: Point::new(0.0, 0.0, 0.0),
+            vup: Vector::new(0.0, 1.0, 0.0),
         }
     }
 
@@ -84,6 +122,22 @@ impl Camera3D {
         self
     }
 
+    /// Sets the focal length from a vertical field-of-view angle in degrees.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vertical_fov` is not finite or is outside `0..180` degrees.
+    #[must_use]
+    pub fn with_vertical_fov(mut self, vertical_fov: f64) -> Self {
+        assert!(
+            vertical_fov.is_finite() && 0.0 < vertical_fov && vertical_fov < 180.0,
+            "vertical field of view must be finite and in 0..180 degrees"
+        );
+        let theta = vertical_fov.to_radians();
+        self.focal_length = f64::from(self.height) * 0.5 / (theta * 0.5).tan();
+        self
+    }
+
     /// Sets the vertical screen center as a fraction of canvas height.
     #[must_use]
     pub fn with_center_y_factor(mut self, center_y_factor: f64) -> Self {
@@ -98,20 +152,78 @@ impl Camera3D {
         self
     }
 
+    /// Positions the projection camera at `lookfrom`, aimed at `lookat`.
+    ///
+    /// The default camera is equivalent to looking from `(0, 0, -camera_distance)`
+    /// toward the origin, preserving the historical projection behavior.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lookfrom` and `lookat` are the same point.
+    #[must_use]
+    pub fn with_look_at(mut self, lookfrom: Point, lookat: Point) -> Self {
+        assert!(
+            (lookat - lookfrom).length_squared() > f64::EPSILON,
+            "lookfrom and lookat must be distinct"
+        );
+        self.lookfrom = Some(lookfrom);
+        self.lookat = lookat;
+        self
+    }
+
+    /// Sets the camera-relative up direction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vup` is zero.
+    #[must_use]
+    pub fn with_view_up(mut self, vup: Vector) -> Self {
+        assert!(
+            vup.length_squared() > f64::EPSILON,
+            "view-up vector must be nonzero"
+        );
+        self.vup = vup;
+        self
+    }
+
+    fn effective_lookfrom(&self) -> Point {
+        self.lookfrom
+            .unwrap_or_else(|| Point::new(0.0, 0.0, -self.camera_distance))
+    }
+
+    fn camera_frame(&self) -> Option<(Point, Vector, Vector, Vector)> {
+        let lookfrom = self.effective_lookfrom();
+        let forward = (self.lookat - lookfrom).normalized();
+        if forward.length_squared() <= f64::EPSILON {
+            return None;
+        }
+
+        let right = self.vup.cross(forward).normalized();
+        if right.length_squared() <= f64::EPSILON {
+            return None;
+        }
+
+        let up = forward.cross(right);
+        Some((lookfrom, right, up, forward))
+    }
+
     /// Projects a homogeneous point into 2D screen coordinates.
     #[must_use]
     pub fn project(&self, point: &[f64]) -> Option<ScreenPoint> {
         if point.len() < 3 {
             return None;
         }
-        let depth = point[2] + self.camera_distance;
+        let (lookfrom, right, up, forward) = self.camera_frame()?;
+        let point = Point::new(point[0], point[1], point[2]);
+        let camera_relative = point - lookfrom;
+        let depth = camera_relative.dot(forward);
         if depth < self.near_depth {
             return None;
         }
         let scale = self.focal_length / depth;
         Some(ScreenPoint {
-            x: f64::from(self.width) * 0.5 + point[0] * scale,
-            y: f64::from(self.height) * self.center_y_factor - point[1] * scale,
+            x: f64::from(self.width) * 0.5 + camera_relative.dot(right) * scale,
+            y: f64::from(self.height) * self.center_y_factor - camera_relative.dot(up) * scale,
             depth,
         })
     }
@@ -155,6 +267,13 @@ impl Camera3D {
 }
 
 #[cfg(feature = "fancy_math")]
+impl Default for RayCamera {
+    fn default() -> Self {
+        Self::new(100, 1.0)
+    }
+}
+
+#[cfg(feature = "fancy_math")]
 impl RayCamera {
     /// Creates a camera with the requested image width and ideal aspect ratio.
     ///
@@ -174,31 +293,243 @@ impl RayCamera {
             "aspect ratio must be positive and finite"
         );
 
-        let image_height = ((f64::from(image_width) / aspect_ratio) as u32).max(1);
-        let focal_length = 1.0;
-        let viewport_height = 2.0;
-        let viewport_width = viewport_height * (f64::from(image_width) / f64::from(image_height));
-        let camera_center = Point::new(0.0, 0.0, 0.0);
+        Self::initialized(RayCameraParams {
+            image_width,
+            aspect_ratio,
+            samples_per_pixel: 1,
+            max_depth: 10,
+            rng_seed: 1,
+            vertical_fov: 90.0,
+            lookfrom: Point::new(0.0, 0.0, 0.0),
+            lookat: Point::new(0.0, 0.0, -1.0),
+            view_up: Vector::new(0.0, 1.0, 0.0),
+            defocus_angle: 0.0,
+            focus_distance: 1.0,
+        })
+    }
 
-        let viewport_u = Vector::new(viewport_width, 0.0, 0.0);
-        let viewport_v = Vector::new(0.0, -viewport_height, 0.0);
-        let pixel_delta_u = viewport_u / f64::from(image_width);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn initialized(params: RayCameraParams) -> Self {
+        Self::validate_view(
+            params.vertical_fov,
+            params.lookfrom,
+            params.lookat,
+            params.view_up,
+            params.defocus_angle,
+            params.focus_distance,
+        );
+
+        let image_height = ((f64::from(params.image_width) / params.aspect_ratio) as u32).max(1);
+        let theta = degrees_to_radians(params.vertical_fov);
+        let h = (theta * 0.5).tan();
+        let viewport_height = 2.0 * h * params.focus_distance;
+        let viewport_width =
+            viewport_height * (f64::from(params.image_width) / f64::from(image_height));
+        let camera_center = params.lookfrom;
+
+        let w = (params.lookfrom - params.lookat).normalized();
+        let u = params.view_up.cross(w).normalized();
+        let v = w.cross(u);
+
+        let viewport_u = viewport_width * u;
+        let viewport_v = viewport_height * -v;
+        let pixel_delta_u = viewport_u / f64::from(params.image_width);
         let pixel_delta_v = viewport_v / f64::from(image_height);
 
-        let viewport_upper_left = camera_center
-            - Vector::new(0.0, 0.0, focal_length)
-            - viewport_u / 2.0
-            - viewport_v / 2.0;
+        let viewport_upper_left =
+            camera_center - params.focus_distance * w - viewport_u / 2.0 - viewport_v / 2.0;
         let pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
+        let defocus_radius =
+            params.focus_distance * degrees_to_radians(params.defocus_angle * 0.5).tan();
+        let defocus_disk_u = defocus_radius * u;
+        let defocus_disk_v = defocus_radius * v;
 
         Self {
-            image_width,
+            aspect_ratio: params.aspect_ratio,
+            image_width: params.image_width,
             image_height,
+            samples_per_pixel: params.samples_per_pixel.max(1),
+            max_depth: params.max_depth,
+            rng_seed: params.rng_seed,
+            vertical_fov: params.vertical_fov,
+            lookfrom: params.lookfrom,
+            lookat: params.lookat,
+            view_up: params.view_up,
+            defocus_angle: params.defocus_angle,
+            focus_distance: params.focus_distance,
             camera_center,
             pixel00_loc,
             pixel_delta_u,
             pixel_delta_v,
+            defocus_disk_u,
+            defocus_disk_v,
         }
+    }
+
+    /// Returns a copy of the camera initialized from its current public render parameters.
+    #[must_use]
+    fn initialize(self) -> Self {
+        Self::initialized(RayCameraParams {
+            image_width: self.image_width,
+            aspect_ratio: self.aspect_ratio,
+            samples_per_pixel: self.samples_per_pixel,
+            max_depth: self.max_depth,
+            rng_seed: self.rng_seed,
+            vertical_fov: self.vertical_fov,
+            lookfrom: self.lookfrom,
+            lookat: self.lookat,
+            view_up: self.view_up,
+            defocus_angle: self.defocus_angle,
+            focus_distance: self.focus_distance,
+        })
+    }
+
+    fn validate_view(
+        vertical_fov: f64,
+        lookfrom: Point,
+        lookat: Point,
+        view_up: Vector,
+        defocus_angle: f64,
+        focus_distance: f64,
+    ) {
+        assert!(
+            vertical_fov.is_finite() && 0.0 < vertical_fov && vertical_fov < 180.0,
+            "vertical field of view must be finite and in 0..180 degrees"
+        );
+        let w = lookfrom - lookat;
+        assert!(
+            w.length_squared() > f64::EPSILON,
+            "lookfrom and lookat must be distinct"
+        );
+        assert!(
+            view_up.length_squared() > f64::EPSILON,
+            "view-up vector must be nonzero"
+        );
+        assert!(
+            view_up.cross(w).length_squared() > f64::EPSILON,
+            "view-up vector must not be parallel to the viewing direction"
+        );
+        assert!(
+            defocus_angle.is_finite() && (0.0..180.0).contains(&defocus_angle),
+            "defocus angle must be finite and in 0..180 degrees"
+        );
+        assert!(
+            focus_distance.is_finite() && focus_distance > 0.0,
+            "focus distance must be positive and finite"
+        );
+    }
+
+    /// Sets the target image width and recomputes derived camera values.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `image_width` is zero.
+    #[must_use]
+    pub fn with_image_width(mut self, image_width: u32) -> Self {
+        assert!(image_width > 0, "image width must be positive");
+        self.image_width = image_width;
+        self.initialize()
+    }
+
+    /// Sets the target aspect ratio and recomputes derived camera values.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `aspect_ratio` is not positive and finite.
+    #[must_use]
+    pub fn with_aspect_ratio(mut self, aspect_ratio: f64) -> Self {
+        assert!(
+            aspect_ratio.is_finite() && aspect_ratio > 0.0,
+            "aspect ratio must be positive and finite"
+        );
+        self.aspect_ratio = aspect_ratio;
+        self.initialize()
+    }
+
+    /// Sets the random samples taken per pixel for world rendering.
+    #[must_use]
+    pub fn with_samples_per_pixel(mut self, samples_per_pixel: u32) -> Self {
+        self.samples_per_pixel = samples_per_pixel.max(1);
+        self.initialize()
+    }
+
+    /// Sets the maximum ray-bounce recursion depth for diffuse world rendering.
+    #[must_use]
+    pub fn with_max_depth(mut self, max_depth: u32) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    /// Sets the deterministic random seed used for antialiasing samples.
+    #[must_use]
+    pub fn with_rng_seed(mut self, rng_seed: u64) -> Self {
+        self.rng_seed = rng_seed;
+        self
+    }
+
+    /// Sets the vertical field of view in degrees and recomputes derived camera values.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vertical_fov` is not finite or is outside `0..180` degrees.
+    #[must_use]
+    pub fn with_vertical_fov(mut self, vertical_fov: f64) -> Self {
+        self.vertical_fov = vertical_fov;
+        self.initialize()
+    }
+
+    /// Positions the camera at `lookfrom`, aimed at `lookat`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lookfrom` and `lookat` are the same point, or if the current view-up vector is
+    /// parallel to the new viewing direction.
+    #[must_use]
+    pub fn with_look_at(mut self, lookfrom: Point, lookat: Point) -> Self {
+        self.lookfrom = lookfrom;
+        self.lookat = lookat;
+        self.initialize()
+    }
+
+    /// Sets the camera-relative up direction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `view_up` is zero or parallel to the current viewing direction.
+    #[must_use]
+    pub fn with_view_up(mut self, view_up: Vector) -> Self {
+        self.view_up = view_up;
+        self.initialize()
+    }
+
+    /// Sets the variation angle of rays through each pixel for defocus blur.
+    ///
+    /// A zero angle keeps the camera as a pinhole camera.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `defocus_angle` is not finite or is outside `0..180` degrees.
+    #[must_use]
+    pub fn with_defocus_angle(mut self, defocus_angle: f64) -> Self {
+        self.defocus_angle = defocus_angle;
+        self.initialize()
+    }
+
+    /// Sets the distance from the camera origin to the plane of perfect focus.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `focus_distance` is not positive and finite.
+    #[must_use]
+    pub fn with_focus_distance(mut self, focus_distance: f64) -> Self {
+        self.focus_distance = focus_distance;
+        self.initialize()
+    }
+
+    /// Returns the camera's ideal aspect ratio.
+    #[must_use]
+    pub fn aspect_ratio(self) -> f64 {
+        self.aspect_ratio
     }
 
     /// Returns the rendered image width in pixels.
@@ -213,10 +544,52 @@ impl RayCamera {
         self.image_height
     }
 
+    /// Returns the number of random samples per pixel used by [`Self::render_world`].
+    #[must_use]
+    pub fn samples_per_pixel(self) -> u32 {
+        self.samples_per_pixel
+    }
+
+    /// Returns the maximum ray-bounce recursion depth used by [`Self::render_world`].
+    #[must_use]
+    pub fn max_depth(self) -> u32 {
+        self.max_depth
+    }
+
+    /// Returns the vertical field of view in degrees.
+    #[must_use]
+    pub fn vertical_fov(self) -> f64 {
+        self.vertical_fov
+    }
+
+    /// Returns the defocus cone angle in degrees.
+    #[must_use]
+    pub fn defocus_angle(self) -> f64 {
+        self.defocus_angle
+    }
+
+    /// Returns the distance from the camera origin to the plane of perfect focus.
+    #[must_use]
+    pub fn focus_distance(self) -> f64 {
+        self.focus_distance
+    }
+
     /// Returns the camera origin point.
     #[must_use]
     pub fn camera_center(self) -> Point {
         self.camera_center
+    }
+
+    /// Returns the point this camera is aimed at.
+    #[must_use]
+    pub fn lookat(self) -> Point {
+        self.lookat
+    }
+
+    /// Returns the camera-relative up direction.
+    #[must_use]
+    pub fn view_up(self) -> Vector {
+        self.view_up
     }
 
     /// Returns a ray from the camera center through the center of pixel `(x, y)`.
@@ -238,14 +611,84 @@ impl RayCamera {
         Ray::new(self.camera_center, pixel_center - self.camera_center)
     }
 
+    fn ray_for_pixel_sample(self, x: u32, y: u32, rng: &mut SampleRng) -> Ray {
+        let offset = Self::sample_square(rng);
+        let pixel_sample = self.pixel00_loc
+            + (f64::from(x) + offset.x()) * self.pixel_delta_u
+            + (f64::from(y) + offset.y()) * self.pixel_delta_v;
+        let ray_origin = if self.defocus_angle <= 0.0 {
+            self.camera_center
+        } else {
+            self.defocus_disk_sample(rng)
+        };
+        Ray::new(ray_origin, pixel_sample - ray_origin)
+    }
+
+    fn sample_square(rng: &mut SampleRng) -> Vector {
+        Vector::new(rng.random_double() - 0.5, rng.random_double() - 0.5, 0.0)
+    }
+
+    fn defocus_disk_sample(self, rng: &mut SampleRng) -> Point {
+        let point = rng.random_in_unit_disk();
+        self.camera_center + point.x() * self.defocus_disk_u + point.y() * self.defocus_disk_v
+    }
+
+    fn ray_color(ray: &Ray, depth: u32, world: &dyn Hittable, rng: &mut SampleRng) -> Vector {
+        if depth == 0 {
+            return Vector::default();
+        }
+
+        if let Some(record) = world.hit(ray, Interval::new(SHADOW_ACNE_EPSILON, INFINITY)) {
+            if let Some(scatter) = record.material.scatter(ray, &record, rng) {
+                let color = Self::ray_color(&scatter.ray, depth - 1, world, rng);
+                Vector::new(
+                    scatter.attenuation.x() * color.x(),
+                    scatter.attenuation.y() * color.y(),
+                    scatter.attenuation.z() * color.z(),
+                )
+            } else {
+                Vector::default()
+            }
+        } else {
+            sky_gradient(ray)
+        }
+    }
+
     /// Renders a canvas by evaluating `ray_color` for each emitted camera ray.
-    #[must_use]
     pub fn render<F>(self, mut ray_color: F) -> Canvas
     where
         F: FnMut(&Ray) -> Vector,
     {
         Canvas::from_fn(self.image_width, self.image_height, |x, y| {
             Rgb::from(ray_color(&self.ray_for_pixel(x, y)))
+        })
+    }
+
+    /// Renders a hittable world using this camera's antialiasing sample count.
+    pub fn render_world(self, world: &dyn Hittable) -> Canvas {
+        let camera = self.initialize();
+        let mut rng = SampleRng::new(camera.rng_seed);
+        Canvas::from_fn(camera.image_width, camera.image_height, |x, y| {
+            let mut pixel_color = Vector::default();
+            for _ in 0..camera.samples_per_pixel {
+                let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
+                pixel_color += Self::ray_color(&ray, camera.max_depth, world, &mut rng);
+            }
+            linear_color_to_rgb(pixel_color / f64::from(camera.samples_per_pixel))
+        })
+    }
+
+    /// Renders a hittable world as surface-normal colors for debugging.
+    pub fn render_world_normals(self, world: &dyn Hittable) -> Canvas {
+        let camera = self.initialize();
+        let mut rng = SampleRng::new(camera.rng_seed);
+        Canvas::from_fn(camera.image_width, camera.image_height, |x, y| {
+            let mut pixel_color = Vector::default();
+            for _ in 0..camera.samples_per_pixel {
+                let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
+                pixel_color += normal_scene_color(&ray, world);
+            }
+            linear_color_to_rgb(pixel_color / f64::from(camera.samples_per_pixel))
         })
     }
 
@@ -275,6 +718,46 @@ impl RayCamera {
         Ok(Canvas::from_pixels(
             self.image_width,
             self.image_height,
+            pixels,
+        ))
+    }
+
+    /// Renders a hittable world with antialiasing while writing scanline progress messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns any write error produced by `log`.
+    pub fn render_world_with_progress<W>(
+        self,
+        world: &dyn Hittable,
+        mut log: W,
+    ) -> io::Result<Canvas>
+    where
+        W: Write,
+    {
+        let camera = self.initialize();
+        let mut rng = SampleRng::new(camera.rng_seed);
+        let mut pixels =
+            Vec::with_capacity(camera.image_width as usize * camera.image_height as usize);
+        for y in 0..camera.image_height {
+            write!(log, "\rScanlines remaining: {} ", camera.image_height - y)?;
+            log.flush()?;
+            for x in 0..camera.image_width {
+                let mut pixel_color = Vector::default();
+                for _ in 0..camera.samples_per_pixel {
+                    let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
+                    pixel_color += Self::ray_color(&ray, camera.max_depth, world, &mut rng);
+                }
+                pixels.push(linear_color_to_rgb(
+                    pixel_color / f64::from(camera.samples_per_pixel),
+                ));
+            }
+        }
+        writeln!(log, "\rDone.                 ")?;
+
+        Ok(Canvas::from_pixels(
+            camera.image_width,
+            camera.image_height,
             pixels,
         ))
     }
@@ -390,6 +873,10 @@ impl Canvas {
 mod tests {
     use super::*;
 
+    fn assert_close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-10);
+    }
+
     #[test]
     fn projected_mesh_wireframe_returns_three_segments_per_visible_triangle() {
         let mut mesh = PolygonMatrix::new();
@@ -405,9 +892,42 @@ mod tests {
         assert_eq!(segments.len(), 3);
     }
 
-    #[cfg(feature = "fancy_math")]
-    fn assert_close(actual: f64, expected: f64) {
-        assert!((actual - expected).abs() < 1e-10);
+    #[test]
+    fn camera3d_default_projection_matches_legacy_camera_distance() {
+        let camera = Camera3D::new(100, 100);
+        let point = camera.project(&[0.0, 0.0, 0.0]).expect("visible");
+
+        assert_close(point.x, 50.0);
+        assert_close(point.y, 50.0);
+        assert_close(point.depth, 900.0);
+    }
+
+    #[test]
+    fn camera3d_can_be_positioned_with_look_at() {
+        let camera = Camera3D::new(100, 100)
+            .with_look_at(Point::new(0.0, 0.0, -10.0), Point::new(0.0, 0.0, 0.0))
+            .with_focal_length(10.0)
+            .with_near_depth(0.1);
+
+        let center = camera.project(&[0.0, 0.0, 0.0]).expect("center visible");
+        let right = camera.project(&[1.0, 0.0, 0.0]).expect("right visible");
+
+        assert_close(center.x, 50.0);
+        assert_close(center.y, 50.0);
+        assert_close(center.depth, 10.0);
+        assert!(right.x > center.x);
+    }
+
+    #[test]
+    fn camera3d_vertical_fov_sets_projection_scale() {
+        let camera = Camera3D::new(100, 100)
+            .with_look_at(Point::new(0.0, 0.0, -10.0), Point::new(0.0, 0.0, 0.0))
+            .with_vertical_fov(90.0)
+            .with_near_depth(0.1);
+
+        let top = camera.project(&[0.0, 10.0, 0.0]).expect("top visible");
+
+        assert_close(top.y, 0.0);
     }
 
     #[cfg(feature = "fancy_math")]
@@ -430,5 +950,80 @@ mod tests {
         assert!(ray.direction().z() < 0.0);
         assert!(ray.direction().x().abs() < 0.01);
         assert!(ray.direction().y().abs() < 0.01);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_tracks_antialiasing_sample_count() {
+        let camera = RayCamera::default()
+            .with_image_width(40)
+            .with_aspect_ratio(16.0 / 9.0)
+            .with_samples_per_pixel(25)
+            .with_max_depth(50);
+
+        assert_eq!(camera.image_width(), 40);
+        assert_eq!(camera.image_height(), 22);
+        assert_eq!(camera.samples_per_pixel(), 25);
+        assert_eq!(camera.max_depth(), 50);
+        assert_close(camera.defocus_angle(), 0.0);
+        assert_close(camera.focus_distance(), 1.0);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_vertical_fov_controls_ray_spread() {
+        let wide = RayCamera::new(101, 1.0).with_vertical_fov(90.0);
+        let narrow = RayCamera::new(101, 1.0).with_vertical_fov(20.0);
+
+        let wide_top = wide.ray_for_pixel(50, 0).direction().normalized();
+        let narrow_top = narrow.ray_for_pixel(50, 0).direction().normalized();
+
+        assert!(wide_top.y().abs() > narrow_top.y().abs());
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_can_be_positioned_with_look_at() {
+        let lookfrom = Point::new(-2.0, 2.0, 1.0);
+        let lookat = Point::new(0.0, 0.0, -1.0);
+        let camera = RayCamera::new(101, 1.0)
+            .with_look_at(lookfrom, lookat)
+            .with_view_up(Vector::new(0.0, 1.0, 0.0));
+
+        let ray = camera.ray_for_pixel(50, 50);
+        let expected_direction = (lookat - lookfrom).normalized();
+        let actual_direction = ray.direction().normalized();
+
+        assert_eq!(*ray.origin(), lookfrom);
+        assert_close(actual_direction.dot(expected_direction), 1.0);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_defocus_blur_offsets_sample_origin() {
+        let mut rng = SampleRng::new(17);
+        let pinhole = RayCamera::new(101, 1.0);
+        let defocused = pinhole.with_defocus_angle(10.0).with_focus_distance(3.4);
+
+        let pinhole_ray = pinhole.ray_for_pixel_sample(50, 50, &mut rng);
+        let defocused_ray = defocused.ray_for_pixel_sample(50, 50, &mut rng);
+
+        assert_eq!(*pinhole_ray.origin(), pinhole.camera_center());
+        assert_ne!(*defocused_ray.origin(), defocused.camera_center());
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_world_render_is_seeded_and_deterministic() {
+        let world = crate::graphics::raytracing::normal_sphere_world();
+        let camera = RayCamera::new(20, 16.0 / 9.0)
+            .with_samples_per_pixel(4)
+            .with_max_depth(3)
+            .with_rng_seed(123);
+
+        let first = camera.render_world(&world);
+        let second = camera.render_world(&world);
+
+        assert_eq!(first.pixels(), second.pixels());
     }
 }

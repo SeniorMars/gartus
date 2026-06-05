@@ -1,4 +1,4 @@
-use super::matrix::Matrix;
+use super::{geometry::SphereGeometry, matrix::Matrix};
 use std::f64::consts::PI;
 use std::fmt;
 
@@ -403,6 +403,7 @@ impl PolygonMatrix {
     /// Panics if `steps` is zero.
     #[allow(clippy::cast_precision_loss)]
     pub fn add_sphere(&mut self, center: (f64, f64, f64), radius: f64, steps: usize) {
+        let sphere = SphereGeometry::from_tuple(center, radius);
         assert!(steps > 0, "sphere steps must be positive");
         let step_by = 1.0 / steps as f64;
         let mut latitudes = Vec::with_capacity(steps + 1);
@@ -412,9 +413,9 @@ impl PolygonMatrix {
         }
 
         let mut data = Vec::with_capacity(steps * steps * 24);
-        let mut current_ring = Self::sphere_ring(center, radius, 0, step_by, &latitudes);
+        let mut current_ring = Self::sphere_ring(sphere, 0, step_by, &latitudes);
         for i in 0..steps {
-            let next_ring = Self::sphere_ring(center, radius, i + 1, step_by, &latitudes);
+            let next_ring = Self::sphere_ring(sphere, i + 1, step_by, &latitudes);
             for j in 0..steps {
                 let p0 = current_ring[j];
                 let p1 = current_ring[j + 1];
@@ -439,12 +440,13 @@ impl PolygonMatrix {
 
     #[allow(clippy::cast_precision_loss)]
     fn sphere_ring(
-        (cx, cy, cz): (f64, f64, f64),
-        radius: f64,
+        sphere: SphereGeometry,
         phi_index: usize,
         step_by: f64,
         latitudes: &[(f64, f64)],
     ) -> Vec<(f64, f64, f64)> {
+        let (cx, cy, cz) = sphere.center_tuple();
+        let radius = sphere.radius();
         let phi = phi_index as f64 * step_by * PI * 2.0;
         let (sin_p, cos_p) = phi.sin_cos();
         latitudes

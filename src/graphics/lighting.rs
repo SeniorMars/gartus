@@ -249,6 +249,12 @@ impl PhongMaterial {
 pub struct RefractiveIndex(pub f64);
 
 impl RefractiveIndex {
+    /// Creates a refractive index value.
+    #[must_use]
+    pub const fn new(index: f64) -> Self {
+        Self(index)
+    }
+
     /// Vacuum index of refraction.
     pub const VACUUM: Self = Self(1.0);
     /// Approximate air index of refraction.
@@ -265,6 +271,12 @@ impl RefractiveIndex {
     pub const RUBY: Self = Self(1.77);
     /// Emerald index of refraction.
     pub const EMERALD: Self = Self(1.57);
+
+    /// Returns this index relative to an enclosing medium.
+    #[must_use]
+    pub fn relative_to(self, enclosing: Self) -> Self {
+        Self(self.0 / enclosing.0)
+    }
 }
 
 /// Whether a light is positional or a legacy direction vector.
@@ -646,6 +658,10 @@ mod tests {
         );
         assert!((PhongMaterial::RUBY.alpha - 0.55).abs() < f64::EPSILON);
         assert_eq!(RefractiveIndex::DIAMOND, RefractiveIndex(2.42));
+        assert_eq!(
+            RefractiveIndex::AIR.relative_to(RefractiveIndex::GLASS),
+            RefractiveIndex::new(RefractiveIndex::AIR.0 / RefractiveIndex::GLASS.0)
+        );
     }
 
     #[test]

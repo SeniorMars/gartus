@@ -132,6 +132,21 @@ impl Vector {
             self / len
         }
     }
+
+    /// Returns this vector reflected around a unit surface normal.
+    #[must_use]
+    pub fn reflected(self, normal: Vector) -> Self {
+        self - 2.0 * self.dot(normal) * normal
+    }
+
+    /// Returns this unit vector refracted across a surface with the given relative index.
+    #[must_use]
+    pub fn refracted(self, normal: Vector, etai_over_etat: f64) -> Self {
+        let cos_theta = (-self).dot(normal).min(1.0);
+        let r_out_perp = etai_over_etat * (self + cos_theta * normal);
+        let r_out_parallel = -(1.0 - r_out_perp.length_squared()).abs().sqrt() * normal;
+        r_out_perp + r_out_parallel
+    }
 }
 
 impl Index<usize> for Vector {
@@ -313,6 +328,22 @@ mod test {
         let norm = v.normalized();
         assert_eq!(norm.data, [0.6, 0.8, 0.0]);
         assert!((norm.length() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_reflected_vector() {
+        let incoming = Vector::new(1.0, -1.0, 0.0);
+        let normal = Vector::new(0.0, 1.0, 0.0);
+
+        assert_eq!(incoming.reflected(normal), Vector::new(1.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn test_refracted_vector_perpendicular_incidence() {
+        let incoming = Vector::new(0.0, 0.0, -1.0);
+        let normal = Vector::new(0.0, 0.0, 1.0);
+
+        assert_eq!(incoming.refracted(normal, 1.0 / 1.5), incoming);
     }
 
     #[test]

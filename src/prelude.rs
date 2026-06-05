@@ -2,6 +2,7 @@
 pub use crate::{
     gmath::{
         edge_matrix::EdgeMatrix,
+        geometry::SphereGeometry,
         matrix::Matrix,
         polygon_matrix::{HeightMapOptions, PolygonMatrix},
         stack::MatrixStack,
@@ -27,8 +28,15 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        LinearColor, WIDESCREEN_ASPECT_RATIO, first_sphere_color, hit_sphere, render_first_sphere,
-        render_unit_gradient, sky_gradient,
+        Dielectric, HitRecord, Hittable, HittableList, INFINITY, Interval, Lambertian, LinearColor,
+        Material, MaterialRef, Metal, PI, SHADOW_ACNE_EPSILON, SampleRng, ScatterRecord, Sphere,
+        WIDESCREEN_ASPECT_RATIO, degrees_to_radians, dielectric_sphere_world, final_scene_world,
+        first_sphere_color, hit_sphere, linear_color_to_rgb, linear_to_gamma, metal_sphere_world,
+        normal_scene_color, normal_sphere_world, render_defocus_sphere_scene,
+        render_dielectric_sphere_scene, render_diffuse_sphere_scene, render_final_scene,
+        render_final_scene_with_samples, render_first_sphere, render_metal_sphere_scene,
+        render_normal_sphere_scene, render_unit_gradient, render_wide_angle_sphere_scene,
+        rgb_to_linear_color, sky_gradient, wide_angle_sphere_world,
     },
 };
 

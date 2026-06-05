@@ -1,6 +1,6 @@
 use super::vector::{Point, Vector};
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 /// A ray composed of an origin point and a direction vector.
 pub struct Ray {
     origin: Point,

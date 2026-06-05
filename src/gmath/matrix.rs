@@ -296,7 +296,7 @@ impl Matrix {
         let mut x_data = vec![0.0; n * target_b.cols];
 
         for col in 0..target_b.cols {
-            for i in 0..n {
+            for (i, &pivot_row) in p_vec.iter().enumerate().take(n) {
                 let mut sum = 0.0;
                 for j in 0..i {
                     unsafe {
@@ -305,7 +305,7 @@ impl Matrix {
                 }
                 unsafe {
                     *y_data.get_unchecked_mut(col * n + i) =
-                        target_b.get_unchecked(p_vec[i], col) - sum;
+                        target_b.get_unchecked(pivot_row, col) - sum;
                 }
             }
 

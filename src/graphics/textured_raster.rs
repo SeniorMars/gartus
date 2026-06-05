@@ -656,6 +656,7 @@ fn interpolate_normal(normals: [Vector; 3], weights: [f64; 3]) -> Vector {
     normals[0] * weights[0] + normals[1] * weights[1] + normals[2] * weights[2]
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn interpolate_rgb(colors: [Rgb; 3], weights: [f64; 3]) -> Rgb {
     let channel = |channel: fn(Rgb) -> u8| {
         let value = weights[0].mul_add(

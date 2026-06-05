@@ -3,6 +3,8 @@
 
 /// Hosts the [`EdgeMatrix`] type — a dynamically-growing 4×N point list for edge drawing.
 pub mod edge_matrix;
+/// Shared analytic geometry descriptors.
+pub mod geometry;
 /// Hosts various helpers to make math easier.
 pub mod helpers;
 /// Includes the [Matrix] struct with a surrounding mini matrix library

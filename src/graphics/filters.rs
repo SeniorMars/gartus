@@ -284,33 +284,36 @@ impl Canvas {
         })
     }
 
-    #[allow(clippy::cast_possible_truncation)]
     /// Pixelate / Mosaic effect.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `block_size` is zero.
     pub fn pixelate(&self, block_size: usize) -> Canvas {
         assert!(block_size > 0, "pixelate block size must be positive");
         let w = self.width() as usize;
         let h = self.height() as usize;
-        let blocks_x = w.div_ceil(block_size);
-        let blocks_y = h.div_ceil(block_size);
+        let block_columns = w.div_ceil(block_size);
+        let block_rows = h.div_ceil(block_size);
 
         let block_colors = {
             #[cfg(feature = "rayon")]
             {
-                (0..blocks_x * blocks_y)
+                (0..block_columns * block_rows)
                     .into_par_iter()
                     .map(|idx| {
-                        let bx = (idx % blocks_x) * block_size;
-                        let by = (idx / blocks_x) * block_size;
+                        let bx = (idx % block_columns) * block_size;
+                        let by = (idx / block_columns) * block_size;
                         self.pixelate_block_color(bx, by, block_size, w, h)
                     })
                     .collect::<Vec<_>>()
             }
             #[cfg(not(feature = "rayon"))]
             {
-                (0..blocks_x * blocks_y)
+                (0..block_columns * block_rows)
                     .map(|idx| {
-                        let bx = (idx % blocks_x) * block_size;
-                        let by = (idx / blocks_x) * block_size;
+                        let bx = (idx % block_columns) * block_size;
+                        let by = (idx / block_columns) * block_size;
                         self.pixelate_block_color(bx, by, block_size, w, h)
                     })
                     .collect::<Vec<_>>()
@@ -318,9 +321,9 @@ impl Canvas {
         };
 
         self.map_pixels_with_position_independent(|x, y, _| {
-            let block_x = x as usize / block_size;
-            let block_y = y as usize / block_size;
-            block_colors[Self::idx(blocks_x, block_x, block_y)]
+            let block_column = x as usize / block_size;
+            let block_row = y as usize / block_size;
+            block_colors[Self::idx(block_columns, block_column, block_row)]
         })
     }
 
@@ -348,9 +351,9 @@ impl Canvas {
         }
 
         Rgb::new(
-            (r_sum / count) as u8,
-            (g_sum / count) as u8,
-            (b_sum / count) as u8,
+            u8::try_from(r_sum / count).unwrap_or(u8::MAX),
+            u8::try_from(g_sum / count).unwrap_or(u8::MAX),
+            u8::try_from(b_sum / count).unwrap_or(u8::MAX),
         )
     }
 
@@ -422,7 +425,11 @@ impl Canvas {
         self.with_pixels_like(pixels)
     }
 
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::many_single_char_names
+    )]
     /// Median filter for noise reduction.
     pub fn median_filter(&self, radius: usize) -> Canvas {
         let w = self.width() as isize;
@@ -464,7 +471,8 @@ impl Canvas {
     #[allow(
         clippy::cast_possible_wrap,
         clippy::cast_sign_loss,
-        clippy::cast_possible_truncation
+        clippy::cast_possible_truncation,
+        clippy::many_single_char_names
     )]
     /// Applies an oil-painting effect using local intensity buckets.
     ///
@@ -514,7 +522,8 @@ impl Canvas {
     #[allow(
         clippy::cast_possible_wrap,
         clippy::cast_sign_loss,
-        clippy::cast_possible_truncation
+        clippy::cast_possible_truncation,
+        clippy::many_single_char_names
     )]
     /// Applies a Watercolor Effect.
     pub fn watercolor(&self) -> Canvas {
