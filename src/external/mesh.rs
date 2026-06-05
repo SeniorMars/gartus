@@ -233,7 +233,8 @@ impl Error for MeshError {}
 /// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ faces
 /// with three or more vertices are triangulated with a fan, so quadrilateral faces are accepted.
 /// OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and smoothing
-/// directives are ignored because Gartus renders imported meshes as wireframe triangles.
+/// directives are ignored by this geometry-only loader. Use [`meshify_with_materials`] when
+/// material groups, diffuse colors, texture coordinates, and texture paths should be preserved.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -249,9 +250,10 @@ pub fn meshify(file_name: &str) -> MeshResult<PolygonMatrix> {
 
 /// Converts an OBJ or STL mesh file into material-grouped triangles.
 ///
-/// OBJ `mtllib`, `usemtl`, and MTL `Kd` diffuse colors are preserved. OBJ faces with three or more
-/// vertices are triangulated with a fan, so quadrilateral faces are accepted. STL files are returned
-/// as a single uncolored group.
+/// OBJ `mtllib`, `usemtl`, MTL material coefficients, `map_Kd` diffuse texture paths, and per-face
+/// vertex texture coordinates are preserved. OBJ faces with three or more vertices are triangulated
+/// with a fan, so quadrilateral faces are accepted. STL files are returned as a single uncolored
+/// group without texture data.
 ///
 /// # Errors
 /// Returns an error if the mesh cannot be read, has an unsupported extension, or contains malformed
@@ -311,7 +313,8 @@ fn bounds_span(bounds: Bounds3) -> f64 {
 /// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ faces
 /// with three or more vertices are triangulated with a fan, so quadrilateral faces are accepted.
 /// OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and smoothing
-/// directives are ignored because Gartus renders imported meshes as wireframe triangles.
+/// directives are ignored by this geometry-only loader. Use [`meshify_with_materials`] when
+/// material groups, diffuse colors, texture coordinates, and texture paths should be preserved.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -664,14 +667,7 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
             }
             Some("map_Kd") => {
                 if let Some(name) = current_material.as_ref() {
-                    let filename = parts.collect::<Vec<_>>().join(" ");
-                    if filename.is_empty() {
-                        return Err(MeshError::at_line(
-                            source,
-                            line_num,
-                            "missing diffuse texture filename",
-                        ));
-                    }
+                    let filename = parse_mtl_texture_filename(parts, source, line_num)?;
                     materials
                         .entry(name.clone())
                         .or_insert(empty_mesh_material())
@@ -684,6 +680,89 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
     })?;
 
     Ok(materials)
+}
+
+fn parse_mtl_texture_filename<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<String> {
+    let tokens = parts.collect::<Vec<_>>();
+    let mut index = 0;
+
+    while index < tokens.len() && is_mtl_option_token(tokens[index]) {
+        let option = tokens[index];
+        index += 1;
+
+        match option {
+            "-blendu" | "-blendv" | "-boost" | "-bm" | "-cc" | "-clamp" | "-imfchan"
+            | "-texres" | "-type" => {
+                require_mtl_option_values(&tokens, &mut index, 1, option, source, line_num)?;
+            }
+            "-mm" => {
+                require_mtl_option_values(&tokens, &mut index, 2, option, source, line_num)?;
+            }
+            "-o" | "-s" | "-t" => {
+                let start = index;
+                while index < tokens.len()
+                    && index - start < 3
+                    && !is_mtl_option_token(tokens[index])
+                    && tokens[index].parse::<f64>().is_ok()
+                {
+                    index += 1;
+                }
+                if index == start {
+                    return Err(MeshError::at_line(
+                        source,
+                        line_num,
+                        format!("map_Kd option `{option}` requires at least one numeric value"),
+                    ));
+                }
+            }
+            _ => {
+                return Err(MeshError::at_line(
+                    source,
+                    line_num,
+                    format!("unsupported map_Kd option `{option}`"),
+                ));
+            }
+        }
+    }
+
+    let filename = tokens[index..].join(" ");
+    if filename.is_empty() {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "missing diffuse texture filename",
+        ));
+    }
+    Ok(filename)
+}
+
+fn require_mtl_option_values(
+    tokens: &[&str],
+    index: &mut usize,
+    count: usize,
+    option: &str,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<()> {
+    for _ in 0..count {
+        if *index >= tokens.len() || is_mtl_option_token(tokens[*index]) {
+            return Err(MeshError::at_line(
+                source,
+                line_num,
+                format!("map_Kd option `{option}` expects {count} value(s)"),
+            ));
+        }
+        *index += 1;
+    }
+    Ok(())
+}
+
+fn is_mtl_option_token(token: &str) -> bool {
+    token.starts_with('-') && token.parse::<f64>().is_err()
 }
 
 fn empty_mesh_material() -> MeshMaterial {
@@ -1493,6 +1572,55 @@ f 1/1 2/2 4/4 3/3
         assert_eq!(mesh.groups[1].material_name.as_deref(), Some("green"));
         assert_eq!(mesh.groups[1].diffuse_color, Some(Rgb::new(0, 128, 0)));
         assert!(mesh.has_material_colors());
+        let _ = fs::remove_file(obj_path);
+        let _ = fs::remove_file(mtl_path);
+    }
+
+    #[test]
+    fn parses_mtl_map_kd_options_before_texture_filename() {
+        let obj_path = temp_file("map-options", "obj");
+        let mtl_path = obj_path.with_extension("mtl");
+        let mtl_name = mtl_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("utf8 mtl filename");
+
+        fs::write(
+            &mtl_path,
+            b"newmtl tex\nKd 1 1 1\nmap_Kd -s 1 1 1 -o 0 0 0 -clamp on textures/blue tile.ppm\n",
+        )
+        .expect("write temp mtl");
+        fs::write(
+            &obj_path,
+            format!(
+                "\
+mtllib {mtl_name}
+v 0 0 0
+v 1 0 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 0 1
+usemtl tex
+f 1/1 2/2 3/3
+"
+            ),
+        )
+        .expect("write temp obj");
+
+        let mesh = meshify_with_materials(obj_path.to_str().expect("utf8 path"))
+            .expect("load material mesh");
+
+        let material = mesh.groups[0].material.as_ref().expect("material");
+        assert_eq!(
+            material.diffuse_texture,
+            Some(
+                mtl_path
+                    .parent()
+                    .expect("mtl parent")
+                    .join("textures/blue tile.ppm")
+            )
+        );
         let _ = fs::remove_file(obj_path);
         let _ = fs::remove_file(mtl_path);
     }

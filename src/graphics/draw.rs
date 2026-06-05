@@ -5,12 +5,13 @@ use crate::gmath::{
 use crate::graphics::{
     display::{Canvas, PolygonColorMode, ShadingMode, ZSpan},
     lighting::PreparedLighting,
-    texture::Texture,
 };
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::{BuildHasherDefault, Hasher},
 };
+
+pub use super::textured_raster::TexturedVertex;
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
 
@@ -35,35 +36,6 @@ struct NormalScanPoint {
     y: i32,
     z: f64,
     normal: Vector,
-}
-
-/// A screen-space vertex with normalized texture coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TexturedVertex {
-    /// X coordinate.
-    pub x: f64,
-    /// Y coordinate.
-    pub y: f64,
-    /// Z coordinate for z-buffering.
-    pub z: f64,
-    /// Horizontal texture coordinate, usually in `0..=1`.
-    pub s: f64,
-    /// Vertical texture coordinate, usually in `0..=1`.
-    pub t: f64,
-}
-
-impl TexturedVertex {
-    /// Creates a textured vertex.
-    #[must_use]
-    pub const fn new(x_coord: f64, y_coord: f64, z_coord: f64, s_coord: f64, t_coord: f64) -> Self {
-        Self {
-            x: x_coord,
-            y: y_coord,
-            z: z_coord,
-            s: s_coord,
-            t: t_coord,
-        }
-    }
 }
 
 trait ScanSortable {
@@ -98,20 +70,6 @@ impl ScanSortable for NormalScanPoint {
 
     fn scan_y(&self) -> i32 {
         self.y
-    }
-}
-
-impl TexturedVertex {
-    fn is_finite(&self) -> bool {
-        self.x.is_finite()
-            && self.y.is_finite()
-            && self.z.is_finite()
-            && self.s.is_finite()
-            && self.t.is_finite()
-    }
-
-    fn position_tuple(self) -> (f64, f64, f64) {
-        (self.x, self.y, self.z)
     }
 }
 
@@ -399,7 +357,7 @@ impl Canvas {
                 _
             ) | (_, PolygonColorMode::PhongReflection)
         ) {
-            Some(self.lighting().prepare())
+            Some(self.lighting_ref().prepare())
         } else {
             None
         };
@@ -453,155 +411,44 @@ impl Canvas {
         }
     }
 
-    /// Draws a textured triangle with linear interpolation of texture coordinates.
-    pub fn draw_textured_triangle(&mut self, texture: &Texture, vertices: [TexturedVertex; 3]) {
-        self.draw_textured_triangle_with_color(texture, vertices, |sample| sample);
-    }
-
-    /// Draws a textured triangle and multiplies each sampled texel by `modulation`.
-    pub fn draw_textured_triangle_modulated(
+    /// Draws one filled triangle with a fixed color.
+    ///
+    /// This bypasses [`PolygonMatrix`] construction for callers that already have a single
+    /// screen-space triangle.
+    pub fn draw_triangle(
         &mut self,
-        texture: &Texture,
-        vertices: [TexturedVertex; 3],
-        modulation: Rgb,
+        color: Rgb,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
     ) {
-        self.draw_textured_triangle_with_color(texture, vertices, |sample| {
-            modulate_rgb(sample, modulation)
-        });
-    }
-
-    fn draw_textured_triangle_with_color(
-        &mut self,
-        texture: &Texture,
-        vertices: [TexturedVertex; 3],
-        mut color: impl FnMut(Rgb) -> Rgb,
-    ) {
-        if !vertices.iter().all(TexturedVertex::is_finite) {
+        if !triangle_points_are_finite([p0, p1, p2]) {
             return;
         }
+        self.draw_scanline_triangle(color, p0, p1, p2);
+    }
 
-        let normal = triangle_normal(
-            vertices[0].position_tuple(),
-            vertices[1].position_tuple(),
-            vertices[2].position_tuple(),
-        );
+    /// Draws one flat Phong-lit triangle using the canvas lighting state.
+    ///
+    /// Back-facing triangles are culled to match [`Self::draw_polygons`].
+    pub fn draw_lit_triangle(
+        &mut self,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        if !triangle_points_are_finite([p0, p1, p2]) {
+            return;
+        }
+        let normal = triangle_normal(p0, p1, p2);
         if normal[2] <= 0.0 {
             return;
         }
-
-        self.draw_textured_triangle_unculled(texture, vertices, &mut color);
-    }
-
-    /// Draws a textured quad as two textured triangles.
-    ///
-    /// Texture coordinates are assigned as bottom-left, bottom-right, top-right, top-left.
-    pub fn draw_textured_quad(&mut self, texture: &Texture, points: [(f64, f64, f64); 4]) {
-        let vertices = [
-            TexturedVertex::new(points[0].0, points[0].1, points[0].2, 0.0, 0.0),
-            TexturedVertex::new(points[1].0, points[1].1, points[1].2, 1.0, 0.0),
-            TexturedVertex::new(points[2].0, points[2].1, points[2].2, 1.0, 1.0),
-            TexturedVertex::new(points[3].0, points[3].1, points[3].2, 0.0, 1.0),
-        ];
-
-        self.draw_textured_triangle(texture, [vertices[0], vertices[1], vertices[2]]);
-        self.draw_textured_triangle(texture, [vertices[0], vertices[2], vertices[3]]);
-    }
-
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::many_single_char_names,
-        clippy::similar_names
-    )]
-    fn draw_textured_triangle_unculled(
-        &mut self,
-        texture: &Texture,
-        vertices: [TexturedVertex; 3],
-        color: &mut impl FnMut(Rgb) -> Rgb,
-    ) {
-        let mut min_x = vertices
-            .iter()
-            .map(|vertex| vertex.x)
-            .fold(f64::INFINITY, f64::min)
-            .floor() as i64;
-        let mut max_x = vertices
-            .iter()
-            .map(|vertex| vertex.x)
-            .fold(f64::NEG_INFINITY, f64::max)
-            .ceil() as i64;
-        let mut min_y = vertices
-            .iter()
-            .map(|vertex| vertex.y)
-            .fold(f64::INFINITY, f64::min)
-            .floor() as i64;
-        let mut max_y = vertices
-            .iter()
-            .map(|vertex| vertex.y)
-            .fold(f64::NEG_INFINITY, f64::max)
-            .ceil() as i64;
-
-        if !self.wrapped {
-            let width = i64::from(self.width());
-            let height = i64::from(self.height());
-            min_x = min_x.max(0);
-            max_x = max_x.min(width - 1);
-            min_y = min_y.max(0);
-            max_y = max_y.min(height - 1);
-        }
-
-        let Some(bounds) = texture_bounds(min_x, max_x, min_y, max_y) else {
-            return;
-        };
-        let denom = barycentric_denominator(vertices);
-        if denom.abs() < f64::EPSILON {
-            return;
-        }
-
-        let [a, b, c] = vertices;
-        let dw0_dx = (b.y - c.y) / denom;
-        let dw0_dy = (c.x - b.x) / denom;
-        let dw1_dx = (c.y - a.y) / denom;
-        let dw1_dy = (a.x - c.x) / denom;
-
-        let q0 = texture_inv_depth(a);
-        let q1 = texture_inv_depth(b);
-        let q2 = texture_inv_depth(c);
-
-        let ctx = TexturedTriangleContext {
-            dw0_dx,
-            dw1_dx,
-            dw0_dy,
-            dw1_dy,
-            q0,
-            q1,
-            q2,
-            s0_q0: a.s * q0,
-            s1_q1: b.s * q1,
-            s2_q2: c.s * q2,
-            t0_q0: a.t * q0,
-            t1_q1: b.t * q1,
-            t2_q2: c.t * q2,
-        };
-
-        for y in bounds.min_y..=bounds.max_y {
-            for x in bounds.min_x..=bounds.max_x {
-                let sample_x = x as f64;
-                let sample_y = y as f64;
-                let (w0, w1, w2) = barycentric_weights(vertices, sample_x, sample_y, denom);
-                if !inside_barycentric(w0, w1, w2) {
-                    continue;
-                }
-                let z = w0.mul_add(vertices[0].z, w1.mul_add(vertices[1].z, w2 * vertices[2].z));
-                let (s, t) = perspective_texture_coordinates_fast(vertices, &ctx, w0, w1, w2);
-                let sample = if texture.level_count() > 1 {
-                    let lod = texture_lod(texture, &ctx, vertices, s, t, w0, w1);
-                    texture.sample_lod(s, t, lod)
-                } else {
-                    texture.sample(s, t)
-                };
-                self.plot_z(&color(sample), x, y, z);
-            }
-        }
+        let color = self
+            .lighting_ref()
+            .prepare()
+            .illuminate_at(normal, triangle_centroid(p0, p1, p2));
+        self.draw_scanline_triangle(color, p0, p1, p2);
     }
 
     fn draw_polygon_edges(
@@ -1346,7 +1193,11 @@ fn normal_point_on_edge(start: NormalScanPoint, end: NormalScanPoint, y: i32) ->
     }
 }
 
-fn triangle_normal(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
+pub(super) fn triangle_normal(
+    p0: (f64, f64, f64),
+    p1: (f64, f64, f64),
+    p2: (f64, f64, f64),
+) -> Vector {
     let a = Vector::new(p1.0 - p0.0, p1.1 - p0.1, p1.2 - p0.2);
     let b = Vector::new(p2.0 - p0.0, p2.1 - p0.1, p2.2 - p0.2);
     a.cross(b)
@@ -1368,130 +1219,6 @@ fn triangle_points_are_finite(points: [(f64, f64, f64); 3]) -> bool {
     points
         .into_iter()
         .all(|point| point.0.is_finite() && point.1.is_finite() && point.2.is_finite())
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TextureBounds {
-    min_x: i64,
-    max_x: i64,
-    min_y: i64,
-    max_y: i64,
-}
-
-fn texture_bounds(min_x: i64, max_x: i64, min_y: i64, max_y: i64) -> Option<TextureBounds> {
-    if min_x > max_x || min_y > max_y {
-        return None;
-    }
-    Some(TextureBounds {
-        min_x,
-        max_x,
-        min_y,
-        max_y,
-    })
-}
-
-fn barycentric_denominator(vertices: [TexturedVertex; 3]) -> f64 {
-    let [a, b, c] = vertices;
-    (b.y - c.y).mul_add(a.x - c.x, (c.x - b.x) * (a.y - c.y))
-}
-
-fn barycentric_weights(
-    vertices: [TexturedVertex; 3],
-    sample_x: f64,
-    sample_y: f64,
-    denominator: f64,
-) -> (f64, f64, f64) {
-    let [a, b, c] = vertices;
-    let w0 = (b.y - c.y).mul_add(sample_x - c.x, (c.x - b.x) * (sample_y - c.y)) / denominator;
-    let w1 = (c.y - a.y).mul_add(sample_x - c.x, (a.x - c.x) * (sample_y - c.y)) / denominator;
-    let w2 = 1.0 - w0 - w1;
-    (w0, w1, w2)
-}
-
-fn inside_barycentric(w0: f64, w1: f64, w2: f64) -> bool {
-    const EDGE_EPS: f64 = -1e-9;
-    w0 >= EDGE_EPS && w1 >= EDGE_EPS && w2 >= EDGE_EPS
-}
-
-struct TexturedTriangleContext {
-    dw0_dx: f64,
-    dw1_dx: f64,
-    dw0_dy: f64,
-    dw1_dy: f64,
-    q0: f64,
-    q1: f64,
-    q2: f64,
-    s0_q0: f64,
-    s1_q1: f64,
-    s2_q2: f64,
-    t0_q0: f64,
-    t1_q1: f64,
-    t2_q2: f64,
-}
-
-fn perspective_texture_coordinates_fast(
-    vertices: [TexturedVertex; 3],
-    ctx: &TexturedTriangleContext,
-    w0: f64,
-    w1: f64,
-    w2: f64,
-) -> (f64, f64) {
-    let denom = w0.mul_add(ctx.q0, w1.mul_add(ctx.q1, w2 * ctx.q2));
-    if denom.abs() < PERSPECTIVE_EPS {
-        return (
-            w0.mul_add(vertices[0].s, w1.mul_add(vertices[1].s, w2 * vertices[2].s)),
-            w0.mul_add(vertices[0].t, w1.mul_add(vertices[1].t, w2 * vertices[2].t)),
-        );
-    }
-
-    let s = w0.mul_add(ctx.s0_q0, w1.mul_add(ctx.s1_q1, w2 * ctx.s2_q2)) / denom;
-    let t = w0.mul_add(ctx.t0_q0, w1.mul_add(ctx.t1_q1, w2 * ctx.t2_q2)) / denom;
-    (s, t)
-}
-
-fn texture_lod(
-    texture: &Texture,
-    ctx: &TexturedTriangleContext,
-    vertices: [TexturedVertex; 3],
-    s: f64,
-    t: f64,
-    w0: f64,
-    w1: f64,
-) -> f64 {
-    let right_w0 = w0 + ctx.dw0_dx;
-    let right_w1 = w1 + ctx.dw1_dx;
-    let right_w2 = 1.0 - right_w0 - right_w1;
-
-    let down_w0 = w0 + ctx.dw0_dy;
-    let down_w1 = w1 + ctx.dw1_dy;
-    let down_w2 = 1.0 - down_w0 - down_w1;
-
-    let (right_s, right_t) =
-        perspective_texture_coordinates_fast(vertices, ctx, right_w0, right_w1, right_w2);
-    let (down_s, down_t) =
-        perspective_texture_coordinates_fast(vertices, ctx, down_w0, down_w1, down_w2);
-    texture.lod_from_derivatives(right_s - s, right_t - t, down_s - s, down_t - t)
-}
-
-fn texture_inv_depth(vertex: TexturedVertex) -> f64 {
-    let depth = vertex.z.abs();
-    if depth < PERSPECTIVE_EPS {
-        1.0
-    } else {
-        1.0 / depth
-    }
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn modulate_rgb(texture: Rgb, modulation: Rgb) -> Rgb {
-    let channel = |texture: u8, modulation: u8| {
-        ((u16::from(texture) * u16::from(modulation) + 127) / 255) as u8
-    };
-    Rgb::new(
-        channel(texture.red, modulation.red),
-        channel(texture.green, modulation.green),
-        channel(texture.blue, modulation.blue),
-    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

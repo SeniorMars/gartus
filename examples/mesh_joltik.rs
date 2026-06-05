@@ -1,9 +1,11 @@
 use gartus::{external, prelude::*};
 use std::{
     collections::HashMap,
+    env,
     error::Error,
     f64::consts::PI,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 const WIDTH: u32 = 900;
@@ -13,7 +15,8 @@ const TAU: f64 = PI * 2.0;
 const CAMERA_DISTANCE: f64 = 980.0;
 const FOCAL_LENGTH: f64 = 760.0;
 const CHARGE_LINE_Z: f64 = -5600.0;
-const LIGHT_DIR: (f64, f64, f64) = (-0.28, -0.54, 0.8);
+const LIGHT_DIR: (f64, f64, f64) = (-0.28, -0.54, -0.8);
+const EYE_DECAL_Z_BIAS: f64 = 32.0;
 
 struct Scene {
     mesh: MaterialMesh,
@@ -46,16 +49,32 @@ fn render() -> Result<(), Box<dyn Error>> {
         lighting: joltik_lighting(),
     };
 
-    FrameRecorder::render_gif(
+    let timing_start = env::var_os("GARTUS_TIMING").map(|_| Instant::now());
+    let options =
         AnimationRenderOptions::new("anim", "mesh-joltik-", FRAMES, "final/mesh_joltik.gif")
             .delay_cs(3)
             .preview(18, "final/mesh_joltik.png")
-            .unique_frame_dir(true),
-        |frame| Ok(render_frame(frame, &scene)),
-    )?;
+            .unique_frame_dir(true);
+    render_animation(options, &scene)?;
+    if let Some(start) = timing_start {
+        eprintln!(
+            "mesh_joltik render: {:.3}s for {FRAMES} frames",
+            start.elapsed().as_secs_f64()
+        );
+    }
 
     println!("Saved final/mesh_joltik.png and final/mesh_joltik.gif");
     Ok(())
+}
+
+#[cfg(feature = "rayon")]
+fn render_animation(options: AnimationRenderOptions, scene: &Scene) -> std::io::Result<()> {
+    FrameRecorder::render_gif_parallel(options, |frame| Ok(render_frame(frame, scene)))
+}
+
+#[cfg(not(feature = "rayon"))]
+fn render_animation(options: AnimationRenderOptions, scene: &Scene) -> std::io::Result<()> {
+    FrameRecorder::render_gif(options, |frame| Ok(render_frame(frame, scene)))
 }
 
 fn load_mesh_textures(mesh: &MaterialMesh) -> HashMap<PathBuf, Texture> {
@@ -87,6 +106,7 @@ fn load_mesh_textures(mesh: &MaterialMesh) -> HashMap<PathBuf, Texture> {
 fn load_texture(path: &Path) -> Result<Texture, Box<dyn Error>> {
     let image = external::ppmify(path_to_str(path)?, false)?;
     Ok(Texture::from_canvas(image)
+        .wrap(TextureWrap::Repeat, TextureWrap::Repeat)
         .filter(TextureFilter::Linear)
         .mipmapped())
 }
@@ -107,8 +127,8 @@ fn render_frame(frame: usize, scene: &Scene) -> Canvas {
     let phase = t * TAU;
     let body_transform = Matrix::translate(0.0, 188.0 + phase.sin() * 8.0, 115.0)
         * Matrix::rotate_z(374.0 + 1.7 * (phase * 1.6).sin())
-        * Matrix::rotate_y(12.0 + 5.0 * phase.sin())
-        * Matrix::rotate_x(9.0 + 2.5 * (phase * 1.2).cos())
+        * Matrix::rotate_y(168.0 - 5.0 * phase.sin())
+        * Matrix::rotate_x(35.0 + 2.5 * (phase * 1.2).cos())
         * scene.normalize.clone();
 
     draw_lit_projected_triangles(
@@ -242,7 +262,6 @@ fn draw_lit_projected_triangles(
     transform: &Matrix,
     t: f64,
 ) {
-    let mut triangle = PolygonMatrix::with_capacity(3);
     let mut triangle_idx = 0;
     for group in &mesh.groups {
         let texture = group
@@ -268,11 +287,12 @@ fn draw_lit_projected_triangles(
                 continue;
             };
 
+            if screen_normal_z(p0_screen, p1_screen, p2_screen) <= 0.0 {
+                triangle_idx += 1;
+                continue;
+            }
             let color = joltik_color(triangle_idx, &p0, &p1, &p2, t);
-            triangle.clear();
-            triangle.add_polygon(p0_screen, p1_screen, p2_screen);
-            canvas.set_line_pixel(color);
-            canvas.draw_polygons(&triangle);
+            canvas.draw_triangle(color, p0_screen, p1_screen, p2_screen);
             triangle_idx += 1;
         }
     }
@@ -289,33 +309,64 @@ fn draw_textured_group(
         let p0_world = transform_point(transform, triangle[0].position);
         let p1_world = transform_point(transform, triangle[1].position);
         let p2_world = transform_point(transform, triangle[2].position);
+        let is_eye_group = is_eye_material_group(group);
         let shade = joltik_texture_light(lighting, &p0_world, &p1_world, &p2_world);
 
-        let Some(p0) = textured_screen_vertex_from_point(triangle[0], &p0_world) else {
+        let z_bias = textured_group_z_bias(group);
+        let Some(p0) = textured_screen_vertex_from_point(triangle[0], &p0_world, z_bias) else {
             continue;
         };
-        let Some(p1) = textured_screen_vertex_from_point(triangle[1], &p1_world) else {
+        let Some(p1) = textured_screen_vertex_from_point(triangle[1], &p1_world, z_bias) else {
             continue;
         };
-        let Some(p2) = textured_screen_vertex_from_point(triangle[2], &p2_world) else {
+        let Some(p2) = textured_screen_vertex_from_point(triangle[2], &p2_world, z_bias) else {
             continue;
         };
-        canvas.draw_textured_triangle_modulated(texture, [p0, p1, p2], shade);
+        if is_eye_group {
+            canvas.draw_textured_triangle_modulated_unculled_keyed(
+                texture,
+                [p0, p1, p2],
+                shade,
+                is_eye_texture_key,
+            );
+        } else {
+            canvas.draw_textured_triangle_modulated_unculled(texture, [p0, p1, p2], shade);
+        }
     }
 }
 
 fn textured_screen_vertex_from_point(
     vertex: TexturedMeshVertex,
     point: &[f64],
+    z_bias: f64,
 ) -> Option<TexturedVertex> {
     let screen = project_body_point(point)?;
     Some(TexturedVertex::new(
         screen.0,
         screen.1,
-        screen.2,
+        screen.2 + z_bias,
         vertex.texcoord.0,
         vertex.texcoord.1,
     ))
+}
+
+fn textured_group_z_bias(group: &MaterialMeshGroup) -> f64 {
+    if is_eye_material_group(group) {
+        EYE_DECAL_Z_BIAS
+    } else {
+        0.0
+    }
+}
+
+fn is_eye_material_group(group: &MaterialMeshGroup) -> bool {
+    group
+        .material_name
+        .as_deref()
+        .is_some_and(|name| name.contains("Eye"))
+}
+
+fn is_eye_texture_key(color: Rgb) -> bool {
+    color.red > 235 && color.green < 32 && color.blue < 32
 }
 
 fn transform_point(transform: &Matrix, point: (f64, f64, f64)) -> [f64; 3] {
@@ -337,6 +388,10 @@ fn transform_point(transform: &Matrix, point: (f64, f64, f64)) -> [f64; 3] {
             + transform[(2, 2)] * z
             + transform[(2, 3)] * w,
     ]
+}
+
+fn screen_normal_z(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> f64 {
+    (p1.0 - p0.0) * (p2.1 - p0.1) - (p1.1 - p0.1) * (p2.0 - p0.0)
 }
 
 fn joltik_lighting() -> Lighting {

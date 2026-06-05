@@ -1,6 +1,8 @@
 use crate::graphics::{colors::Rgb, lighting::Lighting};
 
 use core::slice;
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -270,31 +272,38 @@ impl Canvas {
         let samples = u64::from(factor) * u64::from(factor);
         #[allow(clippy::cast_possible_truncation)]
         let source_width = self.width as usize;
-        let pixels = (0..height)
-            .flat_map(|y| {
-                (0..width).map(move |x| {
-                    let mut red = 0_u64;
-                    let mut green = 0_u64;
-                    let mut blue = 0_u64;
-                    for sample_y in 0..factor {
-                        for sample_x in 0..factor {
-                            let source_x = x * factor + sample_x;
-                            let source_y = y * factor + sample_y;
-                            let pixel =
-                                self.pixels[source_y as usize * source_width + source_x as usize];
-                            red += u64::from(pixel.red);
-                            green += u64::from(pixel.green);
-                            blue += u64::from(pixel.blue);
-                        }
-                    }
-                    Rgb::new(
-                        ((red + samples / 2) / samples) as u8,
-                        ((green + samples / 2) / samples) as u8,
-                        ((blue + samples / 2) / samples) as u8,
-                    )
-                })
-            })
-            .collect();
+        let pixel_count = Self::pixel_count(width, height);
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..pixel_count)
+                    .into_par_iter()
+                    .map(|idx| {
+                        self.downsample_pixel(
+                            idx,
+                            width as usize,
+                            factor as usize,
+                            source_width,
+                            samples,
+                        )
+                    })
+                    .collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..pixel_count)
+                    .map(|idx| {
+                        self.downsample_pixel(
+                            idx,
+                            width as usize,
+                            factor as usize,
+                            source_width,
+                            samples,
+                        )
+                    })
+                    .collect()
+            }
+        };
 
         Self {
             width,
@@ -309,6 +318,37 @@ impl Canvas {
             shading_mode: self.shading_mode,
             lighting: self.lighting.clone(),
         }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn downsample_pixel(
+        &self,
+        idx: usize,
+        width: usize,
+        factor: usize,
+        source_width: usize,
+        samples: u64,
+    ) -> Rgb {
+        let x = idx % width;
+        let y = idx / width;
+        let mut red = 0_u64;
+        let mut green = 0_u64;
+        let mut blue = 0_u64;
+        for sample_y in 0..factor {
+            for sample_x in 0..factor {
+                let source_x = x * factor + sample_x;
+                let source_y = y * factor + sample_y;
+                let pixel = self.pixels[source_y * source_width + source_x];
+                red += u64::from(pixel.red);
+                green += u64::from(pixel.green);
+                blue += u64::from(pixel.blue);
+            }
+        }
+        Rgb::new(
+            ((red + samples / 2) / samples) as u8,
+            ((green + samples / 2) / samples) as u8,
+            ((blue + samples / 2) / samples) as u8,
+        )
     }
 
     pub(crate) fn with_pixels_like(&self, pixels: Vec<Rgb>) -> Self {
@@ -513,6 +553,50 @@ impl Canvas {
         }
     }
 
+    /// Returns the storage index for a visible z-buffered pixel.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn visible_pixel_index(&self, x: i64, y: i64, z: f64) -> Option<usize> {
+        if !z.is_finite() {
+            return None;
+        }
+
+        let (x, y) = self.normalize_coords(x, y)?;
+        let index = y as usize * self.width as usize + x as usize;
+        (z > self.zbuffer[index]).then_some(index)
+    }
+
+    /// Returns the storage index for a visible non-wrapping, already-clipped screen pixel.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn visible_pixel_index_clipped_unchecked(
+        &self,
+        x: i64,
+        y: i64,
+        z: f64,
+    ) -> Option<usize> {
+        if !z.is_finite() {
+            return None;
+        }
+
+        debug_assert!(!self.wrapped);
+        debug_assert!(x >= 0 && x < i64::from(self.width));
+        debug_assert!(y >= 0 && y < i64::from(self.height));
+
+        let storage_y = if self.upper_left_origin {
+            y
+        } else {
+            i64::from(self.height) - 1 - y
+        };
+        let index = storage_y as usize * self.width as usize + x as usize;
+        (z > self.zbuffer[index]).then_some(index)
+    }
+
+    /// Sets a z-buffered pixel by storage index.
+    pub(crate) fn plot_z_index_unchecked(&mut self, index: usize, pixel: Rgb, z: f64) {
+        debug_assert!(index < self.pixels.len());
+        self.pixels[index] = pixel;
+        self.zbuffer[index] = z;
+    }
+
     /// Draws a clipped, non-wrapping horizontal z-buffered span.
     #[allow(
         clippy::cast_possible_truncation,
@@ -664,6 +748,24 @@ impl Canvas {
         self.with_pixels_like(self.pixels.iter().copied().map(&mut f).collect())
     }
 
+    #[cfg(feature = "filters")]
+    pub(crate) fn map_pixels_independent<F>(&self, f: F) -> Self
+    where
+        F: Fn(Rgb) -> Rgb + Send + Sync,
+    {
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                self.pixels.par_iter().copied().map(f).collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                self.pixels.iter().copied().map(f).collect()
+            }
+        };
+        self.with_pixels_like(pixels)
+    }
+
     /// Returns a new canvas with every pixel transformed by `f`.
     ///
     /// The callback receives `(x, y, pixel)` in storage coordinates.
@@ -680,6 +782,36 @@ impl Canvas {
             .enumerate()
             .map(|(idx, pixel)| f((idx % width) as u32, (idx / width) as u32, pixel))
             .collect();
+        self.with_pixels_like(pixels)
+    }
+
+    #[cfg(feature = "filters")]
+    #[allow(clippy::cast_possible_truncation)]
+    pub(crate) fn map_pixels_with_position_independent<F>(&self, f: F) -> Self
+    where
+        F: Fn(u32, u32, Rgb) -> Rgb + Send + Sync,
+    {
+        let width = self.width as usize;
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                self.pixels
+                    .par_iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(idx, pixel)| f((idx % width) as u32, (idx / width) as u32, pixel))
+                    .collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                self.pixels
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(idx, pixel)| f((idx % width) as u32, (idx / width) as u32, pixel))
+                    .collect()
+            }
+        };
         self.with_pixels_like(pixels)
     }
 }
@@ -802,6 +934,11 @@ impl Canvas {
     #[must_use]
     pub fn lighting(&self) -> Lighting {
         self.lighting.clone()
+    }
+
+    /// Returns the Phong reflection lighting configuration by reference.
+    pub(crate) fn lighting_ref(&self) -> &Lighting {
+        &self.lighting
     }
 
     /// Returns the Phong reflection lighting configuration mutably.

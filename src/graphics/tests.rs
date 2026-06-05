@@ -574,6 +574,23 @@ fn draw_textured_triangle_culls_reversed_winding() {
 }
 
 #[test]
+fn draw_textured_triangle_unculled_draws_reversed_winding() {
+    let texture = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::WHITE]));
+    let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
+
+    canvas.draw_textured_triangle_unculled(
+        &texture,
+        [
+            TexturedVertex::new(0.0, 0.0, 0.0, 0.0, 0.0),
+            TexturedVertex::new(0.0, 3.0, 0.0, 0.0, 1.0),
+            TexturedVertex::new(3.0, 0.0, 0.0, 1.0, 0.0),
+        ],
+    );
+
+    assert!(canvas.pixels().contains(&Rgb::WHITE));
+}
+
+#[test]
 fn draw_textured_triangle_modulates_sampled_color() {
     let texture = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::new(200, 100, 50)]));
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
@@ -590,6 +607,73 @@ fn draw_textured_triangle_modulates_sampled_color() {
     );
 
     assert!(canvas.pixels().contains(&Rgb::new(100, 100, 13)));
+}
+
+#[test]
+fn direct_triangle_apis_draw_without_polygon_matrix() {
+    let mut flat = Canvas::new_with_bg(6, 6, Rgb::BLACK);
+    flat.wrapped = false;
+    flat.draw_triangle(Rgb::RED, (0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
+
+    let mut lit = Canvas::new_with_bg(6, 6, Rgb::BLACK);
+    lit.wrapped = false;
+    lit.draw_lit_triangle((0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
+
+    assert!(flat.pixels().contains(&Rgb::RED));
+    assert!(lit.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+}
+
+#[test]
+fn overlapping_textured_triangles_respect_z_buffer_order() {
+    let red = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::RED]));
+    let blue = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::BLUE]));
+    let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
+    canvas.wrapped = false;
+
+    let triangle = |z| {
+        [
+            TexturedVertex::new(0.0, 0.0, z, 0.0, 0.0),
+            TexturedVertex::new(3.0, 0.0, z, 1.0, 0.0),
+            TexturedVertex::new(0.0, 3.0, z, 0.0, 1.0),
+        ]
+    };
+    canvas.draw_textured_triangle(&red, triangle(0.0));
+    canvas.draw_textured_triangle(&blue, triangle(1.0));
+
+    assert_eq!(canvas.get_pixel(1, 1), Some(&Rgb::BLUE));
+}
+
+#[test]
+fn textured_triangle_uses_explicit_inv_w_for_perspective_coordinates() {
+    let texture = Texture::from_canvas(Canvas::from_pixels(
+        4,
+        1,
+        vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
+    ));
+    let mut affine = Canvas::new_with_bg(8, 8, Rgb::BLACK);
+    affine.wrapped = false;
+    let mut perspective = Canvas::new_with_bg(8, 8, Rgb::BLACK);
+    perspective.wrapped = false;
+
+    affine.draw_textured_triangle(
+        &texture,
+        [
+            TexturedVertex::from_projected(0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            TexturedVertex::from_projected(7.0, 0.0, 1.0, 1.0, 1.0, 0.0),
+            TexturedVertex::from_projected(0.0, 7.0, 1.0, 1.0, 0.0, 0.0),
+        ],
+    );
+    perspective.draw_textured_triangle(
+        &texture,
+        [
+            TexturedVertex::from_projected(0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            TexturedVertex::from_projected(7.0, 0.0, 1.0, 0.05, 1.0, 0.0),
+            TexturedVertex::from_projected(0.0, 7.0, 1.0, 1.0, 0.0, 0.0),
+        ],
+    );
+
+    assert_eq!(affine.get_pixel(2, 2), Some(&Rgb::GREEN));
+    assert_eq!(perspective.get_pixel(2, 2), Some(&Rgb::RED));
 }
 
 #[test]

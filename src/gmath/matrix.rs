@@ -1,4 +1,6 @@
 use super::vector::Vector;
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 use std::{
     fmt,
     ops::{Add, AddAssign, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
@@ -6,6 +8,10 @@ use std::{
 };
 
 const EPS: f64 = 1e-10;
+#[cfg(feature = "rayon")]
+const PARALLEL_POINT_TRANSFORM_THRESHOLD: usize = 4_096;
+#[cfg(feature = "rayon")]
+const PARALLEL_MATRIX_MULTIPLY_WORK_THRESHOLD: usize = 16_384;
 
 #[must_use]
 #[derive(Default, Clone, Debug)]
@@ -687,7 +693,24 @@ impl Matrix {
         let m32 = transform[(3, 2)];
         let m33 = transform[(3, 3)];
 
-        for point in self.data[start_col * 4..].chunks_exact_mut(4) {
+        let points = &mut self.data[start_col * 4..];
+
+        #[cfg(feature = "rayon")]
+        {
+            let point_count = points.len() / 4;
+            if point_count >= PARALLEL_POINT_TRANSFORM_THRESHOLD {
+                points.par_chunks_exact_mut(4).for_each(|point| {
+                    let (x, y, z, w) = (point[0], point[1], point[2], point[3]);
+                    point[0] = m00 * x + m01 * y + m02 * z + m03 * w;
+                    point[1] = m10 * x + m11 * y + m12 * z + m13 * w;
+                    point[2] = m20 * x + m21 * y + m22 * z + m23 * w;
+                    point[3] = m30 * x + m31 * y + m32 * z + m33 * w;
+                });
+                return;
+            }
+        }
+
+        for point in points.chunks_exact_mut(4) {
             let (x, y, z, w) = (point[0], point[1], point[2], point[3]);
             point[0] = m00 * x + m01 * y + m02 * z + m03 * w;
             point[1] = m10 * x + m11 * y + m12 * z + m13 * w;
@@ -756,6 +779,27 @@ impl Matrix {
         );
 
         let mut result = Matrix::zeros(self.rows, other.cols);
+
+        #[cfg(feature = "rayon")]
+        {
+            let work = self.rows * self.cols * other.cols;
+            if work >= PARALLEL_MATRIX_MULTIPLY_WORK_THRESHOLD {
+                result
+                    .data
+                    .par_chunks_mut(self.rows)
+                    .enumerate()
+                    .for_each(|(j, result_col)| {
+                        for k in 0..self.cols {
+                            let b = other[(k, j)];
+                            for i in 0..self.rows {
+                                result_col[i] += self[(i, k)] * b;
+                            }
+                        }
+                    });
+                return result;
+            }
+        }
+
         for j in 0..other.cols {
             for k in 0..self.cols {
                 unsafe {
@@ -1082,7 +1126,7 @@ impl fmt::Display for Matrix {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[allow(clippy::cast_precision_loss, clippy::float_cmp)]
 mod tests {
     use super::*;
     use std::iter::Iterator;
@@ -1195,6 +1239,69 @@ mod tests {
         assert_eq!(c.get(1, 0), 43.0);
         assert_eq!(c.get(0, 1), 22.0);
         assert_eq!(c.get(1, 1), 50.0);
+    }
+
+    #[test]
+    fn large_matrix_multiplication_matches_expected_values() {
+        let rows = 24;
+        let inner = 32;
+        let cols = 24;
+        let mut a_data = Vec::with_capacity(rows * inner);
+        let mut b_data = Vec::with_capacity(inner * cols);
+
+        for k in 0..inner {
+            for i in 0..rows {
+                a_data.push(i as f64 * 0.5 + k as f64 * 0.25);
+            }
+        }
+        for j in 0..cols {
+            for k in 0..inner {
+                b_data.push(j as f64 * 0.125 - k as f64 * 0.375);
+            }
+        }
+
+        let a = Matrix::new(rows, inner, a_data);
+        let b = Matrix::new(inner, cols, b_data);
+        let c = a.mult_matrix(&b);
+
+        for &(i, j) in &[(0, 0), (3, 5), (11, 17), (23, 23)] {
+            let expected = (0..inner)
+                .map(|k| (i as f64 * 0.5 + k as f64 * 0.25) * (j as f64 * 0.125 - k as f64 * 0.375))
+                .sum::<f64>();
+            assert!((c[(i, j)] - expected).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn large_homogeneous_transform_updates_all_points() {
+        let point_count = 4_096;
+        let mut data = Vec::with_capacity(point_count * 4);
+        for col in 0..point_count {
+            let c = col as f64;
+            data.extend_from_slice(&[c, c + 1.0, c + 2.0, 1.0]);
+        }
+        let mut points = Matrix::new(4, point_count, data);
+        let transform = Matrix::new(
+            4,
+            4,
+            vec![
+                2.0, 7.0, 11.0, 13.0, 3.0, 8.0, 12.0, 14.0, 4.0, 9.0, 15.0, 16.0, 5.0, 10.0, 17.0,
+                18.0,
+            ],
+        );
+
+        points.apply_homogeneous_transform_from_col(0, &transform);
+
+        for &col in &[0, 97, point_count - 1] {
+            let c = col as f64;
+            let x = c;
+            let y = c + 1.0;
+            let z = c + 2.0;
+            assert_eq!(points[(0, col)], 2.0 * x + 3.0 * y + 4.0 * z + 5.0);
+            assert_eq!(points[(1, col)], 7.0 * x + 8.0 * y + 9.0 * z + 10.0);
+            assert_eq!(points[(2, col)], 11.0 * x + 12.0 * y + 15.0 * z + 17.0);
+            assert_eq!(points[(3, col)], 13.0 * x + 14.0 * y + 16.0 * z + 18.0);
+        }
     }
 
     #[test]

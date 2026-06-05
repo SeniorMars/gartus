@@ -10,6 +10,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 /// Explicit frame recorder for animations.
 #[derive(Debug)]
 pub struct FrameRecorder {
@@ -307,6 +310,41 @@ impl FrameRecorder {
                 save_preview(&canvas, preview_output).map_err(AnimationError::Io)?;
             }
             recorder.capture(&canvas).map_err(AnimationError::Io)?;
+            Ok(())
+        })
+        .map_err(animation_error_into_io)
+    }
+
+    /// Renders frames in parallel, then writes and encodes them in frame order.
+    ///
+    /// Enable the `rayon` feature to use this helper. This is best for frame renderers where each
+    /// frame is independent and memory can hold all rendered canvases until they are written.
+    ///
+    /// # Errors
+    /// Returns `Err` if frame rendering, frame capture, preview saving, GIF encoding, or cleanup fails.
+    #[cfg(feature = "rayon")]
+    pub fn render_gif_parallel<F>(options: AnimationRenderOptions, render: F) -> io::Result<()>
+    where
+        F: Fn(usize) -> io::Result<Canvas> + Sync,
+    {
+        let frames = options.frames();
+        let rendered = (0..frames)
+            .into_par_iter()
+            .map(|frame| render(frame).map(|canvas| (frame, canvas)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut rendered = rendered;
+        rendered.sort_by_key(|(frame, _)| *frame);
+        Self::render_gif_with_recorder(options, |frame, preview_output, recorder| {
+            let Some((_, canvas)) = rendered.get(frame) else {
+                return Err(AnimationError::InvalidOptions(format!(
+                    "parallel renderer produced fewer than {frames} frames"
+                )));
+            };
+            if let Some(preview_output) = preview_output {
+                save_preview(canvas, preview_output).map_err(AnimationError::Io)?;
+            }
+            recorder.capture(canvas).map_err(AnimationError::Io)?;
             Ok(())
         })
         .map_err(animation_error_into_io)

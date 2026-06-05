@@ -21,7 +21,13 @@ use std::{
 };
 
 #[cfg(feature = "external")]
-use {crate::external::MaterialMesh, std::sync::Arc};
+use {
+    crate::{
+        external::MaterialMesh,
+        graphics::texture::{Texture, TextureFilter, TextureWrap},
+    },
+    std::sync::Arc,
+};
 
 /// Rendering configuration for one MDL execution.
 #[derive(Debug, Clone)]
@@ -170,6 +176,8 @@ pub struct Runtime {
     scratch: ScratchGeometry,
     #[cfg(feature = "external")]
     mesh_cache: HashMap<PathBuf, Arc<MaterialMesh>>,
+    #[cfg(feature = "external")]
+    texture_cache: HashMap<PathBuf, Arc<Texture>>,
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +245,8 @@ impl Runtime {
             scratch: ScratchGeometry::new(),
             #[cfg(feature = "external")]
             mesh_cache: HashMap::new(),
+            #[cfg(feature = "external")]
+            texture_cache: HashMap::new(),
         }
     }
 
@@ -518,7 +528,7 @@ impl Runtime {
     }
 
     pub(crate) fn apply_draw_state(&mut self, constants: Option<MaterialConstants>) -> DrawState {
-        let lighting = self.canvas.lighting();
+        let lighting = self.canvas.lighting_ref();
         let previous = DrawState {
             line: self.canvas.line_color(),
             ambient_reflection: lighting.ambient_reflection,
@@ -661,6 +671,32 @@ impl Runtime {
         self.mesh_cache
             .insert(path.to_path_buf(), Arc::clone(&mesh));
         Ok(mesh)
+    }
+
+    #[cfg(feature = "external")]
+    pub(crate) fn load_texture_cached(
+        &mut self,
+        path: &Path,
+    ) -> Result<Arc<Texture>, ExecutionError> {
+        if let Some(texture) = self.texture_cache.get(path) {
+            return Ok(Arc::clone(texture));
+        }
+
+        let image = crate::external::ppmify(path_to_str(path)?, false).map_err(|error| {
+            ExecutionError::Texture {
+                filename: path.display().to_string(),
+                error: error.to_string(),
+            }
+        })?;
+        let texture = Arc::new(
+            Texture::from_canvas(image)
+                .wrap(TextureWrap::Repeat, TextureWrap::Repeat)
+                .filter(TextureFilter::Linear)
+                .mipmapped(),
+        );
+        self.texture_cache
+            .insert(path.to_path_buf(), Arc::clone(&texture));
+        Ok(texture)
     }
 }
 

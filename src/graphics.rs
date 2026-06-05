@@ -22,6 +22,8 @@ pub mod primitives;
 mod tests;
 /// 2D texture sampling helpers.
 pub mod texture;
+/// Textured triangle and quad rasterization.
+pub mod textured_raster;
 /// An agent that can move throughout the [Canvas]
 #[cfg(feature = "turtle")]
 pub mod turtle;

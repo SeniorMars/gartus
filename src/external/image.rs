@@ -237,9 +237,7 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
         _ => return Err(format!("Invalid PPM file: unsupported magic {magic}").into()),
     }
 
-    let mut canvas = Canvas::new(width, height, Rgb::default());
-    canvas.fill_canvas(pixels);
-    Ok(canvas)
+    Ok(Canvas::from_pixels(width, height, pixels))
 }
 
 #[cfg(test)]

@@ -15,20 +15,29 @@ debug = 1
 incremental = true
 lto = "off"
 
+[profile.render]
+inherits = "release"
+debug = 0
+incremental = false
+lto = "thin"
+codegen-units = 1
+
 [dependencies]
 num = "0.3.1"
+rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
 rand = "0.8.5"
 num = "0.3.1"
 
 [features]
-default = ["external", "turtle", "filters", "fancy_math"]
+default = ["external", "turtle", "filters", "fancy_math", "rayon"]
 external = ["filters"]
 filters = []
 turtle = []
 fancy_math = []
 old_parser = []
+rayon = ["dep:rayon"]
 
 [[example]]
 name = "frac_tree"

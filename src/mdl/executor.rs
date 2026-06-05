@@ -4,21 +4,19 @@ use super::{
     animation::FrameOutputConfig,
     ast::{
         AnimationCommand, Axis, CameraCommand, ColorSpec, Command, ControlCommand, CurveCommand,
-        FilterCommand, Material, OutputCommand, PointRef, Program, RenderCommand, ShadingMode,
-        ShapeCommand, Spanned, TransformCommand, Vec2, Vec3,
+        FilterCommand, OutputCommand, PointRef, Program, RenderCommand, ShadingMode, ShapeCommand,
+        Spanned, TransformCommand, Vec2, Vec3,
     },
     lexer::Span,
-    runtime::{Light, MaterialConstants, RenderConfig, Runtime, rgb_from_vec3},
+    runtime::{Light, RenderConfig, Runtime, rgb_from_vec3},
     semantic::CompiledProgram,
 };
 use crate::{
-    external::MeshMaterial,
     gmath::{edge_matrix::DEFAULT_CURVE_STEP, matrix::Matrix},
     graphics::{
         animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
         colors::Rgb,
         display::{PolygonColorMode, ShadingMode as CanvasShadingMode},
-        texture::Texture,
     },
 };
 use std::{
@@ -26,6 +24,17 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
 };
+
+#[cfg(feature = "external")]
+use super::{ast::Material, runtime::MaterialConstants};
+#[cfg(feature = "external")]
+use crate::{
+    external::{MaterialMeshGroup, MeshMaterial, TexturedMeshTriangle, TexturedMeshVertex},
+    gmath::vector::Vector,
+    graphics::draw::TexturedVertex,
+};
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 const DEFAULT_3D_STEPS: usize = 100;
 
@@ -69,6 +78,13 @@ pub enum ExecutionError {
     /// Mesh loading failed.
     Mesh {
         /// Mesh filename.
+        filename: String,
+        /// Error detail.
+        error: String,
+    },
+    /// Texture loading failed.
+    Texture {
+        /// Texture filename.
         filename: String,
         /// Error detail.
         error: String,
@@ -130,6 +146,9 @@ impl fmt::Display for ExecutionError {
             Self::Mesh { filename, error } => {
                 write!(f, "could not load mesh `{filename}`: {error}")
             }
+            Self::Texture { filename, error } => {
+                write!(f, "could not load texture `{filename}`: {error}")
+            }
             Self::InvalidFrame { frame, frames } => {
                 write!(f, "frame {frame} is outside compiled frame count {frames}")
             }
@@ -158,6 +177,7 @@ impl Error for ExecutionError {
             | Self::UnknownColor(_)
             | Self::InvalidFilter { .. }
             | Self::Mesh { .. }
+            | Self::Texture { .. }
             | Self::InvalidFrame { .. }
             | Self::InvalidAnimationOptions { .. } => None,
         }
@@ -259,17 +279,47 @@ pub fn execute_compiled_frames_with_options(
     config: RenderConfig,
     output: FrameOutputConfig,
 ) -> Result<Vec<PathBuf>, ExecutionError> {
+    #[cfg(feature = "rayon")]
+    {
+        execute_compiled_frames_with_options_parallel(compiled, config, &output)
+    }
+    #[cfg(not(feature = "rayon"))]
+    {
+        fs::create_dir_all(output.output_dir_path()).map_err(ExecutionError::Io)?;
+
+        let mut paths = Vec::with_capacity(compiled.animation().frames());
+        let config = config.save_enabled(false);
+        for_each_compiled_frame(compiled, &config, |frame, runtime| {
+            let path = output.frame_path(compiled.animation().basename(), frame);
+            runtime.save_to_path(&path)?;
+            paths.push(path);
+            Ok(())
+        })?;
+        Ok(paths)
+    }
+}
+
+#[cfg(feature = "rayon")]
+fn execute_compiled_frames_with_options_parallel(
+    compiled: &CompiledProgram,
+    config: RenderConfig,
+    output: &FrameOutputConfig,
+) -> Result<Vec<PathBuf>, ExecutionError> {
     fs::create_dir_all(output.output_dir_path()).map_err(ExecutionError::Io)?;
 
-    let mut paths = Vec::with_capacity(compiled.animation().frames());
     let config = config.save_enabled(false);
-    for_each_compiled_frame(compiled, &config, |frame, runtime| {
-        let path = output.frame_path(compiled.animation().basename(), frame);
-        runtime.save_to_path(&path)?;
-        paths.push(path);
-        Ok(())
-    })?;
-    Ok(paths)
+    let basename = compiled.animation().basename().to_string();
+    let mut paths = (0..compiled.animation().frames())
+        .into_par_iter()
+        .map(|frame| {
+            let runtime = execute_compiled_frame_from_config(compiled, &config, frame)?;
+            let path = output.frame_path(&basename, frame);
+            runtime.save_to_path(&path)?;
+            Ok((frame, path))
+        })
+        .collect::<Result<Vec<_>, ExecutionError>>()?;
+    paths.sort_by_key(|(frame, _)| *frame);
+    Ok(paths.into_iter().map(|(_, path)| path).collect())
 }
 
 /// Executes every compiled frame using the default `frames/` output convention.
@@ -610,13 +660,7 @@ fn execute_texture_shape(
 ) -> Result<(), ExecutionError> {
     let transform = runtime.top_transform().clone();
     let path = runtime.resolve_mesh_path(filename, source_name);
-    let canvas = crate::external::ppmify(path_to_str(&path)?, false).map_err(|error| {
-        ExecutionError::Mesh {
-            filename: path.display().to_string(),
-            error: error.to_string(),
-        }
-    })?;
-    let texture = Texture::from_canvas(canvas);
+    let texture = runtime.load_texture_cached(&path)?;
     let points = points.map(|point| {
         let transformed = transform.transform_homogeneous_point(&[point.x, point.y, point.z, 1.0]);
         (transformed[0], transformed[1], transformed[2])
@@ -928,15 +972,6 @@ fn execute_filter_command(
     apply_filter(runtime, &filter.name, filter.value)
 }
 
-fn path_to_str(path: &Path) -> Result<&str, ExecutionError> {
-    path.to_str().ok_or_else(|| {
-        ExecutionError::Io(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("path is not valid UTF-8: {}", path.display()),
-        ))
-    })
-}
-
 fn draw_edges(
     runtime: &mut Runtime,
     build: impl FnOnce(&mut crate::gmath::edge_matrix::EdgeMatrix),
@@ -1031,15 +1066,31 @@ fn draw_mesh(
 
     for group in &mesh.groups {
         let draw_material =
-            material_with_mesh_material(material, group.material.clone(), group.diffuse_color);
+            material_with_mesh_material(material, group.material.as_ref(), group.diffuse_color);
+        let texture = if group.textured_triangles.is_empty() {
+            None
+        } else {
+            group
+                .material
+                .as_ref()
+                .and_then(|material| material.diffuse_texture.as_ref())
+                .map(|path| runtime.load_texture_cached(path))
+                .transpose()?
+        };
         let previous = runtime.apply_draw_state(draw_material);
 
-        let mut polygons = group.polygons.clone();
-        if reverse {
-            polygons.reverse_winding();
+        if let Some(texture) = texture {
+            draw_textured_mesh_group(runtime, group, &texture, &transform, reverse);
+        } else {
+            runtime.with_tmp_polygons(|polygons| {
+                polygons.extend(&group.polygons);
+                if reverse {
+                    polygons.reverse_winding();
+                }
+                polygons.apply_in_place(&transform);
+            });
+            runtime.draw_tmp_polygons();
         }
-        polygons.apply_in_place(&transform);
-        runtime.canvas_mut().draw_polygons(&polygons);
 
         runtime.restore_draw_state(previous);
     }
@@ -1048,9 +1099,86 @@ fn draw_mesh(
 }
 
 #[cfg(feature = "external")]
+fn draw_textured_mesh_group(
+    runtime: &mut Runtime,
+    group: &MaterialMeshGroup,
+    texture: &crate::graphics::texture::Texture,
+    transform: &Matrix,
+    reverse: bool,
+) {
+    for triangle in &group.textured_triangles {
+        let mut vertices = textured_vertices_from_triangle(*triangle, transform);
+        if reverse {
+            vertices.swap(1, 2);
+        }
+        let modulation = {
+            let lighting = runtime.canvas().lighting_ref();
+            textured_triangle_lighting(lighting, vertices)
+        };
+        runtime
+            .canvas_mut()
+            .draw_textured_triangle_modulated(texture, vertices, modulation);
+    }
+}
+
+#[cfg(feature = "external")]
+fn textured_vertices_from_triangle(
+    triangle: TexturedMeshTriangle,
+    transform: &Matrix,
+) -> [TexturedVertex; 3] {
+    triangle.map(|vertex| textured_vertex_from_mesh_vertex(vertex, transform))
+}
+
+#[cfg(feature = "external")]
+fn textured_vertex_from_mesh_vertex(
+    vertex: TexturedMeshVertex,
+    transform: &Matrix,
+) -> TexturedVertex {
+    let point = transform.transform_homogeneous_point(&[
+        vertex.position.0,
+        vertex.position.1,
+        vertex.position.2,
+        1.0,
+    ]);
+    TexturedVertex::new(
+        point[0],
+        point[1],
+        point[2],
+        vertex.texcoord.0,
+        vertex.texcoord.1,
+    )
+}
+
+#[cfg(feature = "external")]
+fn textured_triangle_lighting(
+    lighting: &crate::graphics::lighting::Lighting,
+    vertices: [TexturedVertex; 3],
+) -> Rgb {
+    let p0 = vertices[0].position_tuple();
+    let p1 = vertices[1].position_tuple();
+    let p2 = vertices[2].position_tuple();
+    let normal = triangle_normal(p0, p1, p2);
+    let point = Vector::new(
+        (p0.0 + p1.0 + p2.0) / 3.0,
+        (p0.1 + p1.1 + p2.1) / 3.0,
+        (p0.2 + p1.2 + p2.2) / 3.0,
+    );
+    lighting.illuminate_at(normal, point)
+}
+
+#[cfg(feature = "external")]
+fn triangle_normal(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
+    Vector::new(
+        (p1.1 - p0.1) * (p2.2 - p0.2) - (p1.2 - p0.2) * (p2.1 - p0.1),
+        (p1.2 - p0.2) * (p2.0 - p0.0) - (p1.0 - p0.0) * (p2.2 - p0.2),
+        (p1.0 - p0.0) * (p2.1 - p0.1) - (p1.1 - p0.1) * (p2.0 - p0.0),
+    )
+}
+
+#[cfg(feature = "external")]
 fn material_with_mesh_material(
     material: Option<MaterialConstants>,
-    mesh_material: Option<MeshMaterial>,
+    mesh_material: Option<&MeshMaterial>,
     diffuse_color: Option<Rgb>,
 ) -> Option<MaterialConstants> {
     if mesh_material.is_none() && diffuse_color.is_none() {
@@ -1891,10 +2019,61 @@ mod tests {
         )
         .unwrap();
 
-        assert!(runtime.canvas().pixels().contains(&Rgb::BLUE));
-        assert!(runtime.canvas().pixels().contains(&Rgb::GREEN));
+        let textured_pixels = runtime
+            .canvas()
+            .pixels()
+            .iter()
+            .filter(|pixel| **pixel != Rgb::BLACK)
+            .collect::<Vec<_>>();
+        assert!(!textured_pixels.is_empty());
+        assert!(textured_pixels.iter().any(|pixel| pixel.blue > 0));
+        assert!(textured_pixels.iter().any(|pixel| pixel.green > 0));
         let _ = std::fs::remove_file(texture_path);
         let _ = std::fs::remove_dir(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn mesh_command_uses_obj_material_texture_map() {
+        let dir =
+            std::env::temp_dir().join(format!("gartus-mdl-textured-mesh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp textured mesh dir");
+        std::fs::write(
+            dir.join("tri.obj"),
+            "\
+mtllib tri.mtl
+v 10 10 0
+v 60 10 0
+v 10 60 0
+vt 0 0
+vt 1 0
+vt 0 1
+usemtl tex
+f 1/1 2/2 3/3
+",
+        )
+        .expect("write obj");
+        std::fs::write(
+            dir.join("tri.mtl"),
+            "newmtl tex\nKd 1 1 1\nmap_Kd tex.ppm\n",
+        )
+        .expect("write mtl");
+        std::fs::write(dir.join("tex.ppm"), b"P3\n1 1\n255\n0 0 255\n").expect("write texture");
+
+        let program = parse_script("mesh :tri.obj").unwrap();
+        let runtime = execute_program(
+            &program,
+            &RenderConfig::new_with_bg(80, 80, Rgb::WHITE, Rgb::BLACK)
+                .display_enabled(false)
+                .source_dir(&dir),
+        )
+        .unwrap();
+
+        assert!(runtime.canvas().pixels().iter().any(|pixel| {
+            pixel.blue > 0 && pixel.blue > pixel.red.saturating_mul(2) && pixel.blue > pixel.green
+        }));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(feature = "filters")]

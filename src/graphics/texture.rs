@@ -1,4 +1,6 @@
 use super::{colors::Rgb, display::Canvas};
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 /// Controls how texture coordinates outside `0..=1` are handled.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -28,6 +30,32 @@ pub struct Texture {
     wrap_s: TextureWrap,
     wrap_t: TextureWrap,
     filter: TextureFilter,
+}
+
+/// A texture sampler selected once for a draw call.
+pub(crate) enum ActiveTextureSampler<'a> {
+    NearestBase {
+        image: &'a Canvas,
+        wrap_s: TextureWrap,
+        wrap_t: TextureWrap,
+    },
+    LinearBase {
+        image: &'a Canvas,
+        wrap_s: TextureWrap,
+        wrap_t: TextureWrap,
+    },
+    NearestMip {
+        texture: &'a Texture,
+        wrap_s: TextureWrap,
+        wrap_t: TextureWrap,
+        max_level: usize,
+    },
+    LinearMip {
+        texture: &'a Texture,
+        wrap_s: TextureWrap,
+        wrap_t: TextureWrap,
+        max_level: usize,
+    },
 }
 
 impl Texture {
@@ -151,6 +179,100 @@ impl Texture {
             &self.mipmaps[level - 1]
         }
     }
+
+    pub(crate) fn active_sampler(&self) -> ActiveTextureSampler<'_> {
+        match (self.filter, self.mipmaps.is_empty()) {
+            (TextureFilter::Nearest, true) => ActiveTextureSampler::NearestBase {
+                image: &self.image,
+                wrap_s: self.wrap_s,
+                wrap_t: self.wrap_t,
+            },
+            (TextureFilter::Linear, true) => ActiveTextureSampler::LinearBase {
+                image: &self.image,
+                wrap_s: self.wrap_s,
+                wrap_t: self.wrap_t,
+            },
+            (TextureFilter::Nearest, false) => ActiveTextureSampler::NearestMip {
+                texture: self,
+                wrap_s: self.wrap_s,
+                wrap_t: self.wrap_t,
+                max_level: self.mipmaps.len(),
+            },
+            (TextureFilter::Linear, false) => ActiveTextureSampler::LinearMip {
+                texture: self,
+                wrap_s: self.wrap_s,
+                wrap_t: self.wrap_t,
+                max_level: self.mipmaps.len(),
+            },
+        }
+    }
+}
+
+impl ActiveTextureSampler<'_> {
+    pub(crate) const fn uses_mips(&self) -> bool {
+        matches!(self, Self::NearestMip { .. } | Self::LinearMip { .. })
+    }
+
+    pub(crate) fn sample(&self, s: f64, t: f64, lod: f64) -> Rgb {
+        if !s.is_finite() || !t.is_finite() || !lod.is_finite() {
+            return Rgb::BLACK;
+        }
+
+        match self {
+            Self::NearestBase {
+                image,
+                wrap_s,
+                wrap_t,
+            } => {
+                if image.is_empty() {
+                    return Rgb::BLACK;
+                }
+                sample_nearest(image, apply_wrap(s, *wrap_s), apply_wrap(t, *wrap_t))
+            }
+            Self::LinearBase {
+                image,
+                wrap_s,
+                wrap_t,
+            } => {
+                if image.is_empty() {
+                    return Rgb::BLACK;
+                }
+                sample_linear(image, apply_wrap(s, *wrap_s), apply_wrap(t, *wrap_t))
+            }
+            Self::NearestMip {
+                texture,
+                wrap_s,
+                wrap_t,
+                max_level,
+            } => {
+                if texture.image.is_empty() {
+                    return Rgb::BLACK;
+                }
+                let level = mip_level_from_lod(lod, *max_level);
+                sample_nearest(
+                    texture.level_image(level),
+                    apply_wrap(s, *wrap_s),
+                    apply_wrap(t, *wrap_t),
+                )
+            }
+            Self::LinearMip {
+                texture,
+                wrap_s,
+                wrap_t,
+                max_level,
+            } => {
+                if texture.image.is_empty() {
+                    return Rgb::BLACK;
+                }
+                let s = apply_wrap(s, *wrap_s);
+                let t = apply_wrap(t, *wrap_t);
+                let (lower, upper, blend) = mip_level_pair_from_lod(lod, *max_level);
+                let lower_sample = sample_linear(texture.level_image(lower), s, t);
+                let upper_sample = sample_linear(texture.level_image(upper), s, t);
+                lower_sample.lerp(upper_sample, blend)
+            }
+        }
+    }
 }
 
 fn sample_canvas(image: &Canvas, s: f64, t: f64, filter: TextureFilter) -> Rgb {
@@ -194,24 +316,42 @@ fn pixel_at_storage(image: &Canvas, x: u32, y: u32) -> Rgb {
 
 fn build_mipmaps(image: &Canvas) -> Vec<Canvas> {
     let mut levels = Vec::new();
-    let mut current = image.clone();
-    while current.width() > 1 || current.height() > 1 {
-        current = downsample_mipmap_level(&current);
-        levels.push(current.clone());
+    let mut source = image;
+    while source.width() > 1 || source.height() > 1 {
+        levels.push(downsample_mipmap_level(source));
+        source = levels.last().expect("just pushed generated mipmap level");
     }
     levels
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn downsample_mipmap_level(image: &Canvas) -> Canvas {
     let next_width = (image.width() / 2).max(1);
     let next_height = (image.height() / 2).max(1);
-    let mut pixels = Vec::with_capacity(next_width as usize * next_height as usize);
-
-    for y in 0..next_height {
-        for x in 0..next_width {
-            pixels.push(average_source_texels(image, x * 2, y * 2));
+    let pixel_count = next_width as usize * next_height as usize;
+    let pixels = {
+        #[cfg(feature = "rayon")]
+        {
+            (0..pixel_count)
+                .into_par_iter()
+                .map(|idx| {
+                    let x = idx % next_width as usize;
+                    let y = idx / next_width as usize;
+                    average_source_texels(image, x as u32 * 2, y as u32 * 2)
+                })
+                .collect()
         }
-    }
+        #[cfg(not(feature = "rayon"))]
+        {
+            (0..pixel_count)
+                .map(|idx| {
+                    let x = idx % next_width as usize;
+                    let y = idx / next_width as usize;
+                    average_source_texels(image, x as u32 * 2, y as u32 * 2)
+                })
+                .collect()
+        }
+    };
 
     Canvas::from_pixels(next_width, next_height, pixels)
 }

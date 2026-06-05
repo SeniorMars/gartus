@@ -2,6 +2,8 @@ use super::{
     colors::{Hsv, Rgb},
     display::Canvas,
 };
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 use std::cmp::min;
 
 impl Canvas {
@@ -25,45 +27,133 @@ impl Canvas {
         self.with_pixels_like(vec![Rgb::default(); self.len()])
     }
 
-    /// Generic convolution with a 3x3 kernel and additive bias.
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
-    pub fn convolve_3x3(&self, kernel: [f32; 9], bias: f32) -> Canvas {
-        let width = self.width() as isize;
-        let height = self.height() as isize;
-        let mut filtered = self.blank_like();
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss
+    )]
+    fn convolve_3x3_pixel(
+        &self,
+        idx: usize,
+        width: usize,
+        height: usize,
+        kernel: [f32; 9],
+        bias: f32,
+    ) -> Rgb {
+        let x = idx % width;
+        let y = idx / width;
+        let mut r_acc = 0.0;
+        let mut g_acc = 0.0;
+        let mut b_acc = 0.0;
 
-        for y in 0..height {
-            for x in 0..width {
-                let mut r_acc = 0.0;
-                let mut g_acc = 0.0;
-                let mut b_acc = 0.0;
+        for ky in 0..3 {
+            for kx in 0..3 {
+                let nx = match kx {
+                    0 => x.saturating_sub(1),
+                    1 => x,
+                    _ => (x + 1).min(width - 1),
+                };
+                let ny = match ky {
+                    0 => y.saturating_sub(1),
+                    1 => y,
+                    _ => (y + 1).min(height - 1),
+                };
 
-                for ky in 0..3 {
-                    for kx in 0..3 {
-                        let nx = x + (kx - 1);
-                        let ny = y + (ky - 1);
+                let pixel = self[ny * width + nx];
+                let weight = kernel[ky * 3 + kx];
 
-                        // Edge handling: clamping to nearest pixel
-                        let nx = nx.clamp(0, width - 1);
-                        let ny = ny.clamp(0, height - 1);
-
-                        let pixel = self[(ny * width + nx) as usize];
-                        let weight = kernel[(ky * 3 + kx) as usize];
-
-                        r_acc += f32::from(pixel.red) * weight;
-                        g_acc += f32::from(pixel.green) * weight;
-                        b_acc += f32::from(pixel.blue) * weight;
-                    }
-                }
-
-                filtered[(y * width + x) as usize] = Rgb::new(
-                    Self::clamp_u8(r_acc + bias),
-                    Self::clamp_u8(g_acc + bias),
-                    Self::clamp_u8(b_acc + bias),
-                );
+                r_acc += f32::from(pixel.red) * weight;
+                g_acc += f32::from(pixel.green) * weight;
+                b_acc += f32::from(pixel.blue) * weight;
             }
         }
-        filtered
+
+        Rgb::new(
+            Self::clamp_u8(r_acc + bias),
+            Self::clamp_u8(g_acc + bias),
+            Self::clamp_u8(b_acc + bias),
+        )
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn convolve_3x3_dual_pixel(
+        &self,
+        idx: usize,
+        width: usize,
+        height: usize,
+        gx: [f32; 9],
+        gy: [f32; 9],
+    ) -> Rgb {
+        let x = idx % width;
+        let y = idx / width;
+        let mut red_x = 0.0;
+        let mut green_x = 0.0;
+        let mut blue_x = 0.0;
+        let mut red_y = 0.0;
+        let mut green_y = 0.0;
+        let mut blue_y = 0.0;
+
+        for ky in 0..3 {
+            for kx in 0..3 {
+                let nx = match kx {
+                    0 => x.saturating_sub(1),
+                    1 => x,
+                    _ => (x + 1).min(width - 1),
+                };
+                let ny = match ky {
+                    0 => y.saturating_sub(1),
+                    1 => y,
+                    _ => (y + 1).min(height - 1),
+                };
+                let pixel = self[ny * width + nx];
+                let kernel_index = ky * 3 + kx;
+                let x_weight = gx[kernel_index];
+                let y_weight = gy[kernel_index];
+
+                red_x += f32::from(pixel.red) * x_weight;
+                green_x += f32::from(pixel.green) * x_weight;
+                blue_x += f32::from(pixel.blue) * x_weight;
+                red_y += f32::from(pixel.red) * y_weight;
+                green_y += f32::from(pixel.green) * y_weight;
+                blue_y += f32::from(pixel.blue) * y_weight;
+            }
+        }
+
+        Rgb::new(
+            (red_x.mul_add(red_x, red_y * red_y).sqrt()).min(255.0) as u8,
+            (green_x.mul_add(green_x, green_y * green_y).sqrt()).min(255.0) as u8,
+            (blue_x.mul_add(blue_x, blue_y * blue_y).sqrt()).min(255.0) as u8,
+        )
+    }
+
+    /// Generic convolution with a 3x3 kernel and additive bias.
+    ///
+    /// # Panics
+    /// Panics if the canvas dimensions cannot fit into `usize` on the target platform.
+    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+    pub fn convolve_3x3(&self, kernel: [f32; 9], bias: f32) -> Canvas {
+        let width = usize::try_from(self.width()).expect("canvas width fits usize");
+        let height = usize::try_from(self.height()).expect("canvas height fits usize");
+        if width == 0 || height == 0 {
+            return self.blank_like();
+        }
+
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..self.len())
+                    .into_par_iter()
+                    .map(|idx| self.convolve_3x3_pixel(idx, width, height, kernel, bias))
+                    .collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..self.len())
+                    .map(|idx| self.convolve_3x3_pixel(idx, width, height, kernel, bias))
+                    .collect()
+            }
+        };
+        self.with_pixels_like(pixels)
     }
 
     /// Applies a sharpen filter.
@@ -99,61 +189,33 @@ impl Canvas {
     pub fn convolve_3x3_dual(&self, gx: [f32; 9], gy: [f32; 9]) -> Canvas {
         let width = usize::try_from(self.width()).expect("canvas width fits usize");
         let height = usize::try_from(self.height()).expect("canvas height fits usize");
-        let mut result = self.blank_like();
         if width == 0 || height == 0 {
-            return result;
+            return self.blank_like();
         }
 
-        for y in 0..height {
-            for x in 0..width {
-                let mut red_x = 0.0;
-                let mut green_x = 0.0;
-                let mut blue_x = 0.0;
-                let mut red_y = 0.0;
-                let mut green_y = 0.0;
-                let mut blue_y = 0.0;
-
-                for ky in 0..3 {
-                    for kx in 0..3 {
-                        let nx = match kx {
-                            0 => x.saturating_sub(1),
-                            1 => x,
-                            _ => (x + 1).min(width - 1),
-                        };
-                        let ny = match ky {
-                            0 => y.saturating_sub(1),
-                            1 => y,
-                            _ => (y + 1).min(height - 1),
-                        };
-                        let pixel = self[ny * width + nx];
-                        let kernel_index = ky * 3 + kx;
-                        let x_weight = gx[kernel_index];
-                        let y_weight = gy[kernel_index];
-
-                        red_x += f32::from(pixel.red) * x_weight;
-                        green_x += f32::from(pixel.green) * x_weight;
-                        blue_x += f32::from(pixel.blue) * x_weight;
-                        red_y += f32::from(pixel.red) * y_weight;
-                        green_y += f32::from(pixel.green) * y_weight;
-                        blue_y += f32::from(pixel.blue) * y_weight;
-                    }
-                }
-
-                result[y * width + x] = Rgb::new(
-                    (red_x.mul_add(red_x, red_y * red_y).sqrt()).min(255.0) as u8,
-                    (green_x.mul_add(green_x, green_y * green_y).sqrt()).min(255.0) as u8,
-                    (blue_x.mul_add(blue_x, blue_y * blue_y).sqrt()).min(255.0) as u8,
-                );
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..self.len())
+                    .into_par_iter()
+                    .map(|idx| self.convolve_3x3_dual_pixel(idx, width, height, gx, gy))
+                    .collect()
             }
-        }
-        result
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..self.len())
+                    .map(|idx| self.convolve_3x3_dual_pixel(idx, width, height, gx, gy))
+                    .collect()
+            }
+        };
+        self.with_pixels_like(pixels)
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Gamma correction.
     pub fn gamma(&self, gamma: f32) -> Canvas {
         let inv_gamma = 1.0 / gamma;
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 (255.0 * (f32::from(pixel.red) / 255.0).powf(inv_gamma)).min(255.0) as u8,
                 (255.0 * (f32::from(pixel.green) / 255.0).powf(inv_gamma)).min(255.0) as u8,
@@ -164,7 +226,7 @@ impl Canvas {
 
     /// Adjust saturation.
     pub fn adjust_saturation(&self, factor: f32) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             let gray = f32::from(pixel.luminance());
             Rgb::new(
                 Self::clamp_u8(gray + factor * (f32::from(pixel.red) - gray)),
@@ -177,7 +239,7 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     /// Rotates hue by given degrees.
     pub fn hue_rotate(&self, degrees: f32) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             let mut hsv = Hsv::from(pixel);
             let new_hue = (f32::from(hsv.hue) + degrees).round() as i32;
             hsv.hue = ((new_hue % 360 + 360) % 360) as u16;
@@ -187,7 +249,7 @@ impl Canvas {
 
     /// Adjust color temperature (positive = warmer, negative = cooler).
     pub fn adjust_temperature(&self, amount: i16) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 Self::clamp_u8(f32::from(pixel.red) + f32::from(amount)),
                 pixel.green,
@@ -209,7 +271,7 @@ impl Canvas {
         let cy = h / 2.0;
         let max_dist = (cx * cx + cy * cy).sqrt();
 
-        self.map_pixels_with_position(|x, y, pixel| {
+        self.map_pixels_with_position_independent(|x, y, pixel| {
             let dx = x as f32 - cx;
             let dy = y as f32 - cy;
             let dist = (dx * dx + dy * dy).sqrt() / max_dist;
@@ -266,7 +328,7 @@ impl Canvas {
     /// Ordered dithering using a 4x4 Bayer matrix.
     pub fn ordered_dither(&self) -> Canvas {
         let bayer = [0, 12, 3, 15, 8, 4, 11, 7, 2, 14, 1, 13, 10, 6, 9, 5];
-        self.map_pixels_with_position(|x, y, pixel| {
+        self.map_pixels_with_position_independent(|x, y, pixel| {
             let threshold =
                 ((bayer[((y as usize % 4) * 4) + (x as usize % 4)] as f32 + 0.5) / 16.0) * 255.0;
             Rgb::new(
@@ -475,7 +537,7 @@ impl Canvas {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Converts the image to grayscale.
     pub fn grayscale(&self) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             let (r, g, b) = pixel.values();
             let average = ((f32::from(r) + f32::from(g) + f32::from(b)) / 3.0).round() as u8;
             Rgb::new(average, average, average)
@@ -485,7 +547,7 @@ impl Canvas {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     /// Applies a sepia tone filter.
     pub fn sepia(&self) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             let (r, g, b) = pixel.values();
             let sepia_red = (0.393 * f32::from(r) + 0.769 * f32::from(g) + 0.198 * f32::from(b))
                 .min(255.0) as u8;
@@ -522,7 +584,7 @@ impl Canvas {
 
     /// Inverts all pixel colors.
     pub fn invert(&self) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             let (r, g, b) = pixel.values();
             Rgb::new(255 - r, 255 - g, 255 - b)
         })
@@ -530,7 +592,7 @@ impl Canvas {
 
     /// Converts to black and white using a luminance threshold.
     pub fn black_and_white(&self, threshold: u8) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             if pixel.luminance() >= threshold {
                 Rgb::WHITE
             } else {
@@ -541,7 +603,7 @@ impl Canvas {
 
     /// Adjusts brightness by adding a signed offset to each channel.
     pub fn adjust_brightness(&self, brightness: i16) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 Self::clamp_u8(f32::from(pixel.red) + f32::from(brightness)),
                 Self::clamp_u8(f32::from(pixel.green) + f32::from(brightness)),
@@ -552,7 +614,7 @@ impl Canvas {
 
     /// Adjusts contrast by scaling each channel around the midpoint.
     pub fn adjust_contrast(&self, contrast: f32) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 Self::clamp_u8((f32::from(pixel.red) - 127.5) * contrast + 127.5),
                 Self::clamp_u8((f32::from(pixel.green) - 127.5) * contrast + 127.5),
@@ -605,8 +667,15 @@ impl Canvas {
         }
 
         let mut horizontal = vec![[0.0f32; 3]; self.len()];
-        for y in 0..height {
-            for x in 0..width {
+        {
+            #[cfg(feature = "rayon")]
+            let horizontal_iter = horizontal.par_iter_mut().enumerate();
+            #[cfg(not(feature = "rayon"))]
+            let horizontal_iter = horizontal.iter_mut().enumerate();
+
+            horizontal_iter.for_each(|(idx, output)| {
+                let x = idx % width;
+                let y = idx / width;
                 let mut r_sum = 0.0;
                 let mut g_sum = 0.0;
                 let mut b_sum = 0.0;
@@ -618,31 +687,39 @@ impl Canvas {
                     g_sum += weight * f32::from(pixel.green);
                     b_sum += weight * f32::from(pixel.blue);
                 }
-                horizontal[Self::idx(width, x, y)] = [r_sum, g_sum, b_sum];
-            }
+                *output = [r_sum, g_sum, b_sum];
+            });
         }
 
-        let mut pixels = Vec::with_capacity(self.len());
-        for y in 0..height {
-            for x in 0..width {
-                let mut r_sum = 0.0;
-                let mut g_sum = 0.0;
-                let mut b_sum = 0.0;
-                for (kernel_idx, weight) in kernel.iter().enumerate() {
-                    let dy = kernel_idx as isize - radius;
-                    let py = (y as isize + dy).clamp(0, height as isize - 1) as usize;
-                    let pixel = horizontal[Self::idx(width, x, py)];
-                    r_sum += weight * pixel[0];
-                    g_sum += weight * pixel[1];
-                    b_sum += weight * pixel[2];
-                }
-                pixels.push(Rgb::new(
-                    Self::clamp_u8(r_sum),
-                    Self::clamp_u8(g_sum),
-                    Self::clamp_u8(b_sum),
-                ));
-            }
-        }
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            let pixel_iter = (0..self.len()).into_par_iter();
+            #[cfg(not(feature = "rayon"))]
+            let pixel_iter = 0..self.len();
+
+            pixel_iter
+                .map(|idx| {
+                    let x = idx % width;
+                    let y = idx / width;
+                    let mut r_sum = 0.0;
+                    let mut g_sum = 0.0;
+                    let mut b_sum = 0.0;
+                    for (kernel_idx, weight) in kernel.iter().enumerate() {
+                        let dy = kernel_idx as isize - radius;
+                        let py = (y as isize + dy).clamp(0, height as isize - 1) as usize;
+                        let pixel = horizontal[Self::idx(width, x, py)];
+                        r_sum += weight * pixel[0];
+                        g_sum += weight * pixel[1];
+                        b_sum += weight * pixel[2];
+                    }
+                    Rgb::new(
+                        Self::clamp_u8(r_sum),
+                        Self::clamp_u8(g_sum),
+                        Self::clamp_u8(b_sum),
+                    )
+                })
+                .collect()
+        };
 
         self.with_pixels_like(pixels)
     }
@@ -862,7 +939,7 @@ impl Canvas {
     }
 
     fn apply_luminance_lut(&self, lut: &[u8; 256]) -> Canvas {
-        self.map_pixels(|pixel| Self::equalized_luminance_pixel(pixel, lut))
+        self.map_pixels_independent(|pixel| Self::equalized_luminance_pixel(pixel, lut))
     }
 
     fn equalized_luminance_pixel(pixel: Rgb, lut: &[u8; 256]) -> Rgb {
@@ -918,7 +995,7 @@ impl Canvas {
     /// Posterize to a given number of color levels.
     pub fn posterize(&self, levels: u8) -> Canvas {
         let levels = f32::from(levels.max(1));
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 ((f32::from(pixel.red) / 255.0 * levels).round() / levels * 255.0) as u8,
                 ((f32::from(pixel.green) / 255.0 * levels).round() / levels * 255.0) as u8,
@@ -929,7 +1006,7 @@ impl Canvas {
 
     /// Solarize channels above the given threshold.
     pub fn solarize(&self, threshold: u8) -> Canvas {
-        self.map_pixels(|pixel| {
+        self.map_pixels_independent(|pixel| {
             Rgb::new(
                 if pixel.red > threshold {
                     255 - pixel.red
