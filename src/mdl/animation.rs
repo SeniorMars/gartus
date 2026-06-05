@@ -99,6 +99,11 @@ impl FrameOutputConfig {
     pub fn extension(mut self, extension: impl Into<String>) -> Self {
         let extension = extension.into();
         let extension = extension.trim_start_matches('.');
+        let extension = extension
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect::<String>();
+        let extension = extension.trim_matches('_');
         self.extension = if extension.is_empty() {
             "ppm".to_string()
         } else {
@@ -194,6 +199,16 @@ mod tests {
         assert_eq!(
             config.frame_path("../../bad name", 0),
             std::path::Path::new("out/______bad_name00000000.ppm")
+        );
+    }
+
+    #[test]
+    fn frame_output_config_sanitizes_extension() {
+        let config = FrameOutputConfig::new("out").extension("../png");
+
+        assert_eq!(
+            config.frame_path("frame", 1),
+            std::path::Path::new("out/frame00000001.png")
         );
     }
 }

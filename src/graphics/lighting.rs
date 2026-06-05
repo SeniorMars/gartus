@@ -28,20 +28,110 @@ impl ReflectionConstants {
     }
 }
 
-/// A point light source with a direction/location vector and RGB color.
+/// Whether a light is positional or a legacy direction vector.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LightKind {
+    /// `location` is a rendered-space point and light direction varies per surface point.
+    Positional,
+    /// `location` is a direction vector, matching the original course lighting model.
+    Directional,
+}
+
+/// Distance falloff model for positional lights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LightAttenuation {
+    /// No distance falloff.
+    None,
+    /// Fall off as `radius / (radius + distance)`.
+    InverseLinear {
+        /// Distance scale where the light reaches half intensity.
+        radius: f64,
+    },
+    /// Fall off as `radius^2 / (radius^2 + distance^2)`.
+    InverseSquare {
+        /// Distance scale where the light reaches half intensity.
+        radius: f64,
+    },
+}
+
+impl LightAttenuation {
+    fn factor(self, distance: f64) -> f64 {
+        match self {
+            Self::None => 1.0,
+            Self::InverseLinear { radius } => {
+                let radius = radius.max(f64::EPSILON);
+                radius / (radius + distance.max(0.0))
+            }
+            Self::InverseSquare { radius } => {
+                let radius = radius.max(f64::EPSILON);
+                let radius_squared = radius * radius;
+                radius_squared / (radius_squared + distance.max(0.0).powi(2))
+            }
+        }
+    }
+}
+
+/// A light source with a position/direction and RGB color.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointLight {
-    /// Vector from the surface to the light source.
+    /// Light position or direction.
     pub location: Vector,
     /// RGB color/intensity of the light source.
     pub color: Rgb,
+    /// Light interpretation.
+    pub kind: LightKind,
+    /// Distance falloff for positional lights.
+    pub attenuation: LightAttenuation,
 }
 
 impl PointLight {
-    /// Creates a point light.
+    /// Creates a legacy directional light.
     #[must_use]
     pub const fn new(location: Vector, color: Rgb) -> Self {
-        Self { location, color }
+        Self::directional(location, color)
+    }
+
+    /// Creates a positional light.
+    #[must_use]
+    pub const fn positional(location: Vector, color: Rgb) -> Self {
+        Self {
+            location,
+            color,
+            kind: LightKind::Positional,
+            attenuation: LightAttenuation::None,
+        }
+    }
+
+    /// Creates a directional light.
+    #[must_use]
+    pub const fn directional(location: Vector, color: Rgb) -> Self {
+        Self {
+            location,
+            color,
+            kind: LightKind::Directional,
+            attenuation: LightAttenuation::None,
+        }
+    }
+
+    /// Returns this light with inverse-linear distance falloff.
+    #[must_use]
+    pub const fn with_inverse_linear_attenuation(mut self, radius: f64) -> Self {
+        self.attenuation = LightAttenuation::InverseLinear { radius };
+        self
+    }
+
+    /// Returns this light with inverse-square distance falloff.
+    #[must_use]
+    pub const fn with_inverse_square_attenuation(mut self, radius: f64) -> Self {
+        self.attenuation = LightAttenuation::InverseSquare { radius };
+        self
+    }
+
+    /// Returns this light with explicit attenuation.
+    #[must_use]
+    pub const fn with_attenuation(mut self, attenuation: LightAttenuation) -> Self {
+        self.attenuation = attenuation;
+        self
     }
 }
 
@@ -88,6 +178,12 @@ impl Lighting {
         self.prepare().illuminate(normal)
     }
 
+    /// Calculates one color for a surface normal at a 3D point.
+    #[must_use]
+    pub fn illuminate_at(&self, normal: Vector, point: Vector) -> Rgb {
+        self.prepare().illuminate_at(normal, point)
+    }
+
     pub(crate) fn prepare(&self) -> PreparedLighting {
         let ambient = rgb_values(self.ambient);
         let ambient_reflection = self.ambient_reflection.values();
@@ -104,7 +200,9 @@ impl Lighting {
             .map(|point_light| {
                 let point = rgb_values(point_light.color);
                 PreparedPointLight {
-                    light: point_light.location.normalized(),
+                    position: point_light.location,
+                    kind: point_light.kind,
+                    attenuation: point_light.attenuation,
                     diffuse: [
                         point[0] * diffuse_reflection[0],
                         point[1] * diffuse_reflection[1],
@@ -134,7 +232,9 @@ impl Lighting {
 
 #[derive(Clone, Copy, Debug)]
 struct PreparedPointLight {
-    light: Vector,
+    position: Vector,
+    kind: LightKind,
+    attenuation: LightAttenuation,
     diffuse: [f64; 3],
     specular: [f64; 3],
 }
@@ -149,23 +249,36 @@ pub(crate) struct PreparedLighting {
 
 impl PreparedLighting {
     pub(crate) fn illuminate(&self, normal: Vector) -> Rgb {
-        self.illuminate_unit(normal.normalized())
+        self.illuminate_at(normal, Vector::default())
     }
 
-    pub(crate) fn illuminate_unit(&self, normal: Vector) -> Rgb {
-        self.illuminate_unit_with(normal, false)
+    pub(crate) fn illuminate_at(&self, normal: Vector, point: Vector) -> Rgb {
+        self.illuminate_unit_at(normal.normalized(), point)
     }
 
-    pub(crate) fn illuminate_toon(&self, normal: Vector) -> Rgb {
-        self.illuminate_unit_with(normal.normalized(), true)
+    pub(crate) fn illuminate_unit_at(&self, normal: Vector, point: Vector) -> Rgb {
+        self.illuminate_unit_with(normal, point, false)
     }
 
-    fn illuminate_unit_with(&self, normal: Vector, toon: bool) -> Rgb {
+    pub(crate) fn illuminate_toon_at(&self, normal: Vector, point: Vector) -> Rgb {
+        self.illuminate_unit_with(normal.normalized(), point, true)
+    }
+
+    fn illuminate_unit_with(&self, normal: Vector, point: Vector, toon: bool) -> Rgb {
         let mut channels = self.ambient;
 
         for point_light in &self.point_lights {
-            let (diffuse_factor, specular_factor) =
-                self.reflection_factors_unit(normal, point_light.light);
+            let (light, attenuation) = match point_light.kind {
+                LightKind::Positional => {
+                    let light_vector = point_light.position - point;
+                    (
+                        light_vector.normalized(),
+                        point_light.attenuation.factor(light_vector.length()),
+                    )
+                }
+                LightKind::Directional => (point_light.position.normalized(), 1.0),
+            };
+            let (diffuse_factor, specular_factor) = self.reflection_factors_unit(normal, light);
             let diffuse_factor = if toon {
                 quantize_diffuse(diffuse_factor)
             } else {
@@ -179,8 +292,9 @@ impl PreparedLighting {
                 specular_factor
             };
             for (channel, value) in channels.iter_mut().enumerate() {
-                *value += point_light.diffuse[channel] * diffuse_factor
-                    + point_light.specular[channel] * specular_factor;
+                *value += attenuation
+                    * (point_light.diffuse[channel] * diffuse_factor
+                        + point_light.specular[channel] * specular_factor);
             }
         }
 
@@ -284,12 +398,92 @@ mod tests {
     }
 
     #[test]
+    fn zero_vector_light_normalizes_safely() {
+        let lighting = Lighting {
+            point_lights: vec![PointLight::new(Vector::default(), Rgb::WHITE)],
+            ..Lighting::default()
+        };
+
+        assert_eq!(
+            lighting.illuminate(Vector::new(0.0, 0.0, 1.0)),
+            Rgb::new(5, 5, 5)
+        );
+    }
+
+    #[test]
+    fn positional_light_direction_depends_on_surface_point() {
+        let lighting = Lighting {
+            ambient: Rgb::BLACK,
+            point_lights: vec![PointLight::positional(
+                Vector::new(0.0, 0.0, 10.0),
+                Rgb::WHITE,
+            )],
+            ambient_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            diffuse_reflection: ReflectionConstants::new(1.0, 1.0, 1.0),
+            specular_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            ..Lighting::default()
+        };
+
+        assert_eq!(
+            lighting.illuminate_at(Vector::new(0.0, 0.0, 1.0), Vector::default()),
+            Rgb::WHITE
+        );
+        assert_eq!(
+            lighting.illuminate_at(Vector::new(0.0, 0.0, 1.0), Vector::new(0.0, 0.0, 20.0)),
+            Rgb::BLACK
+        );
+    }
+
+    #[test]
+    fn positional_light_inverse_linear_attenuation_reduces_distance_intensity() {
+        let lighting = Lighting {
+            ambient: Rgb::BLACK,
+            point_lights: vec![
+                PointLight::positional(Vector::new(0.0, 0.0, 10.0), Rgb::WHITE)
+                    .with_inverse_linear_attenuation(10.0),
+            ],
+            ambient_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            diffuse_reflection: ReflectionConstants::new(1.0, 1.0, 1.0),
+            specular_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            ..Lighting::default()
+        };
+
+        assert_eq!(
+            lighting.illuminate_at(Vector::new(0.0, 0.0, 1.0), Vector::default()),
+            Rgb::new(128, 128, 128)
+        );
+    }
+
+    #[test]
+    fn positional_light_inverse_square_attenuation_reduces_distance_intensity() {
+        let lighting = Lighting {
+            ambient: Rgb::BLACK,
+            point_lights: vec![
+                PointLight::positional(Vector::new(0.0, 0.0, 10.0), Rgb::WHITE)
+                    .with_inverse_square_attenuation(10.0),
+            ],
+            ambient_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            diffuse_reflection: ReflectionConstants::new(1.0, 1.0, 1.0),
+            specular_reflection: ReflectionConstants::new(0.0, 0.0, 0.0),
+            ..Lighting::default()
+        };
+
+        assert_eq!(
+            lighting.illuminate_at(Vector::new(0.0, 0.0, 1.0), Vector::default()),
+            Rgb::new(128, 128, 128)
+        );
+    }
+
+    #[test]
     fn illuminate_toon_quantizes_smooth_lighting() {
         let lighting = Lighting::default().prepare();
         let normal = Vector::new(0.0, 0.0, 1.0);
 
         assert_eq!(lighting.illuminate(normal), Rgb::new(139, 139, 139));
-        assert_eq!(lighting.illuminate_toon(normal), Rgb::new(97, 97, 97));
+        assert_eq!(
+            lighting.illuminate_toon_at(normal, Vector::default()),
+            Rgb::new(97, 97, 97)
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ use gartus::{
         display::{Canvas, PolygonColorMode, ShadingMode},
         lighting::ReflectionConstants,
     },
+    mdl::executor::execute_compiled_frame,
     mdl::{Command, RenderConfig, compile_file, parse_file, run_file, run_source},
 };
 
@@ -163,6 +164,75 @@ fn face_mdl_compiles_runs_and_saves() {
     );
 
     let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn simple_anim_mdl_compiles_and_executes_sample_frames() {
+    let file = "tests/simple_anim.mdl";
+    let compiled = compile_file(file).expect("simple_anim.mdl compiles");
+
+    assert_eq!(compiled.animation().basename(), "simple_50");
+    assert_eq!(compiled.animation().frames(), 50);
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(0)
+            .unwrap()
+            .get("spinny"),
+        Some(&0.0)
+    );
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(49)
+            .unwrap()
+            .get("spinny"),
+        Some(&1.0)
+    );
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(0)
+            .unwrap()
+            .get("bigenator"),
+        Some(&0.0)
+    );
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(24)
+            .unwrap()
+            .get("bigenator"),
+        Some(&1.0)
+    );
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(25)
+            .unwrap()
+            .get("bigenator"),
+        Some(&1.0)
+    );
+    assert_eq!(
+        compiled
+            .animation()
+            .knobs_for_frame(49)
+            .unwrap()
+            .get("bigenator"),
+        Some(&0.0)
+    );
+
+    for frame in [0, 24, 49] {
+        execute_compiled_frame(
+            &compiled,
+            &RenderConfig::new_with_bg(500, 500, Rgb::BLACK, Rgb::WHITE)
+                .wrapped(false)
+                .display_enabled(false)
+                .save_enabled(false),
+            frame,
+        )
+        .unwrap_or_else(|error| panic!("simple_anim.mdl frame {frame} should execute: {error}"));
+    }
 }
 
 #[cfg(feature = "external")]

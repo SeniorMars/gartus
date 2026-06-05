@@ -1,0 +1,90 @@
+// original models:
+// plush: fumo.obj
+// virtue: victory.obj
+// who knows what unspeakable crimes that plush has done
+constants holy_light 1 1 1 1 1 1 1 1 1
+constants blue 0.1 0.3 0.8 0.1 0.3 0.8 0.9 0.8 0
+constants blue2 0.1 0.3 0.3 0.1 0.3 0.3 0.7 0.7 0.7
+frames 120
+basename smite
+set k0 0
+set k1 0
+set k2 0
+set vanish 0
+set aim 0
+set smite 0
+set flee 0
+
+push
+move 100 250 0
+move -250 0 0 flee
+rotate y 10
+scale 60 60 60
+mesh blue :../examples/data/meshes/victory.obj
+pop
+
+push
+move 175 0 0
+scale 0.7 0.7 0.7
+
+push
+move 250 100 500
+rotate y -30
+scale 0.8 0.8 0.8 vanish
+mesh blue2 :../examples/data/meshes/fumo.obj
+pop
+
+push
+move 250 250 0
+
+push
+move 0 -175 0
+rotate x 10
+push
+scale 1 1 1 k0
+torus 0 0 0 10 200
+pop
+push
+scale 0.8 0.8 0.8 k1
+torus 0 0 0 10 200
+pop
+push
+scale 0.6 0.6 0.6 k2
+torus 0 0 0 10 200
+pop
+pop
+
+push
+rotate z 90
+scale 12 1 1 aim
+torus holy_light 0 0 0 10 50
+pop
+push
+rotate z 90
+scale 12 1 1 smite
+torus holy_light 0 0 1000 210 8
+
+vary k0 0 40 0 0.98
+vary k0 40 50 0.98 1 // easing
+vary k0 50 70 1 1
+vary k1 10 41 0 0.95
+vary k1 41 50 0.95 1
+vary k1 50 70 1 1
+vary k2 20 43 0 0.9
+vary k2 43 50 0.9 1
+vary k2 50 70 1 1
+vary k0 70 119 0 0
+vary k1 70 119 0 0
+vary k2 70 119 0 0
+vary vanish 0 70 1 1
+vary vanish 70 119 0 0
+vary aim 20 50 0 1
+vary aim 50 70 1 1
+vary aim 70 119 0 0
+vary smite 0 50 0 0
+vary smite 50 52 0 1
+vary smite 52 85 1 1
+vary smite 85 90 1 0
+vary smite 90 119 0 0
+vary flee 95 100 0 0.1 // why am i doing easing
+vary flee 101 119 0.3 2

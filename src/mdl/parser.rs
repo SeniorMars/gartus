@@ -585,7 +585,12 @@ fn parse_setknobs(command: &Token, args: &[Token]) -> Result<Command, Diagnostic
 }
 
 fn parse_light(command: &Token, args: &[Token]) -> Result<Command, Diagnostic> {
-    expect_len(command, args, &[6, 7], "light [name] r g b x y z")?;
+    expect_len(
+        command,
+        args,
+        &[6, 7],
+        "light r g b x y z | light name x y z r g b",
+    )?;
     let (color, position) = if args.len() == 7 {
         let _name = expect_ident(command, args, 0, "light name")?;
         // The 11_anim C grammar uses: light name x y z r g b.
@@ -1180,6 +1185,19 @@ mod tests {
             Command::Render(RenderCommand::Light {
                 color: Vec3::new(4.0, 5.0, 6.0),
                 position: Vec3::new(1.0, 2.0, 3.0),
+            })
+        );
+    }
+
+    #[test]
+    fn accepts_zero_vector_light_position_because_lighting_normalization_is_safe() {
+        let program = parse_script("light 255 255 255 0 0 0").unwrap();
+
+        assert_eq!(
+            program.commands[0].node,
+            Command::Render(RenderCommand::Light {
+                color: Vec3::new(255.0, 255.0, 255.0),
+                position: Vec3::new(0.0, 0.0, 0.0),
             })
         );
     }

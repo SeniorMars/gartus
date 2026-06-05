@@ -382,10 +382,10 @@ fn validate_frame_range(
     location: &SourceLocation,
     errors: &mut Vec<Diagnostic>,
 ) {
-    if start > end {
+    if start >= end {
         errors.push(diagnostic_at(
             Some(location),
-            format!("`{command}` start frame must be <= end frame"),
+            format!("`{command}` start frame must be < end frame"),
         ));
     }
     if end >= frames {
@@ -414,14 +414,9 @@ fn diagnostic_at(location: Option<&SourceLocation>, message: impl Into<String>) 
 }
 
 fn interpolation_t(frame: usize, start: usize, end: usize) -> f64 {
-    if start == end {
-        // A single-frame vary/tween lands on the requested end value.
-        1.0
-    } else {
-        let elapsed = u32::try_from(frame - start).expect("frame range is capped by MAX_FRAMES");
-        let span = u32::try_from(end - start).expect("frame range is capped by MAX_FRAMES");
-        f64::from(elapsed) / f64::from(span)
-    }
+    let elapsed = u32::try_from(frame - start).expect("frame range is capped by MAX_FRAMES");
+    let span = u32::try_from(end - start).expect("frame range is capped by MAX_FRAMES");
+    f64::from(elapsed) / f64::from(span)
 }
 
 fn lerp(start: f64, end: f64, t: f64) -> f64 {
@@ -614,7 +609,7 @@ mod tests {
         let errors = compile(program).unwrap_err();
 
         assert!(errors.iter().any(|error| error.message.contains("outside")));
-        assert!(errors.iter().any(|error| error.message.contains("<=")));
+        assert!(errors.iter().any(|error| error.message.contains('<')));
         assert!(errors.iter().any(|error| error.line == 2));
         assert!(errors.iter().any(|error| error.line == 3));
     }

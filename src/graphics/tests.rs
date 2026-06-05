@@ -1,7 +1,7 @@
 //! Tests for the graphics module.
 
 use super::{
-    animation::FrameRecorder,
+    animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
     colors::Rgb,
     display::{Canvas, PolygonColorMode, ShadingMode},
     draw::{triangle_color, vertex_normal, vertex_normals},
@@ -541,6 +541,60 @@ fn frame_recorder_captures_explicit_frames() {
 
     assert_eq!(recorder.frame_index(), 1);
     let _ = fs::remove_file(format!("anim/{prefix}00000000.ppm"));
+}
+
+#[test]
+fn frame_recorder_prefix_cannot_escape_frame_dir() {
+    let dir = std::env::temp_dir().join(format!("gartus-recorder-prefix-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let mut recorder = FrameRecorder::new(&dir, "../bad/");
+    let canvas = Canvas::new_with_bg(2, 2, Rgb::WHITE);
+
+    let path = recorder.capture(&canvas).expect("capture frame");
+
+    assert_eq!(path.parent(), Some(dir.as_path()));
+    assert_eq!(path.file_name().unwrap(), "___bad_00000000.ppm");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn frame_recorder_rejects_out_of_range_preview() {
+    let options = AnimationRenderOptions::new(
+        "anim",
+        "bad-preview-",
+        3,
+        std::env::temp_dir().join("bad-preview.gif"),
+    )
+    .preview(99, std::env::temp_dir().join("bad-preview.png"));
+
+    let error = FrameRecorder::render_gif(options, |_| Ok(Canvas::new_with_bg(1, 1, Rgb::BLACK)))
+        .unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("preview frame 99"));
+}
+
+#[test]
+fn frame_recorder_cleans_partial_frames_after_render_error() {
+    let dir = std::env::temp_dir().join(format!("gartus-recorder-cleanup-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let options = AnimationRenderOptions::new(&dir, "cleanup-", 2, dir.join("out.gif"));
+    let canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
+
+    let error = FrameRecorder::render_gif_with_recorder(options, |frame, _, recorder| {
+        if frame == 1 {
+            return Err(AnimationError::Render(std::io::Error::other(
+                "render failed",
+            )));
+        }
+        recorder.capture(&canvas).map_err(AnimationError::Io)?;
+        Ok(())
+    })
+    .unwrap_err();
+
+    assert!(matches!(error, AnimationError::Render(_)));
+    assert!(!dir.join("cleanup-00000000.ppm").exists());
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

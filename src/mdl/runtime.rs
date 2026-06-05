@@ -19,6 +19,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(feature = "external")]
+use {crate::external::MaterialMesh, std::sync::Arc};
+
 /// Rendering configuration for one MDL execution.
 #[derive(Debug, Clone)]
 pub struct RenderConfig {
@@ -162,6 +165,8 @@ pub struct Runtime {
     scene: SceneState,
     output: OutputState,
     scratch: ScratchGeometry,
+    #[cfg(feature = "external")]
+    mesh_cache: HashMap<PathBuf, Arc<MaterialMesh>>,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +232,8 @@ impl Runtime {
             scene: SceneState::new(),
             output,
             scratch: ScratchGeometry::new(),
+            #[cfg(feature = "external")]
+            mesh_cache: HashMap::new(),
         }
     }
 
@@ -419,7 +426,7 @@ impl Runtime {
 
     pub(crate) fn add_light(&mut self, light: Light) {
         let first_user_light = self.scene.lights.is_empty();
-        let point_light = PointLight::new(
+        let point_light = PointLight::positional(
             crate::gmath::vector::Vector::new(light.position.x, light.position.y, light.position.z),
             rgb_from_vec3(light.color),
         );
@@ -608,6 +615,28 @@ impl Runtime {
         } else {
             path.to_path_buf()
         }
+    }
+
+    #[cfg(feature = "external")]
+    pub(crate) fn load_mesh_cached(
+        &mut self,
+        path: &Path,
+    ) -> Result<Arc<MaterialMesh>, ExecutionError> {
+        if let Some(mesh) = self.mesh_cache.get(path) {
+            return Ok(Arc::clone(mesh));
+        }
+
+        let mesh =
+            crate::external::meshify_with_materials(path_to_str(path)?).map_err(|error| {
+                ExecutionError::Mesh {
+                    filename: path.display().to_string(),
+                    error: error.to_string(),
+                }
+            })?;
+        let mesh = Arc::new(mesh);
+        self.mesh_cache
+            .insert(path.to_path_buf(), Arc::clone(&mesh));
+        Ok(mesh)
     }
 }
 

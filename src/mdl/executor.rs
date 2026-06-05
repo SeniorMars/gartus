@@ -15,7 +15,7 @@ use crate::{
     external::MeshMaterial,
     gmath::{edge_matrix::DEFAULT_CURVE_STEP, matrix::Matrix},
     graphics::{
-        animation::{AnimationRenderOptions, FrameRecorder},
+        animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
         colors::Rgb,
         display::{PolygonColorMode, ShadingMode as CanvasShadingMode},
     },
@@ -79,6 +79,13 @@ pub enum ExecutionError {
         /// Number of available frames.
         frames: usize,
     },
+    /// GIF/file animation options do not match the compiled animation plan.
+    InvalidAnimationOptions {
+        /// Expected frame count from the compiled program.
+        expected_frames: usize,
+        /// Frame count requested by render options.
+        got_frames: usize,
+    },
 }
 
 impl fmt::Display for ExecutionError {
@@ -125,6 +132,13 @@ impl fmt::Display for ExecutionError {
             Self::InvalidFrame { frame, frames } => {
                 write!(f, "frame {frame} is outside compiled frame count {frames}")
             }
+            Self::InvalidAnimationOptions {
+                expected_frames,
+                got_frames,
+            } => write!(
+                f,
+                "animation options request {got_frames} frames, but compiled program has {expected_frames}"
+            ),
         }
     }
 }
@@ -143,7 +157,8 @@ impl Error for ExecutionError {
             | Self::UnknownColor(_)
             | Self::InvalidFilter { .. }
             | Self::Mesh { .. }
-            | Self::InvalidFrame { .. } => None,
+            | Self::InvalidFrame { .. }
+            | Self::InvalidAnimationOptions { .. } => None,
         }
     }
 }
@@ -300,14 +315,35 @@ pub fn execute_compiled_gif_with_options(
     config: RenderConfig,
     options: AnimationRenderOptions,
 ) -> Result<(), ExecutionError> {
+    if options.frames() != compiled.animation().frames() {
+        return Err(ExecutionError::InvalidAnimationOptions {
+            expected_frames: compiled.animation().frames(),
+            got_frames: options.frames(),
+        });
+    }
+
     let config = config.save_enabled(false);
     let mut runtime = Runtime::new(&config);
-    FrameRecorder::render_gif(options, |frame| {
+    FrameRecorder::render_gif_with_recorder(options, |frame, preview_output, recorder| {
         execute_compiled_frame_into(&mut runtime, compiled, frame)
-            .map(|()| runtime.canvas().clone())
-            .map_err(|error| io::Error::other(error.to_string()))
+            .map_err(AnimationError::Render)?;
+        if let Some(preview_output) = preview_output {
+            runtime
+                .save_to_path(preview_output)
+                .map_err(AnimationError::Render)?;
+        }
+        recorder
+            .capture(runtime.canvas())
+            .map_err(AnimationError::Io)?;
+        Ok(())
     })
-    .map_err(ExecutionError::Io)
+    .map_err(|error| match error {
+        AnimationError::Render(error) => error,
+        AnimationError::Io(error) => ExecutionError::Io(error),
+        AnimationError::InvalidOptions(error) => {
+            ExecutionError::Io(io::Error::new(io::ErrorKind::InvalidInput, error))
+        }
+    })
 }
 
 /// Executes one frame of a compiled MDL program.
@@ -934,19 +970,14 @@ fn draw_mesh(
     let material = runtime.material_for(constants)?;
     let path = runtime.resolve_mesh_path(filename, source_name);
 
-    let mesh = crate::external::meshify_with_materials(path.to_string_lossy().as_ref()).map_err(
-        |error| ExecutionError::Mesh {
-            filename: path.display().to_string(),
-            error: error.to_string(),
-        },
-    )?;
+    let mesh = runtime.load_mesh_cached(&path)?;
 
-    for group in mesh.groups {
+    for group in &mesh.groups {
         let draw_material =
             material_with_mesh_material(material, group.material, group.diffuse_color);
         let previous = runtime.apply_draw_state(draw_material);
 
-        let mut polygons = group.polygons;
+        let mut polygons = group.polygons.clone();
         if reverse {
             polygons.reverse_winding();
         }
@@ -1170,6 +1201,7 @@ mod tests {
             runtime::{RenderConfig, Runtime, Symbol},
             semantic::compile,
         },
+        prelude::AnimationRenderOptions,
     };
 
     fn execute(src: &str) -> crate::mdl::runtime::Runtime {
@@ -1380,6 +1412,26 @@ mod tests {
     }
 
     #[test]
+    fn for_each_compiled_frame_clears_zbuffer_between_frames() {
+        let program =
+            parse_script("frames 2\nvary k 0 1 1 0\nmove 0 0 10 k\nline 0 0 0 1 0 0").unwrap();
+        let compiled = compile(program).unwrap();
+        let mut depths = Vec::new();
+
+        super::for_each_compiled_frame(
+            &compiled,
+            &RenderConfig::new_with_bg(3, 3, Rgb::WHITE, Rgb::BLACK).display_enabled(false),
+            |_, runtime| {
+                depths.push(runtime.canvas().get_zbuffer(0, 0).unwrap());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(depths, vec![10.0, 0.0]);
+    }
+
+    #[test]
     fn compiled_frame_files_use_basename_and_disable_script_save_commands() {
         let dir =
             std::env::temp_dir().join(format!("gartus-mdl-frames-{}-redirect", std::process::id()));
@@ -1457,6 +1509,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(feature = "external")]
+    #[test]
+    fn compiled_frame_meshes_are_cached_across_streamed_frames() {
+        let dir =
+            std::env::temp_dir().join(format!("gartus-mdl-mesh-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mesh = dir.join("tri.obj");
+        std::fs::write(&mesh, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+
+        let program = parse_script(&format!(
+            "frames 2\nvary k 0 1 0 1\nmesh :{}",
+            mesh.display()
+        ))
+        .unwrap();
+        let compiled = compile(program).unwrap();
+        let mut frames = Vec::new();
+
+        super::for_each_compiled_frame(
+            &compiled,
+            &RenderConfig::new(5, 5).display_enabled(false),
+            |frame, _| {
+                frames.push(frame);
+                if frame == 0 {
+                    std::fs::remove_file(&mesh).unwrap();
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(frames, vec![0, 1]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn compiled_frame_rejects_out_of_range_frame() {
         let program = parse_script("frames 1").unwrap();
@@ -1473,6 +1560,33 @@ mod tests {
             ExecutionError::InvalidFrame {
                 frame: 1,
                 frames: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn compiled_gif_options_frame_count_must_match_plan() {
+        let program = parse_script("frames 2\nvary k 0 1 0 1\nmove 1 0 0 k").unwrap();
+        let compiled = compile(program).unwrap();
+        let options = AnimationRenderOptions::new(
+            "anim",
+            "mismatch-",
+            1,
+            std::env::temp_dir().join("mismatch.gif"),
+        );
+
+        let error = super::execute_compiled_gif_with_options(
+            &compiled,
+            RenderConfig::new(10, 10).display_enabled(false),
+            options,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutionError::InvalidAnimationOptions {
+                expected_frames: 2,
+                got_frames: 1
             }
         ));
     }

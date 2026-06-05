@@ -93,6 +93,10 @@ pub fn compile_file(path: impl AsRef<Path>) -> Result<CompiledProgram, Vec<Diagn
 
 /// Parses, compiles, and executes source text after include expansion.
 ///
+/// This convenience/debug API returns every rendered frame runtime and therefore
+/// retains every frame canvas in memory. Prefer [`run_source_streaming`] for
+/// real animations.
+///
 /// # Errors
 /// Returns front-end diagnostics or execution errors.
 pub fn run_source(
@@ -131,6 +135,10 @@ pub fn run_source_streaming(
 }
 
 /// Parses, compiles, and executes an MDL file after include expansion.
+///
+/// This convenience/debug API returns every rendered frame runtime and therefore
+/// retains every frame canvas in memory. Prefer [`run_file_streaming`] for real
+/// animations.
 ///
 /// # Errors
 /// Returns front-end diagnostics or execution errors.

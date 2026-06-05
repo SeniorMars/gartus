@@ -3,19 +3,52 @@ use crate::{
     graphics::display::Canvas,
 };
 use std::{
-    fs, io,
+    error::Error,
+    fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 /// Explicit frame recorder for animations.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FrameRecorder {
     dir: PathBuf,
     prefix: String,
     delay_cs: u16,
     frame_index: usize,
+    captured_paths: Vec<PathBuf>,
+}
+
+/// Error returned while rendering and encoding an animation.
+#[derive(Debug)]
+pub enum AnimationError<E> {
+    /// Frame rendering failed with the caller's error type.
+    Render(E),
+    /// Frame writing, preview writing, cleanup, or encoding failed.
+    Io(io::Error),
+    /// Animation options are inconsistent.
+    InvalidOptions(String),
+}
+
+impl<E: fmt::Display> fmt::Display for AnimationError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Render(error) => write!(f, "animation frame render failed: {error}"),
+            Self::Io(error) => write!(f, "animation I/O error: {error}"),
+            Self::InvalidOptions(error) => f.write_str(error),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for AnimationError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Render(error) => Some(error),
+            Self::Io(error) => Some(error),
+            Self::InvalidOptions(_) => None,
+        }
+    }
 }
 
 /// Options for rendering a whole GIF through [`FrameRecorder::render_gif`].
@@ -88,6 +121,12 @@ impl AnimationRenderOptions {
         self.unique_frame_dir = unique_frame_dir;
         self
     }
+
+    /// Returns the requested frame count.
+    #[must_use]
+    pub const fn frames(&self) -> usize {
+        self.frames
+    }
 }
 
 impl FrameRecorder {
@@ -96,9 +135,10 @@ impl FrameRecorder {
     pub fn new(dir: impl Into<PathBuf>, prefix: impl Into<String>) -> Self {
         Self {
             dir: dir.into(),
-            prefix: prefix.into(),
+            prefix: sanitize_prefix(&prefix.into()),
             delay_cs: 2,
             frame_index: 0,
+            captured_paths: Vec::new(),
         }
     }
 
@@ -128,6 +168,7 @@ impl FrameRecorder {
                 "animation path is not valid UTF-8",
             )
         })?)?;
+        self.captured_paths.push(path.clone());
         self.frame_index += 1;
         Ok(path)
     }
@@ -147,7 +188,7 @@ impl FrameRecorder {
         self.capture(&frame)
     }
 
-    /// Removes existing PPM frames that match this recorder's prefix.
+    /// Removes existing generated PPM frames that match this recorder's prefix and 8-digit suffix.
     ///
     /// # Errors
     /// Returns `Err` if the frame directory cannot be read or a matching frame cannot be deleted.
@@ -163,11 +204,25 @@ impl FrameRecorder {
             let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
-            if file_name.starts_with(&self.prefix)
-                && path.extension().is_some_and(|ext| ext == "ppm")
-            {
+            if is_generated_frame_name(file_name, &self.prefix) {
                 fs::remove_file(path)?;
                 removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Removes only the frame files captured by this recorder.
+    ///
+    /// # Errors
+    /// Returns `Err` if a captured frame cannot be deleted.
+    pub fn clear_captured_frames(&self) -> io::Result<usize> {
+        let mut removed = 0;
+        for path in &self.captured_paths {
+            match fs::remove_file(path) {
+                Ok(()) => removed += 1,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
             }
         }
         Ok(removed)
@@ -185,23 +240,44 @@ impl FrameRecorder {
             ));
         }
 
-        let mut command = Command::new("magick");
-        command.arg("-delay").arg(self.delay_cs.to_string());
-        for idx in 0..self.frame_index {
-            command.arg(self.frame_path(idx));
-        }
-        command.arg(output.as_ref());
+        let output = output.as_ref();
+        let run_encoder = |binary: &str| {
+            let mut command = Command::new(binary);
+            command
+                .arg("-delay")
+                .arg(self.delay_cs.to_string())
+                .arg("-loop")
+                .arg("0");
+            for path in &self.captured_paths {
+                command.arg(path);
+            }
+            command.arg(output);
+            command.status()
+        };
 
-        let status = command.status().map_err(|err| {
-            io::Error::new(
-                err.kind(),
-                format!("failed to run ImageMagick `magick`; is ImageMagick installed and in PATH? {err}"),
-            )
-        })?;
+        let (binary, status) = match run_encoder("magick") {
+            Ok(status) => ("magick", status),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                ("convert", run_encoder("convert").map_err(|convert_error| {
+                    io::Error::new(
+                        convert_error.kind(),
+                        format!(
+                            "failed to run ImageMagick `magick` or `convert`; is ImageMagick installed and in PATH? {convert_error}"
+                        ),
+                    )
+                })?)
+            }
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("failed to run ImageMagick `magick`: {error}"),
+                ));
+            }
+        };
 
         if !status.success() {
             return Err(io::Error::other(format!(
-                "ImageMagick `magick` failed with status {status} while encoding animation"
+                "ImageMagick `{binary}` failed with status {status} while encoding animation"
             )));
         }
         Ok(())
@@ -213,7 +289,7 @@ impl FrameRecorder {
     /// Returns `Err` if encoding fails or the frame cleanup fails.
     pub fn encode_gif_and_cleanup(&self, output: impl AsRef<Path>) -> io::Result<()> {
         self.encode_gif(output)?;
-        self.clear_existing_frames()?;
+        self.clear_captured_frames()?;
         Ok(())
     }
 
@@ -224,6 +300,28 @@ impl FrameRecorder {
     pub fn render_gif<F>(options: AnimationRenderOptions, mut render: F) -> io::Result<()>
     where
         F: FnMut(usize) -> io::Result<Canvas>,
+    {
+        Self::render_gif_with_recorder(options, |frame, preview_output, recorder| {
+            let canvas = render(frame).map_err(AnimationError::Render)?;
+            if let Some(preview_output) = preview_output {
+                save_preview(&canvas, preview_output).map_err(AnimationError::Io)?;
+            }
+            recorder.capture(&canvas).map_err(AnimationError::Io)?;
+            Ok(())
+        })
+        .map_err(animation_error_into_io)
+    }
+
+    /// Renders frames by letting `render` write directly through a recorder.
+    ///
+    /// # Errors
+    /// Returns `Err` if frame rendering, frame capture, preview saving, GIF encoding, or cleanup fails.
+    pub fn render_gif_with_recorder<F, E>(
+        options: AnimationRenderOptions,
+        mut render: F,
+    ) -> Result<(), AnimationError<E>>
+    where
+        F: FnMut(usize, Option<&Path>, &mut FrameRecorder) -> Result<(), AnimationError<E>>,
     {
         let AnimationRenderOptions {
             dir,
@@ -238,26 +336,34 @@ impl FrameRecorder {
         } = options;
 
         if frames == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot render animation with zero frames",
+            return Err(AnimationError::InvalidOptions(
+                "cannot render animation with zero frames".to_string(),
             ));
+        }
+
+        if let Some((preview_frame, _)) = preview
+            && preview_frame >= frames
+        {
+            return Err(AnimationError::InvalidOptions(format!(
+                "preview frame {preview_frame} is outside {frames} animation frames"
+            )));
         }
 
         if let Some(parent) = output
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(AnimationError::Io)?;
         }
         if let Some((_, ref preview_output)) = preview
             && let Some(parent) = preview_output
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
         {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(AnimationError::Io)?;
         }
 
+        let prefix = sanitize_prefix(&prefix);
         let frame_dir = if unique_frame_dir {
             dir.join(format!("{}run-{}", prefix, unique_run_id()))
         } else {
@@ -266,38 +372,88 @@ impl FrameRecorder {
 
         let mut recorder = Self::new(frame_dir, prefix).with_delay(delay_cs);
         if clear_existing_frames {
-            recorder.clear_existing_frames()?;
+            recorder
+                .clear_existing_frames()
+                .map_err(AnimationError::Io)?;
         }
 
-        for frame in 0..frames {
-            let canvas = render(frame)?;
-            if let Some((preview_frame, ref preview_output)) = preview
-                && frame == preview_frame
-            {
-                canvas.save_extension(preview_output.to_str().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "preview path is not valid UTF-8",
-                    )
-                })?)?;
+        let result = (|| {
+            for frame in 0..frames {
+                let preview_output = preview.as_ref().and_then(|(preview_frame, output)| {
+                    (*preview_frame == frame).then_some(output.as_path())
+                });
+                render(frame, preview_output, &mut recorder)?;
             }
-            recorder.capture(&canvas)?;
-        }
+            recorder.encode_gif(&output).map_err(AnimationError::Io)
+        })();
 
         if cleanup_frames {
-            recorder.encode_gif_and_cleanup(&output)?;
-            if unique_frame_dir {
-                fs::remove_dir(&recorder.dir)?;
+            let cleanup_result = recorder
+                .clear_captured_frames()
+                .and_then(|_| {
+                    if unique_frame_dir {
+                        fs::remove_dir_all(&recorder.dir)
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(AnimationError::Io);
+            if result.is_ok() {
+                cleanup_result?;
             }
-            Ok(())
-        } else {
-            recorder.encode_gif(output)
         }
+
+        result
     }
 
     fn frame_path(&self, index: usize) -> PathBuf {
         self.dir.join(format!("{}{:08}.ppm", self.prefix, index))
     }
+}
+
+fn save_preview(canvas: &Canvas, preview_output: &Path) -> io::Result<()> {
+    canvas.save_extension(preview_output.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "preview path is not valid UTF-8",
+        )
+    })?)
+}
+
+fn animation_error_into_io(error: AnimationError<io::Error>) -> io::Error {
+    match error {
+        AnimationError::Render(error) | AnimationError::Io(error) => error,
+        AnimationError::InvalidOptions(error) => io::Error::new(io::ErrorKind::InvalidInput, error),
+    }
+}
+
+fn sanitize_prefix(prefix: &str) -> String {
+    let sanitized = prefix
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    if sanitized.is_empty() {
+        "frame-".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn is_generated_frame_name(file_name: &str, prefix: &str) -> bool {
+    let Some(rest) = file_name.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some(number) = rest.strip_suffix(".ppm") else {
+        return false;
+    };
+    number.len() == 8 && number.chars().all(|ch| ch.is_ascii_digit())
 }
 
 fn unique_run_id() -> String {

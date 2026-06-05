@@ -33,6 +33,21 @@ struct NormalScanPoint {
     normal: Vector,
 }
 
+#[derive(Clone, Copy)]
+struct NormalScanState {
+    x: f64,
+    y: i64,
+    z: f64,
+    normal: Vector,
+}
+
+impl NormalScanState {
+    #[allow(clippy::cast_precision_loss)]
+    fn point(self) -> Vector {
+        Vector::new(self.x, self.y as f64, self.z)
+    }
+}
+
 struct WrappedRestore<'a> {
     wrapped: *mut bool,
     original: bool,
@@ -309,7 +324,9 @@ impl Canvas {
                 ShadingMode::Wireframe => unreachable!("wireframe handled before culling"),
                 ShadingMode::Flat => {
                     let color = match &lighting {
-                        Some(lighting) => lighting.illuminate(normal),
+                        Some(lighting) => {
+                            lighting.illuminate_at(normal, triangle_centroid(p0, p1, p2))
+                        }
                         None => triangle_color(color_mode, line_color, index),
                     };
                     self.draw_scanline_triangle(color, p0, p1, p2);
@@ -363,9 +380,9 @@ impl Canvas {
                 points[1],
                 points[2],
                 [
-                    lighting.illuminate_unit(normals[0]),
-                    lighting.illuminate_unit(normals[1]),
-                    lighting.illuminate_unit(normals[2]),
+                    lighting.illuminate_unit_at(normals[0], tuple_to_vector(points[0])),
+                    lighting.illuminate_unit_at(normals[1], tuple_to_vector(points[1])),
+                    lighting.illuminate_unit_at(normals[2], tuple_to_vector(points[2])),
                 ],
             ),
             ShadingMode::Phong => {
@@ -752,9 +769,18 @@ impl Canvas {
                         z: p0.z,
                         dz,
                     },
-                    p0.normal,
-                    |normal, step| *normal += dnormal * step,
-                    |normal| lighting.illuminate(*normal),
+                    NormalScanState {
+                        x: x0 as f64,
+                        y: y + dy,
+                        z: p0.z,
+                        normal: p0.normal,
+                    },
+                    |state, step| {
+                        state.x += step;
+                        state.z += dz * step;
+                        state.normal += dnormal * step;
+                    },
+                    |state| lighting.illuminate_at(state.normal, state.point()),
                 );
             }
             return;
@@ -764,7 +790,8 @@ impl Canvas {
             let mut z = p0.z;
             let mut normal = p0.normal;
             for x in x0..=x1 {
-                self.plot_z(&lighting.illuminate(normal), x, y + dy, z);
+                let point = Vector::new(x as f64, (y + dy) as f64, z);
+                self.plot_z(&lighting.illuminate_at(normal, point), x, y + dy, z);
                 z += dz;
                 normal += dnormal;
             }
@@ -817,9 +844,18 @@ impl Canvas {
                         z: p0.z,
                         dz,
                     },
-                    p0.normal,
-                    |normal, step| *normal += dnormal * step,
-                    |normal| lighting.illuminate_toon(*normal),
+                    NormalScanState {
+                        x: x0 as f64,
+                        y: y + dy,
+                        z: p0.z,
+                        normal: p0.normal,
+                    },
+                    |state, step| {
+                        state.x += step;
+                        state.z += dz * step;
+                        state.normal += dnormal * step;
+                    },
+                    |state| lighting.illuminate_toon_at(state.normal, state.point()),
                 );
             }
             return;
@@ -829,7 +865,8 @@ impl Canvas {
             let mut z = p0.z;
             let mut normal = p0.normal;
             for x in x0..=x1 {
-                self.plot_z(&lighting.illuminate_toon(normal), x, y + dy, z);
+                let point = Vector::new(x as f64, (y + dy) as f64, z);
+                self.plot_z(&lighting.illuminate_toon_at(normal, point), x, y + dy, z);
                 z += dz;
                 normal += dnormal;
             }
@@ -1056,6 +1093,18 @@ fn triangle_normal(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)
     let a = Vector::new(p1.0 - p0.0, p1.1 - p0.1, p1.2 - p0.2);
     let b = Vector::new(p2.0 - p0.0, p2.1 - p0.1, p2.2 - p0.2);
     a.cross(b)
+}
+
+fn triangle_centroid(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
+    Vector::new(
+        (p0.0 + p1.0 + p2.0) / 3.0,
+        (p0.1 + p1.1 + p2.1) / 3.0,
+        (p0.2 + p1.2 + p2.2) / 3.0,
+    )
+}
+
+fn tuple_to_vector(point: (f64, f64, f64)) -> Vector {
+    Vector::new(point.0, point.1, point.2)
 }
 
 fn triangle_points_are_finite(points: [(f64, f64, f64); 3]) -> bool {

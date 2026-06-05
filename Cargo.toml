@@ -63,6 +63,13 @@ name = "walle_mdl"
 required-features = ["external"]
 
 [[example]]
+name = "student_mdl"
+required-features = ["external"]
+
+[[example]]
+name = "solarsystem"
+
+[[example]]
 name = "it_takes_two"
 required-features = ["external"]
 

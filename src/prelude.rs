@@ -8,6 +8,6 @@ pub use crate::{
         camera::{Camera3D, ProjectedSegment, ScreenPoint, sort_segments_back_to_front},
         colors::{ColorSpace, Rgb},
         display::{Canvas, PolygonColorMode, ShadingMode},
-        lighting::{Lighting, PointLight, ReflectionConstants},
+        lighting::{LightAttenuation, Lighting, PointLight, ReflectionConstants},
     },
 };
