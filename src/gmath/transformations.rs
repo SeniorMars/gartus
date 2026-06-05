@@ -276,6 +276,51 @@ impl Matrix {
         )
     }
 
+    /// Creates an oblique projection matrix.
+    ///
+    /// `depth_scale` controls how far z depth shifts projected x/y coordinates. The angle is in
+    /// degrees. Use [`Matrix::cabinet_projection`] for the common half-depth variant.
+    ///
+    /// # Panics
+    /// Panics if either parameter is non-finite.
+    pub fn oblique_projection(depth_scale: f64, angle_degrees: f64) -> Self {
+        assert!(
+            [depth_scale, angle_degrees]
+                .iter()
+                .all(|value| value.is_finite()),
+            "oblique projection parameters must be finite"
+        );
+        let angle = angle_degrees.to_radians();
+        let (sin_angle, cos_angle) = angle.sin_cos();
+        Matrix::new(
+            4,
+            4,
+            vec![
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                depth_scale * cos_angle,
+                depth_scale * sin_angle,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ],
+        )
+    }
+
+    /// Creates a cabinet projection matrix using half-depth projection.
+    pub fn cabinet_projection(angle_degrees: f64) -> Self {
+        Self::oblique_projection(0.5, angle_degrees)
+    }
+
     /// Creates a perspective projection matrix for 3D graphics.
     ///
     /// The perspective projection matrix is used to project 3D coordinates onto a 2D plane
@@ -625,6 +670,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cabinet_projection_shifts_depth_by_half() {
+        let projection = Matrix::cabinet_projection(45.0);
+        let point = projection.transform_homogeneous_point(&[2.0, 3.0, 4.0, 1.0]);
+        let half_root_two = 0.5 * std::f64::consts::FRAC_1_SQRT_2;
+
+        assert!(approx_eq(point[0], 2.0 + 4.0 * half_root_two));
+        assert!(approx_eq(point[1], 3.0 + 4.0 * half_root_two));
+        assert!(approx_eq(point[2], 0.0));
+        assert!(approx_eq(point[3], 1.0));
     }
 
     // 4. rotate_point(90, 1, 0, 0) == rotate_x(90)

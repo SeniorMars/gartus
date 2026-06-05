@@ -33,61 +33,16 @@ fn main() {
         }
     }
 
-    // 2. Build EdgeMatrix for the grid
+    // 2. Build the terrain mesh
     println!("Building grid...");
-    let mut polygons = PolygonMatrix::new();
     let scale = 650.0; // Increased scale from 500.0
     let h_scale = 350.0; // Increased height from 300.0
-
-    for y in 0..GRID_SIZE - 1 {
-        for x in 0..GRID_SIZE - 1 {
-            let px0 = (x as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-            let px1 = ((x + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-            let pz0 = (y as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-            let pz1 = ((y + 1) as f64 / (GRID_SIZE - 1) as f64 - 0.5) * scale;
-
-            let py00 = height_map[x][y] * h_scale;
-            let py10 = height_map[x + 1][y] * h_scale;
-            let py01 = height_map[x][y + 1] * h_scale;
-            let py11 = height_map[x + 1][y + 1] * h_scale;
-
-            let p00 = (px0, py00, pz0);
-            let p10 = (px1, py10, pz0);
-            let p01 = (px0, py01, pz1);
-            let p11 = (px1, py11, pz1);
-
-            // Two triangles per grid square
-            polygons.add_polygon(p00, p01, p11);
-            polygons.add_polygon(p00, p11, p10);
-        }
-    }
+    let polygons =
+        PolygonMatrix::from_height_map(&height_map, HeightMapOptions::new(scale, scale, h_scale));
 
     println!("Applying transformations and rendering...");
     // 3. Manual Projection and Rendering with Height-based Coloring
-    let cos45 = std::f64::consts::FRAC_1_SQRT_2;
-    let sin45 = std::f64::consts::FRAC_1_SQRT_2;
-    let cabinet = Matrix::new(
-        4,
-        4,
-        vec![
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.5 * cos45,
-            0.5 * sin45,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-        ],
-    );
+    let cabinet = Matrix::cabinet_projection(45.0);
 
     let transformed = polygons.apply(&cabinet);
 
@@ -174,32 +129,12 @@ fn generate_terrain(size: usize, roughness: f64) -> Vec<Vec<f64>> {
 }
 
 fn determine_color(height: f64) -> Rgb {
-    let color_stops = [
+    let ramp = ColorRamp::new(vec![
         (0.0, Rgb::new(0, 50, 200)),    // Water (Deep blue)
         (0.2, Rgb::new(0, 150, 0)),     // Lowlands (Green)
         (0.4, Rgb::new(100, 100, 50)),  // Mountains (Brownish)
         (0.7, Rgb::new(180, 180, 180)), // High peaks (Gray)
         (1.0, Rgb::new(255, 255, 255)), // Snow (White)
-    ];
-
-    let mut low = color_stops[0];
-    let mut high = color_stops[color_stops.len() - 1];
-
-    for i in 0..color_stops.len() - 1 {
-        if height >= color_stops[i].0 && height <= color_stops[i + 1].0 {
-            low = color_stops[i];
-            high = color_stops[i + 1];
-            break;
-        }
-    }
-
-    let t = if high.0 == low.0 {
-        0.0
-    } else {
-        (height - low.0) / (high.0 - low.0)
-    };
-    let r = (low.1.red as f64 + t * (high.1.red as f64 - low.1.red as f64)) as u8;
-    let g = (low.1.green as f64 + t * (high.1.green as f64 - low.1.green as f64)) as u8;
-    let b = (low.1.blue as f64 + t * (high.1.blue as f64 - low.1.blue as f64)) as u8;
-    Rgb::new(r, g, b)
+    ]);
+    ramp.sample(height)
 }

@@ -351,40 +351,56 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+fn visual_test_temp_file(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "gartus-external-visual-{name}-{}.ppm",
+        std::process::id()
+    ))
+}
+
 #[test]
-#[ignore = "requires external files and a display"]
 fn external_fun() {
-    let pos_glitch = true;
-    let canvas = ppmify("./corro.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.display().expect("Could not display image");
+    let path = visual_test_temp_file("sobel-glitch");
+    fs::write(&path, b"P3\n2 1\n255\n0 0 0 255 255 255\n").expect("write temp ppm");
+
+    let canvas = ppmify(path.to_str().expect("utf8 path"), true).expect("parse ppm");
     let sobel = canvas.sobel();
-    sobel.display().expect("Could not display image");
-    sobel
-        .save_extension("pics/corro.png")
-        .expect("Could not save image");
+
+    assert_eq!(canvas.width(), 1);
+    assert_eq!(canvas.height(), 2);
+    assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+    let _ = fs::remove_file(path);
 }
 
 #[test]
-#[ignore = "requires external files and a display"]
 fn command_block() {
-    let pos_glitch = true;
-    let canvas = ppmify("./CAR.png", pos_glitch).expect("Implmentation is wrong");
-    canvas.display().expect("Could not display image");
+    let path = visual_test_temp_file("sobel");
+    fs::write(&path, b"P3\n3 1\n255\n0 0 0 128 128 128 255 255 255\n").expect("write temp ppm");
+
+    let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
     let sobel = canvas.sobel();
-    sobel.display().expect("Could not display image");
-    sobel
-        .save_extension("pics/corro.png")
-        .expect("Could not save image");
+
+    assert_eq!(canvas.width(), 3);
+    assert_eq!(canvas.height(), 1);
+    assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+    let _ = fs::remove_file(path);
 }
 
 #[test]
-#[ignore = "requires external files and a display"]
 fn parse_and_display() {
-    let canvas = ppmify("./stop_1.ppm", false).expect("Implmentation is wrong");
-    // let blur = canvas.blur();
-    // let sobel = canvas.sobel();
+    let path = visual_test_temp_file("laplacian");
+    fs::write(
+        &path,
+        b"P3\n2 2\n255\n0 0 0 255 255 255 255 255 255 0 0 0\n",
+    )
+    .expect("write temp ppm");
+
+    let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
     let edge = canvas.laplacian_edge_detection();
-    // blur.display().expect("Could not display image");
-    // sobel.display().expect("Could not display image");
-    edge.display().expect("Could not display image");
+
+    assert_eq!(canvas.width(), 2);
+    assert_eq!(canvas.height(), 2);
+    assert!(edge.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+    let _ = fs::remove_file(path);
 }

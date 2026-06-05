@@ -14,19 +14,6 @@ struct MeshObject {
     color: Rgb,
 }
 
-#[derive(Clone, Copy)]
-struct ScreenPoint {
-    x: f64,
-    y: f64,
-    depth: f64,
-}
-
-struct Segment {
-    a: ScreenPoint,
-    b: ScreenPoint,
-    color: Rgb,
-}
-
 fn main() {
     if let Err(err) = render() {
         eprintln!("could not render 3D gallery piece:\n{err}");
@@ -194,71 +181,26 @@ fn render_frame(frame: usize, objects: &[MeshObject]) -> Canvas {
         * Matrix::rotate_x(18.0 + 7.0 * (t * PI * 2.0).sin())
         * Matrix::rotate_z(2.5 * (t * PI * 4.0).cos());
 
+    let camera = Camera3D::new(WIDTH, HEIGHT)
+        .with_camera_distance(CAMERA_DISTANCE)
+        .with_focal_length(FOCAL_LENGTH)
+        .with_center_y_factor(0.58);
     let mut segments = Vec::new();
     for object in objects {
         let animation = Matrix::rotate_y(t * 360.0 * object_spin(object.color));
         let transform = world.clone() * object.base.clone() * animation;
-        collect_wire_segments(
-            &mut segments,
-            &object.mesh.apply(&transform),
-            object.color,
-            t,
-        );
+        segments.extend(camera.project_mesh_wireframe_segments(
+            &object.mesh,
+            &transform,
+            1,
+            |_, depth| depth_color(object.color, depth, t),
+        ));
     }
 
-    segments.sort_by(|a, b| {
-        let da = (a.a.depth + a.b.depth) * 0.5;
-        let db = (b.a.depth + b.b.depth) * 0.5;
-        db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    for segment in segments {
-        canvas.draw_line(
-            segment.color,
-            segment.a.x,
-            segment.a.y,
-            segment.b.x,
-            segment.b.y,
-        );
-    }
+    sort_segments_back_to_front(&mut segments);
+    canvas.draw_projected_segments(segments);
 
     canvas
-}
-
-fn collect_wire_segments(
-    segments: &mut Vec<Segment>,
-    mesh: &PolygonMatrix,
-    base_color: Rgb,
-    t: f64,
-) {
-    for (p0, p1, p2) in mesh.iter_triangles() {
-        let Some(a) = project(p0) else {
-            continue;
-        };
-        let Some(b) = project(p1) else {
-            continue;
-        };
-        let Some(c) = project(p2) else {
-            continue;
-        };
-        let color = depth_color(base_color, (a.depth + b.depth + c.depth) / 3.0, t);
-        segments.push(Segment { a, b, color });
-        segments.push(Segment { a: b, b: c, color });
-        segments.push(Segment { a: c, b: a, color });
-    }
-}
-
-fn project(point: &[f64]) -> Option<ScreenPoint> {
-    let depth = point[2] + CAMERA_DISTANCE;
-    if depth < 80.0 {
-        return None;
-    }
-    let scale = FOCAL_LENGTH / depth;
-    Some(ScreenPoint {
-        x: f64::from(WIDTH) * 0.5 + point[0] * scale,
-        y: f64::from(HEIGHT) * 0.58 - point[1] * scale,
-        depth,
-    })
 }
 
 fn draw_star_tunnel(canvas: &mut Canvas, t: f64) {

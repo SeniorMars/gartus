@@ -54,11 +54,9 @@ impl EdgeMatrix {
         );
 
         let mut matrix = Self::with_capacity(coords.len() / 2);
-        let mut data = Vec::with_capacity(coords.len() * 2);
         for pair in coords.chunks_exact(2) {
-            Self::extend_point_data(&mut data, pair[0].into(), pair[1].into(), z);
+            matrix.push_homogeneous_point(pair[0].into(), pair[1].into(), z);
         }
-        matrix.append_homogeneous_points(&data);
         matrix
     }
 
@@ -212,8 +210,10 @@ impl EdgeMatrix {
             .expect("EdgeMatrix values must always have 4 rows");
     }
 
-    fn extend_point_data(data: &mut Vec<f64>, x: f64, y: f64, z: f64) {
-        data.extend_from_slice(&[x, y, z, 1.0]);
+    fn push_homogeneous_point(&mut self, x: f64, y: f64, z: f64) {
+        self.inner
+            .append_column(&[x, y, z, 1.0])
+            .expect("EdgeMatrix values must always have 4 rows");
     }
 
     fn extend_edge_data(data: &mut Vec<f64>, x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) {

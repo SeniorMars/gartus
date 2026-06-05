@@ -264,9 +264,25 @@ pub enum AnimationCommand {
         end_frame: usize,
         start_val: f64,
         end_val: f64,
+        interpolation: VaryInterpolation,
     },
     /// Set all known knobs to one value.
     SetKnobs(f64),
+}
+
+/// Curve used by `vary` to convert frame progress into knob progress.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VaryInterpolation {
+    /// Use unmodified linear progress.
+    Linear,
+    /// Start slowly and accelerate.
+    Exponential,
+    /// Start quickly and decelerate.
+    Logarithmic,
+    /// Smooth cubic easing with zero slope at both ends.
+    Smoothstep,
+    /// Raise linear progress to a custom exponent.
+    Power(f64),
 }
 
 /// Rendering state commands.
@@ -276,7 +292,12 @@ pub enum RenderCommand {
     /// Change the current drawing color.
     Color(ColorSpec),
     /// Define a point light.
-    Light { color: Vec3, position: Vec3 },
+    Light {
+        name: Option<String>,
+        color: Vec3,
+        position: Vec3,
+        knob: Option<String>,
+    },
     /// Define ambient light.
     Ambient { color: Vec3 },
     /// Define reusable material constants.

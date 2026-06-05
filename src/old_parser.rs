@@ -966,11 +966,19 @@ impl Parser {
     }
 }
 
-#[ignore = "Display test, not meant for CI"]
 #[test]
 fn parser_test() {
-    let mut test = Parser::new("./tests/script_testing", 500, 500, &Rgb::new(0, 255, 0));
-    test.parse_file().expect("Script is valid");
+    let mut test = Parser::new("inline", 20, 20, &Rgb::new(0, 255, 0));
+    test.set_display_enabled(false);
+    test.parse_string("line\n0 0 0 10 10 0\napply")
+        .expect("Script is valid");
+
+    assert!(
+        test.canvas()
+            .pixels()
+            .iter()
+            .any(|pixel| *pixel == Rgb::new(0, 255, 0))
+    );
 }
 
 #[cfg(test)]

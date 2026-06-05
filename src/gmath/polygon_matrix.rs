@@ -18,6 +18,54 @@ pub struct Bounds3 {
     pub max: (f64, f64, f64),
 }
 
+/// Scaling options for converting a row-major height map into a triangle mesh.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeightMapOptions {
+    /// Total generated mesh width along the x axis.
+    pub x_size: f64,
+    /// Total generated mesh depth along the z axis.
+    pub z_size: f64,
+    /// Multiplier applied to each height value to produce y coordinates.
+    pub height_scale: f64,
+    /// Offset added to each generated y coordinate.
+    pub y_offset: f64,
+}
+
+impl HeightMapOptions {
+    /// Creates height-map mesh options centered around the x/z origin.
+    ///
+    /// # Panics
+    /// Panics if any size or scale is non-finite, or if either planar size is not positive.
+    #[must_use]
+    pub fn new(x_size: f64, z_size: f64, height_scale: f64) -> Self {
+        assert!(
+            [x_size, z_size, height_scale]
+                .iter()
+                .all(|value| value.is_finite()),
+            "height-map options must be finite"
+        );
+        assert!(x_size > 0.0, "height-map x size must be positive");
+        assert!(z_size > 0.0, "height-map z size must be positive");
+        Self {
+            x_size,
+            z_size,
+            height_scale,
+            y_offset: 0.0,
+        }
+    }
+
+    /// Sets an additive y offset for generated vertices.
+    ///
+    /// # Panics
+    /// Panics if `y_offset` is non-finite.
+    #[must_use]
+    pub fn y_offset(mut self, y_offset: f64) -> Self {
+        assert!(y_offset.is_finite(), "height-map y offset must be finite");
+        self.y_offset = y_offset;
+        self
+    }
+}
+
 impl PolygonMatrix {
     /// Creates an empty polygon matrix (4 rows, 0 cols).
     #[must_use]
@@ -239,6 +287,50 @@ impl PolygonMatrix {
     pub fn apply_in_place(&mut self, transform: &Matrix) {
         self.inner
             .apply_homogeneous_transform_from_col(0, transform);
+    }
+
+    /// Builds a triangle mesh from row-major height samples.
+    ///
+    /// The outer slice contains z rows and each inner slice contains x columns. Generated x and z
+    /// coordinates are centered around `0.0`, while y coordinates are `height * height_scale +
+    /// y_offset`.
+    ///
+    /// # Panics
+    /// Panics if the height map has fewer than two rows or columns, or if rows have differing
+    /// lengths.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn from_height_map(heights: &[Vec<f64>], options: HeightMapOptions) -> Self {
+        assert!(heights.len() >= 2, "height map must have at least two rows");
+        let cols = heights[0].len();
+        assert!(cols >= 2, "height map must have at least two columns");
+        assert!(
+            heights.iter().all(|row| row.len() == cols),
+            "height map rows must all have the same length"
+        );
+
+        let rows = heights.len();
+        let mut mesh = Self::with_capacity((rows - 1) * (cols - 1) * 6);
+        let x_denom = (cols - 1) as f64;
+        let z_denom = (rows - 1) as f64;
+        let point = |x: usize, z: usize| {
+            let px = (x as f64 / x_denom - 0.5) * options.x_size;
+            let pz = (z as f64 / z_denom - 0.5) * options.z_size;
+            let py = heights[z][x] * options.height_scale + options.y_offset;
+            (px, py, pz)
+        };
+
+        for z in 0..rows - 1 {
+            for x in 0..cols - 1 {
+                let p00 = point(x, z);
+                let p10 = point(x + 1, z);
+                let p01 = point(x, z + 1);
+                let p11 = point(x + 1, z + 1);
+                mesh.add_polygon(p00, p01, p11);
+                mesh.add_polygon(p00, p11, p10);
+            }
+        }
+        mesh
     }
 
     /// Get a reference to the underlying `Matrix`.
@@ -1121,5 +1213,17 @@ mod tests {
                 "Sphere normal should point outward"
             );
         }
+    }
+
+    #[test]
+    fn height_map_builds_two_triangles_per_cell() {
+        let heights = vec![vec![0.0, 1.0], vec![0.5, 0.25]];
+        let mesh = PolygonMatrix::from_height_map(&heights, HeightMapOptions::new(10.0, 20.0, 2.0));
+
+        assert_eq!(mesh.triangle_count(), 2);
+        let (p0, p1, p2) = mesh.iter_triangles().next().expect("first triangle");
+        assert_eq!((p0[0], p0[1], p0[2]), (-5.0, 0.0, -10.0));
+        assert_eq!((p1[0], p1[1], p1[2]), (-5.0, 1.0, 10.0));
+        assert_eq!((p2[0], p2[1], p2[2]), (5.0, 0.5, 10.0));
     }
 }

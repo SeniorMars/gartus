@@ -7,20 +7,20 @@ use gartus::{
 use gartus::graphics::colors::Hsl;
 
 #[test]
-#[ignore]
 fn circle() {
-    let mut circle = Canvas::new_with_bg(500, 500, Rgb::from(Hsl::new(0, 100, 100)));
+    let background = Rgb::from(Hsl::new(0, 100, 100));
+    let mut circle = Canvas::new_with_bg(500, 500, background);
     circle.set_line_pixel(Rgb::from(Hsl::new(5, 99, 26)));
     let color = Rgb::from(Hsl::new(5, 99, 26));
     let mut matrix = EdgeMatrix::new();
     matrix.add_circle(249.0, 249.0, 249.0, 50.0, 0.0001);
     circle.draw_lines(&matrix);
     circle.fill(249, 249, color, color);
-    circle.display().expect("Could not draw circle")
+
+    assert!(circle.pixels().contains(&color));
 }
 
 #[test]
-#[ignore]
 fn donut() {
     let mut t = 0.0;
     let mut donut = Canvas::new(500, 500, Rgb::default());
@@ -48,14 +48,11 @@ fn donut() {
             donut.draw_lines(&matrix);
         }
     }
-    donut.display().expect("Could not draw circle");
-    donut
-        .save_extension("./pics/donut.png")
-        .expect("Could not save donut")
+
+    assert!(donut.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
 }
 
 #[test]
-#[ignore]
 fn spirograph() {
     let mut circle = Canvas::new(500, 500, Rgb::default());
     let colors = vec![
@@ -83,14 +80,11 @@ fn spirograph() {
             circle.draw_lines(&matrix);
         }
     }
-    circle.display().expect("Could not draw circle");
-    circle
-        .save_extension("pics/spiro.png")
-        .expect("Could not save spiro")
+
+    assert!(circle.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
 }
 
 #[test]
-#[ignore]
 fn hermite_test() {
     let color = Rgb::from(Hsl::new(5, 99, 26));
     let mut hermite = Canvas::new(500, 500, color);
@@ -102,5 +96,6 @@ fn hermite_test() {
         (100.0, 150.0),
     );
     hermite.draw_lines(&matrix);
-    hermite.display().expect("Could not draw circle")
+
+    assert!(hermite.pixels().contains(&color));
 }

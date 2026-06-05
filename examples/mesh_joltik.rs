@@ -1,5 +1,10 @@
 use gartus::{external, prelude::*};
-use std::{error::Error, f64::consts::PI};
+use std::{
+    collections::HashMap,
+    error::Error,
+    f64::consts::PI,
+    path::{Path, PathBuf},
+};
 
 const WIDTH: u32 = 900;
 const HEIGHT: u32 = 900;
@@ -11,8 +16,10 @@ const CHARGE_LINE_Z: f64 = -5600.0;
 const LIGHT_DIR: (f64, f64, f64) = (-0.28, -0.54, 0.8);
 
 struct Scene {
-    mesh: PolygonMatrix,
+    mesh: MaterialMesh,
     normalize: Matrix,
+    textures: HashMap<PathBuf, Texture>,
+    lighting: Lighting,
 }
 
 fn main() {
@@ -23,12 +30,20 @@ fn main() {
 }
 
 fn render() -> Result<(), Box<dyn Error>> {
-    let mesh = external::meshify("examples/data/meshes/joltik.obj")?;
+    let mesh = external::meshify_with_materials("examples/data/meshes/joltik.obj")?;
     println!("loaded Joltik: {} triangles", mesh.triangle_count());
+    let textures = load_mesh_textures(&mesh);
+    println!("loaded Joltik textures: {}", textures.len());
 
     let scene = Scene {
-        normalize: external::normalize_mesh_transform(&mesh, 565.0, external::MeshUpAxis::Y),
+        normalize: external::normalize_material_mesh_transform(
+            &mesh,
+            565.0,
+            external::MeshUpAxis::Y,
+        ),
         mesh,
+        textures,
+        lighting: joltik_lighting(),
     };
 
     FrameRecorder::render_gif(
@@ -41,6 +56,44 @@ fn render() -> Result<(), Box<dyn Error>> {
 
     println!("Saved final/mesh_joltik.png and final/mesh_joltik.gif");
     Ok(())
+}
+
+fn load_mesh_textures(mesh: &MaterialMesh) -> HashMap<PathBuf, Texture> {
+    let mut textures = HashMap::new();
+    for group in &mesh.groups {
+        let Some(texture_path) = group
+            .material
+            .as_ref()
+            .and_then(|material| material.diffuse_texture.as_ref())
+        else {
+            continue;
+        };
+        if textures.contains_key(texture_path) {
+            continue;
+        }
+
+        match load_texture(texture_path) {
+            Ok(texture) => {
+                textures.insert(texture_path.clone(), texture);
+            }
+            Err(error) => {
+                eprintln!("could not load texture {}: {error}", texture_path.display());
+            }
+        }
+    }
+    textures
+}
+
+fn load_texture(path: &Path) -> Result<Texture, Box<dyn Error>> {
+    let image = external::ppmify(path_to_str(path)?, false)?;
+    Ok(Texture::from_canvas(image)
+        .filter(TextureFilter::Linear)
+        .mipmapped())
+}
+
+fn path_to_str(path: &Path) -> Result<&str, Box<dyn Error>> {
+    path.to_str()
+        .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()).into())
 }
 
 fn render_frame(frame: usize, scene: &Scene) -> Canvas {
@@ -58,7 +111,14 @@ fn render_frame(frame: usize, scene: &Scene) -> Canvas {
         * Matrix::rotate_x(9.0 + 2.5 * (phase * 1.2).cos())
         * scene.normalize.clone();
 
-    draw_lit_projected_triangles(&mut canvas, &scene.mesh, &body_transform, t);
+    draw_lit_projected_triangles(
+        &mut canvas,
+        &scene.mesh,
+        &scene.textures,
+        &scene.lighting,
+        &body_transform,
+        t,
+    );
     draw_charge_lines(&mut canvas, t);
 
     canvas
@@ -176,28 +236,132 @@ fn web_color(ring: usize, brightness: f64) -> Rgb {
 
 fn draw_lit_projected_triangles(
     canvas: &mut Canvas,
-    mesh: &PolygonMatrix,
+    mesh: &MaterialMesh,
+    textures: &HashMap<PathBuf, Texture>,
+    lighting: &Lighting,
     transform: &Matrix,
     t: f64,
 ) {
     let mut triangle = PolygonMatrix::with_capacity(3);
-    for (idx, (p0, p1, p2)) in mesh.transformed_triangles(transform).enumerate() {
-        let Some(p0_screen) = project_body_point(&p0) else {
-            continue;
-        };
-        let Some(p1_screen) = project_body_point(&p1) else {
-            continue;
-        };
-        let Some(p2_screen) = project_body_point(&p2) else {
-            continue;
-        };
+    let mut triangle_idx = 0;
+    for group in &mesh.groups {
+        let texture = group
+            .material
+            .as_ref()
+            .and_then(|material| material.diffuse_texture.as_ref())
+            .and_then(|path| textures.get(path));
 
-        let color = joltik_color(idx, &p0, &p1, &p2, t);
-        triangle.clear();
-        triangle.add_polygon(p0_screen, p1_screen, p2_screen);
-        canvas.set_line_pixel(color);
-        canvas.draw_polygons(&triangle);
+        if let Some(texture) = texture {
+            draw_textured_group(canvas, group, texture, lighting, transform);
+            triangle_idx += group.polygons.triangle_count();
+            continue;
+        }
+
+        for (p0, p1, p2) in group.polygons.transformed_triangles(transform) {
+            let Some(p0_screen) = project_body_point(&p0) else {
+                continue;
+            };
+            let Some(p1_screen) = project_body_point(&p1) else {
+                continue;
+            };
+            let Some(p2_screen) = project_body_point(&p2) else {
+                continue;
+            };
+
+            let color = joltik_color(triangle_idx, &p0, &p1, &p2, t);
+            triangle.clear();
+            triangle.add_polygon(p0_screen, p1_screen, p2_screen);
+            canvas.set_line_pixel(color);
+            canvas.draw_polygons(&triangle);
+            triangle_idx += 1;
+        }
     }
+}
+
+fn draw_textured_group(
+    canvas: &mut Canvas,
+    group: &MaterialMeshGroup,
+    texture: &Texture,
+    lighting: &Lighting,
+    transform: &Matrix,
+) {
+    for triangle in &group.textured_triangles {
+        let p0_world = transform_point(transform, triangle[0].position);
+        let p1_world = transform_point(transform, triangle[1].position);
+        let p2_world = transform_point(transform, triangle[2].position);
+        let shade = joltik_texture_light(lighting, &p0_world, &p1_world, &p2_world);
+
+        let Some(p0) = textured_screen_vertex_from_point(triangle[0], &p0_world) else {
+            continue;
+        };
+        let Some(p1) = textured_screen_vertex_from_point(triangle[1], &p1_world) else {
+            continue;
+        };
+        let Some(p2) = textured_screen_vertex_from_point(triangle[2], &p2_world) else {
+            continue;
+        };
+        canvas.draw_textured_triangle_modulated(texture, [p0, p1, p2], shade);
+    }
+}
+
+fn textured_screen_vertex_from_point(
+    vertex: TexturedMeshVertex,
+    point: &[f64],
+) -> Option<TexturedVertex> {
+    let screen = project_body_point(point)?;
+    Some(TexturedVertex::new(
+        screen.0,
+        screen.1,
+        screen.2,
+        vertex.texcoord.0,
+        vertex.texcoord.1,
+    ))
+}
+
+fn transform_point(transform: &Matrix, point: (f64, f64, f64)) -> [f64; 3] {
+    let x = point.0;
+    let y = point.1;
+    let z = point.2;
+    let w = 1.0;
+    [
+        transform[(0, 0)] * x
+            + transform[(0, 1)] * y
+            + transform[(0, 2)] * z
+            + transform[(0, 3)] * w,
+        transform[(1, 0)] * x
+            + transform[(1, 1)] * y
+            + transform[(1, 2)] * z
+            + transform[(1, 3)] * w,
+        transform[(2, 0)] * x
+            + transform[(2, 1)] * y
+            + transform[(2, 2)] * z
+            + transform[(2, 3)] * w,
+    ]
+}
+
+fn joltik_lighting() -> Lighting {
+    Lighting {
+        view: Vector::new(0.0, 0.0, 1.0),
+        ambient: Rgb::new(92, 92, 92),
+        point_light: PointLight::directional(
+            Vector::new(LIGHT_DIR.0, LIGHT_DIR.1, LIGHT_DIR.2),
+            Rgb::new(225, 225, 225),
+        ),
+        point_lights: Vec::new(),
+        ambient_reflection: ReflectionConstants::new(0.45, 0.45, 0.45),
+        diffuse_reflection: ReflectionConstants::new(0.72, 0.72, 0.72),
+        specular_reflection: ReflectionConstants::new(0.22, 0.22, 0.22),
+        specular_exponent: 18,
+    }
+}
+
+fn joltik_texture_light(lighting: &Lighting, p0: &[f64], p1: &[f64], p2: &[f64]) -> Rgb {
+    let n = normal(p0, p1, p2);
+    let center = centroid(p0, p1, p2);
+    lighting.illuminate_at(
+        Vector::new(n.0, n.1, n.2),
+        Vector::new(center.0, center.1, center.2),
+    )
 }
 
 fn project_body_point(point: &[f64]) -> Option<(f64, f64, f64)> {

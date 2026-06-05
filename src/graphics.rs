@@ -20,6 +20,8 @@ pub mod lighting;
 pub mod primitives;
 #[cfg(test)]
 mod tests;
+/// 2D texture sampling helpers.
+pub mod texture;
 /// An agent that can move throughout the [Canvas]
 #[cfg(feature = "turtle")]
 pub mod turtle;

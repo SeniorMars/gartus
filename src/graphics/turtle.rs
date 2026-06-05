@@ -424,7 +424,6 @@ mod test {
     }
 
     #[test]
-    #[ignore = "writes an example image"]
     fn spiral() {
         let start_x = 149.0;
         let start_y = 149.0;
@@ -440,9 +439,7 @@ mod test {
             distance += 1.0;
             flag -= 1;
         }
-        canvas
-            .save_binary("./pics/spiral.png")
-            .expect("Image is writeable");
-        // canvas.display().expect("Could not render image")
+
+        assert!(canvas.pixels().iter().any(|pixel| *pixel == turtle.color()));
     }
 }

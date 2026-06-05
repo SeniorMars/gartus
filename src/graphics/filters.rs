@@ -77,7 +77,7 @@ impl Canvas {
     pub fn prewitt(&self) -> Canvas {
         let gx_kernel = [-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0];
         let gy_kernel = [-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-        self.apply_edge_kernels(gx_kernel, gy_kernel)
+        self.convolve_3x3_dual(gx_kernel, gy_kernel)
     }
 
     #[allow(clippy::similar_names)]
@@ -85,29 +85,66 @@ impl Canvas {
     pub fn scharr(&self) -> Canvas {
         let gx_kernel = [-3.0, 0.0, 3.0, -10.0, 0.0, 10.0, -3.0, 0.0, 3.0];
         let gy_kernel = [-3.0, -10.0, -3.0, 0.0, 0.0, 0.0, 3.0, 10.0, 3.0];
-        self.apply_edge_kernels(gx_kernel, gy_kernel)
+        self.convolve_3x3_dual(gx_kernel, gy_kernel)
     }
 
+    /// Applies two 3x3 kernels in one pass and stores channel-wise gradient magnitude.
+    ///
+    /// This is useful for edge operators such as Sobel, Scharr, and Prewitt where the two
+    /// kernels represent horizontal and vertical derivatives.
+    ///
+    /// # Panics
+    /// Panics if the canvas dimensions cannot fit into `usize` on the target platform.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn apply_edge_kernels(&self, gx: [f32; 9], gy: [f32; 9]) -> Canvas {
-        let x_img = self.convolve_3x3(gx, 0.0);
-        let y_img = self.convolve_3x3(gy, 0.0);
+    pub fn convolve_3x3_dual(&self, gx: [f32; 9], gy: [f32; 9]) -> Canvas {
+        let width = usize::try_from(self.width()).expect("canvas width fits usize");
+        let height = usize::try_from(self.height()).expect("canvas height fits usize");
         let mut result = self.blank_like();
+        if width == 0 || height == 0 {
+            return result;
+        }
 
-        for i in 0..self.len() {
-            let px = x_img[i];
-            let py = y_img[i];
-            result[i] = Rgb::new(
-                (f32::from(px.red).powi(2) + f32::from(py.red).powi(2))
-                    .sqrt()
-                    .min(255.0) as u8,
-                (f32::from(px.green).powi(2) + f32::from(py.green).powi(2))
-                    .sqrt()
-                    .min(255.0) as u8,
-                (f32::from(px.blue).powi(2) + f32::from(py.blue).powi(2))
-                    .sqrt()
-                    .min(255.0) as u8,
-            );
+        for y in 0..height {
+            for x in 0..width {
+                let mut red_x = 0.0;
+                let mut green_x = 0.0;
+                let mut blue_x = 0.0;
+                let mut red_y = 0.0;
+                let mut green_y = 0.0;
+                let mut blue_y = 0.0;
+
+                for ky in 0..3 {
+                    for kx in 0..3 {
+                        let nx = match kx {
+                            0 => x.saturating_sub(1),
+                            1 => x,
+                            _ => (x + 1).min(width - 1),
+                        };
+                        let ny = match ky {
+                            0 => y.saturating_sub(1),
+                            1 => y,
+                            _ => (y + 1).min(height - 1),
+                        };
+                        let pixel = self[ny * width + nx];
+                        let kernel_index = ky * 3 + kx;
+                        let x_weight = gx[kernel_index];
+                        let y_weight = gy[kernel_index];
+
+                        red_x += f32::from(pixel.red) * x_weight;
+                        green_x += f32::from(pixel.green) * x_weight;
+                        blue_x += f32::from(pixel.blue) * x_weight;
+                        red_y += f32::from(pixel.red) * y_weight;
+                        green_y += f32::from(pixel.green) * y_weight;
+                        blue_y += f32::from(pixel.blue) * y_weight;
+                    }
+                }
+
+                result[y * width + x] = Rgb::new(
+                    (red_x.mul_add(red_x, red_y * red_y).sqrt()).min(255.0) as u8,
+                    (green_x.mul_add(green_x, green_y * green_y).sqrt()).min(255.0) as u8,
+                    (blue_x.mul_add(blue_x, blue_y * blue_y).sqrt()).min(255.0) as u8,
+                );
+            }
         }
         result
     }
@@ -480,7 +517,7 @@ impl Canvas {
     pub fn sobel(&self) -> Canvas {
         let gx_kernel = [-1.0, 0.0, 1.0, -2.0, 0.0, 2.0, -1.0, 0.0, 1.0];
         let gy_kernel = [-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0];
-        self.apply_edge_kernels(gx_kernel, gy_kernel)
+        self.convolve_3x3_dual(gx_kernel, gy_kernel)
     }
 
     /// Inverts all pixel colors.
@@ -1058,6 +1095,20 @@ mod tests {
         let dithered = canvas.ordered_dither();
 
         assert_eq!(dithered.pixels(), &[Rgb::new(0, 255, 255)]);
+    }
+
+    #[test]
+    fn dual_convolution_computes_channel_magnitude_in_one_pass() {
+        let mut canvas = Canvas::new(1, 1, Rgb::BLACK);
+        canvas.fill_canvas(vec![Rgb::new(10, 0, 0)]);
+        let mut gx = [0.0; 9];
+        let mut gy = [0.0; 9];
+        gx[4] = 3.0;
+        gy[4] = 4.0;
+
+        let convolved = canvas.convolve_3x3_dual(gx, gy);
+
+        assert_eq!(convolved.pixels(), &[Rgb::new(50, 0, 0)]);
     }
 
     #[test]

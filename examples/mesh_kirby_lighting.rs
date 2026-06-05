@@ -141,6 +141,7 @@ fn translate_mesh(mesh: &PolygonMatrix, dx: f64, dy: f64, dz: f64) -> PolygonMat
 }
 
 fn kirby_lighting(light: Vector, mode: ShadingMode) -> Lighting {
+    let material = PhongMaterial::RUBY;
     let specular_exponent = match mode {
         ShadingMode::Toon => 10,
         ShadingMode::Phong => 18,
@@ -151,9 +152,9 @@ fn kirby_lighting(light: Vector, mode: ShadingMode) -> Lighting {
     Lighting {
         ambient: Rgb::new(58, 48, 64),
         point_light: PointLight::new(light, Rgb::new(255, 248, 235)),
-        ambient_reflection: ReflectionConstants::new(0.25, 0.12, 0.17),
-        diffuse_reflection: ReflectionConstants::new(0.92, 0.36, 0.55),
-        specular_reflection: ReflectionConstants::new(0.42, 0.35, 0.45),
+        ambient_reflection: material.ambient,
+        diffuse_reflection: material.diffuse,
+        specular_reflection: material.specular,
         specular_exponent,
         ..Lighting::default()
     }

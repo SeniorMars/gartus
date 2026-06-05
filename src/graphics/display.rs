@@ -40,6 +40,49 @@ pub enum ShadingMode {
     Toon,
 }
 
+/// Inclusive 2D coordinate bounds for mapping pixels into a mathematical domain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Domain2D {
+    /// Minimum x coordinate.
+    pub x_min: f64,
+    /// Maximum x coordinate.
+    pub x_max: f64,
+    /// Minimum y coordinate.
+    pub y_min: f64,
+    /// Maximum y coordinate.
+    pub y_max: f64,
+}
+
+impl Domain2D {
+    /// Creates a 2D domain.
+    ///
+    /// # Panics
+    /// Panics if any bound is non-finite, or if either axis has identical endpoints.
+    #[must_use]
+    pub fn new(x_min: f64, x_max: f64, y_min: f64, y_max: f64) -> Self {
+        assert!(
+            [x_min, x_max, y_min, y_max]
+                .iter()
+                .all(|value| value.is_finite()),
+            "domain bounds must be finite"
+        );
+        assert!(
+            (x_max - x_min).abs() > f64::EPSILON,
+            "domain x bounds must differ"
+        );
+        assert!(
+            (y_max - y_min).abs() > f64::EPSILON,
+            "domain y bounds must differ"
+        );
+        Self {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ZSpan {
     pub x0: i64,
@@ -166,6 +209,105 @@ impl Canvas {
             polygon_color_mode: PolygonColorMode::default(),
             shading_mode: ShadingMode::default(),
             lighting: Lighting::default(),
+        }
+    }
+
+    /// Returns a new [`Canvas`] initialized by evaluating `pixel` for every storage coordinate.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn from_fn<F>(width: u32, height: u32, mut pixel: F) -> Self
+    where
+        F: FnMut(u32, u32) -> Rgb,
+    {
+        let mut pixels = Vec::with_capacity(Self::pixel_count(width, height));
+        for y in 0..height {
+            for x in 0..width {
+                pixels.push(pixel(x, y));
+            }
+        }
+        Self::from_pixels(width, height, pixels)
+    }
+
+    /// Returns a new [`Canvas`] by mapping each pixel into a 2D coordinate domain.
+    ///
+    /// The first storage row maps to `domain.y_max` and the last row approaches `domain.y_min`,
+    /// which matches the common top-to-bottom scan order used by image and fractal renderers.
+    pub fn from_domain<F>(width: u32, height: u32, domain: Domain2D, mut pixel: F) -> Self
+    where
+        F: FnMut(f64, f64) -> Rgb,
+    {
+        let scale_x = (domain.x_max - domain.x_min) / f64::from(width);
+        let scale_y = (domain.y_max - domain.y_min) / f64::from(height);
+        Self::from_fn(width, height, |x, y| {
+            let px = domain.x_min + f64::from(x) * scale_x;
+            let py = domain.y_max - f64::from(y) * scale_y;
+            pixel(px, py)
+        })
+    }
+
+    /// Returns a lower-resolution canvas by averaging `factor` by `factor` pixel blocks.
+    ///
+    /// This is the final step of supersampling: render into a canvas whose dimensions are
+    /// multiplied by `factor`, then downsample it to smooth jagged edges.
+    ///
+    /// # Panics
+    /// Panics if `factor` is zero or if the canvas dimensions are not divisible by `factor`.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn downsample(&self, factor: u32) -> Self {
+        assert!(factor > 0, "downsample factor must be positive");
+        assert_eq!(
+            self.width % factor,
+            0,
+            "canvas width must be divisible by downsample factor"
+        );
+        assert_eq!(
+            self.height % factor,
+            0,
+            "canvas height must be divisible by downsample factor"
+        );
+
+        let width = self.width / factor;
+        let height = self.height / factor;
+        let samples = u64::from(factor) * u64::from(factor);
+        #[allow(clippy::cast_possible_truncation)]
+        let source_width = self.width as usize;
+        let pixels = (0..height)
+            .flat_map(|y| {
+                (0..width).map(move |x| {
+                    let mut red = 0_u64;
+                    let mut green = 0_u64;
+                    let mut blue = 0_u64;
+                    for sample_y in 0..factor {
+                        for sample_x in 0..factor {
+                            let source_x = x * factor + sample_x;
+                            let source_y = y * factor + sample_y;
+                            let pixel =
+                                self.pixels[source_y as usize * source_width + source_x as usize];
+                            red += u64::from(pixel.red);
+                            green += u64::from(pixel.green);
+                            blue += u64::from(pixel.blue);
+                        }
+                    }
+                    Rgb::new(
+                        ((red + samples / 2) / samples) as u8,
+                        ((green + samples / 2) / samples) as u8,
+                        ((blue + samples / 2) / samples) as u8,
+                    )
+                })
+            })
+            .collect();
+
+        Self {
+            width,
+            height,
+            pixels,
+            zbuffer: vec![f64::NEG_INFINITY; Self::pixel_count(width, height)],
+            upper_left_origin: self.upper_left_origin,
+            wrapped: self.wrapped,
+            line: self.line,
+            line_width: self.line_width,
+            polygon_color_mode: self.polygon_color_mode,
+            shading_mode: self.shading_mode,
+            lighting: self.lighting.clone(),
         }
     }
 
@@ -956,5 +1098,65 @@ impl CanvasBuilder {
             shading_mode: self.shading_mode,
             lighting: self.lighting,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_fn_visits_pixels_in_storage_order() {
+        let canvas = Canvas::from_fn(2, 2, |x, y| match (x, y) {
+            (0, 0) => Rgb::new(0, 0, 0),
+            (1, 0) => Rgb::new(1, 0, 0),
+            (0, 1) => Rgb::new(0, 1, 0),
+            (1, 1) => Rgb::new(1, 1, 0),
+            _ => unreachable!("test canvas is 2x2"),
+        });
+
+        assert_eq!(
+            canvas.pixels(),
+            &[
+                Rgb::new(0, 0, 0),
+                Rgb::new(1, 0, 0),
+                Rgb::new(0, 1, 0),
+                Rgb::new(1, 1, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_domain_maps_top_row_to_y_max() {
+        let domain = Domain2D::new(-1.0, 1.0, -1.0, 1.0);
+        let canvas = Canvas::from_domain(2, 4, domain, |x, y| match (x >= 0.0, y >= 0.0) {
+            (false, true) => Rgb::new(0, 200, 0),
+            (true, true) => Rgb::new(100, 200, 0),
+            (false, false) => Rgb::new(0, 100, 0),
+            (true, false) => Rgb::new(100, 100, 0),
+        });
+
+        assert_eq!(canvas.pixels()[0], Rgb::new(0, 200, 0));
+        assert_eq!(canvas.pixels()[7], Rgb::new(100, 100, 0));
+    }
+
+    #[test]
+    fn downsample_averages_pixel_blocks() {
+        let canvas = Canvas::from_pixels(
+            2,
+            2,
+            vec![
+                Rgb::new(0, 0, 0),
+                Rgb::new(10, 20, 30),
+                Rgb::new(20, 40, 60),
+                Rgb::new(30, 60, 90),
+            ],
+        );
+
+        let downsampled = canvas.downsample(2);
+
+        assert_eq!(downsampled.width(), 1);
+        assert_eq!(downsampled.height(), 1);
+        assert_eq!(downsampled.pixels(), &[Rgb::new(15, 30, 45)]);
     }
 }

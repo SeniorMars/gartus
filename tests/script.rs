@@ -4,9 +4,9 @@ use gartus::graphics::colors::*;
 use gartus::parser::Parser;
 
 #[test]
-#[ignore = "visual script uses display/ImageMagick"]
 fn script_1() {
     let mut pig = Parser::new("./scripts/pig.cg", 400, 400, &Rgb::new(0, 255, 0));
+    pig.set_display_enabled(false);
 
     pig.canvas_mut().upper_left_origin = false;
 
@@ -40,10 +40,10 @@ fn script_1() {
 }
 
 #[test]
-#[ignore = "visual script uses display/ImageMagick"]
 fn script2() {
     let file = "./scripts/transform.cg";
     let mut parser = Parser::new(file, 400, 400, &Rgb::new(0, 255, 0));
+    parser.set_display_enabled(false);
     parser.canvas_mut().upper_left_origin = false;
 
     parser.parse_file().expect("Script is valid");

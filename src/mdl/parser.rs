@@ -4,7 +4,7 @@ use super::{
     ast::{
         AnimationCommand, Axis, CameraCommand, ColorSpec, Command, ControlCommand, CurveCommand,
         FilterCommand, Material, OutputCommand, PointRef, Program, RenderCommand, ShadingMode,
-        ShapeCommand, Spanned, TransformCommand, Vec2, Vec3,
+        ShapeCommand, Spanned, TransformCommand, VaryInterpolation, Vec2, Vec3,
     },
     diagnostic::Diagnostic,
     lexer::{Span, Token, TokenKind, lex_line},
@@ -122,7 +122,7 @@ fn parse_command(tokens: &[Token]) -> Result<Command, Diagnostic> {
         "basename" => parse_basename(command_token, args),
         "frames" => parse_frames(command_token, args),
         "set" => parse_set(command_token, args),
-        "save_knobs" => parse_save_knobs(command_token, args),
+        "save_knobs" | "saveknobs" => parse_save_knobs(command_token, args),
         "tween" => parse_tween(command_token, args),
         "vary" => parse_vary(command_token, args),
         "setknobs" => parse_setknobs(command_token, args),
@@ -130,7 +130,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, Diagnostic> {
         "ambient" => parse_ambient(command_token, args),
         "constants" => parse_constants(command_token, args),
         "shading" => parse_shading(command_token, args),
-        "save_coord_system" => parse_save_coord_system(command_token, args),
+        "save_coord_system" | "save_coordinate_system" => {
+            parse_save_coord_system(command_token, args)
+        }
         "camera" => parse_camera(command_token, args),
         "save" => parse_save(command_token, args),
         "include" => parse_include(command_token, args),
@@ -565,16 +567,82 @@ fn parse_vary(command: &Token, args: &[Token]) -> Result<Command, Diagnostic> {
     expect_len(
         command,
         args,
-        &[5],
-        "vary knob start_frame end_frame start_val end_val",
+        &[5, 6, 7],
+        "vary knob start_frame end_frame start_val end_val [linear|exponential|logarithmic|smoothstep|power exponent]",
     )?;
+    let interpolation = parse_vary_interpolation(command, args)?;
     Ok(animation(AnimationCommand::Vary {
         knob: expect_ident(command, args, 0, "knob name")?,
         start_frame: expect_usize(command, args, 1)?,
         end_frame: expect_usize(command, args, 2)?,
         start_val: expect_number(command, args, 3)?,
         end_val: expect_number(command, args, 4)?,
+        interpolation,
     }))
+}
+
+fn parse_vary_interpolation(
+    command: &Token,
+    args: &[Token],
+) -> Result<VaryInterpolation, Diagnostic> {
+    if args.len() == 5 {
+        return Ok(VaryInterpolation::Linear);
+    }
+
+    let mode = expect_ident_ref(command, args, 5, "vary interpolation mode")?.to_ascii_lowercase();
+    match mode.as_str() {
+        "linear" => {
+            if args.len() == 6 {
+                Ok(VaryInterpolation::Linear)
+            } else {
+                Err(diag_at_token(&args[6], "`linear` does not take an argument"))
+            }
+        }
+        "exponential" | "exp" => {
+            if args.len() == 6 {
+                Ok(VaryInterpolation::Exponential)
+            } else {
+                Err(diag_at_token(
+                    &args[6],
+                    "`exponential` does not take an argument",
+                ))
+            }
+        }
+        "logarithmic" | "log" => {
+            if args.len() == 6 {
+                Ok(VaryInterpolation::Logarithmic)
+            } else {
+                Err(diag_at_token(
+                    &args[6],
+                    "`logarithmic` does not take an argument",
+                ))
+            }
+        }
+        "smoothstep" => {
+            if args.len() == 6 {
+                Ok(VaryInterpolation::Smoothstep)
+            } else {
+                Err(diag_at_token(&args[6], "`smoothstep` does not take an argument"))
+            }
+        }
+        "power" | "pow" => {
+            if args.len() != 7 {
+                return Err(diag_at_token(command, "`power` requires an exponent"));
+            }
+            let exponent = expect_number(command, args, 6)?;
+            if exponent.is_finite() && exponent > 0.0 {
+                Ok(VaryInterpolation::Power(exponent))
+            } else {
+                Err(diag_at_token(
+                    &args[6],
+                    "expected positive finite power exponent",
+                ))
+            }
+        }
+        other => Err(diag_at_token(&args[5], format!("invalid vary mode `{other}`")).with_help(
+            "expected one of `linear`, `exponential`, `logarithmic`, `smoothstep`, or `power exponent`",
+        )),
+    }
 }
 
 fn parse_setknobs(command: &Token, args: &[Token]) -> Result<Command, Diagnostic> {
@@ -588,18 +656,48 @@ fn parse_light(command: &Token, args: &[Token]) -> Result<Command, Diagnostic> {
     expect_len(
         command,
         args,
-        &[6, 7],
-        "light r g b x y z | light name x y z r g b",
+        &[6, 7, 8],
+        "light r g b x y z [knob] | light name x y z [knob] r g b",
     )?;
-    let (color, position) = if args.len() == 7 {
-        let _name = expect_ident(command, args, 0, "light name")?;
+    let (name, color, position, knob) = if args.len() == 8 {
+        let name = expect_ident(command, args, 0, "light name")?;
+        (
+            Some(name),
+            parse_rgb(command, args, 5)?,
+            parse_vec3(command, args, 1)?,
+            Some(expect_ident(command, args, 4, "light knob")?),
+        )
+    } else if args.len() == 7 && is_ident_token(&args[0]) {
+        let name = expect_ident(command, args, 0, "light name")?;
         // The 11_anim C grammar uses: light name x y z r g b.
-        (parse_rgb(command, args, 4)?, parse_vec3(command, args, 1)?)
+        (
+            Some(name),
+            parse_rgb(command, args, 4)?,
+            parse_vec3(command, args, 1)?,
+            None,
+        )
+    } else if args.len() == 7 {
+        (
+            None,
+            parse_rgb(command, args, 0)?,
+            parse_vec3(command, args, 3)?,
+            Some(expect_ident(command, args, 6, "light knob")?),
+        )
     } else {
         // The prose MDL spec uses: light r g b x y z.
-        (parse_rgb(command, args, 0)?, parse_vec3(command, args, 3)?)
+        (
+            None,
+            parse_rgb(command, args, 0)?,
+            parse_vec3(command, args, 3)?,
+            None,
+        )
     };
-    Ok(render(RenderCommand::Light { color, position }))
+    Ok(render(RenderCommand::Light {
+        name,
+        color,
+        position,
+        knob,
+    }))
 }
 
 fn parse_ambient(command: &Token, args: &[Token]) -> Result<Command, Diagnostic> {
@@ -1026,7 +1124,8 @@ mod tests {
     use crate::mdl::{
         ast::{
             AnimationCommand, Axis, ColorSpec, Command, ControlCommand, CurveCommand,
-            OutputCommand, RenderCommand, ShadingMode, ShapeCommand, TransformCommand, Vec3,
+            OutputCommand, RenderCommand, ShadingMode, ShapeCommand, TransformCommand,
+            VaryInterpolation, Vec3,
         },
         lexer::lex_line,
     };
@@ -1089,6 +1188,45 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_vary_interpolation_modes() {
+        let program =
+            parse_script("vary k 0 9 0 1 exponential\nvary spin 0 9 0 90 power 3").unwrap();
+
+        assert_eq!(
+            program.commands[0].node,
+            Command::Animation(AnimationCommand::Vary {
+                knob: "k".to_string(),
+                start_frame: 0,
+                end_frame: 9,
+                start_val: 0.0,
+                end_val: 1.0,
+                interpolation: VaryInterpolation::Exponential,
+            })
+        );
+        assert_eq!(
+            program.commands[1].node,
+            Command::Animation(AnimationCommand::Vary {
+                knob: "spin".to_string(),
+                start_frame: 0,
+                end_frame: 9,
+                start_val: 0.0,
+                end_val: 90.0,
+                interpolation: VaryInterpolation::Power(3.0),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_save_coordinate_system_alias() {
+        let program = parse_script("save_coordinate_system hand").unwrap();
+
+        assert_eq!(
+            program.commands[0].node,
+            Command::Render(RenderCommand::SaveCoordSystem("hand".to_string()))
+        );
     }
 
     #[test]
@@ -1162,8 +1300,10 @@ mod tests {
         assert_eq!(
             program.commands[0].node,
             Command::Render(RenderCommand::Light {
+                name: None,
                 color: Vec3::new(255.0, 128.0, 0.0),
                 position: Vec3::new(1.0, 2.0, 3.0),
+                knob: None,
             })
         );
         assert_eq!(
@@ -1183,8 +1323,35 @@ mod tests {
         assert_eq!(
             program.commands[0].node,
             Command::Render(RenderCommand::Light {
+                name: Some("key".to_string()),
                 color: Vec3::new(4.0, 5.0, 6.0),
                 position: Vec3::new(1.0, 2.0, 3.0),
+                knob: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_light_position_knobs() {
+        let unnamed = parse_script("light 255 128 0 1 2 3 glow").unwrap();
+        let named = parse_script("light key 1 2 3 glow 255 128 0").unwrap();
+
+        assert_eq!(
+            unnamed.commands[0].node,
+            Command::Render(RenderCommand::Light {
+                name: None,
+                color: Vec3::new(255.0, 128.0, 0.0),
+                position: Vec3::new(1.0, 2.0, 3.0),
+                knob: Some("glow".to_string()),
+            })
+        );
+        assert_eq!(
+            named.commands[0].node,
+            Command::Render(RenderCommand::Light {
+                name: Some("key".to_string()),
+                color: Vec3::new(255.0, 128.0, 0.0),
+                position: Vec3::new(1.0, 2.0, 3.0),
+                knob: Some("glow".to_string()),
             })
         );
     }
@@ -1196,8 +1363,10 @@ mod tests {
         assert_eq!(
             program.commands[0].node,
             Command::Render(RenderCommand::Light {
+                name: None,
                 color: Vec3::new(255.0, 255.0, 255.0),
                 position: Vec3::new(0.0, 0.0, 0.0),
+                knob: None,
             })
         );
     }
@@ -1217,7 +1386,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_11_anim_texture_opcode_as_unsupported_shape() {
+    fn parses_saveknobs_alias() {
+        let program = parse_script("saveknobs start").unwrap();
+
+        assert_eq!(
+            program.commands[0].node,
+            Command::Animation(AnimationCommand::SaveKnobs("start".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_11_anim_texture_opcode() {
         let program = parse_script("texture tex.ppm 0 0 0 1 0 0 1 1 0 0 1 0\nweb").unwrap();
 
         assert_eq!(
@@ -1269,8 +1448,10 @@ mod tests {
         assert_eq!(
             program.commands[0].node,
             Command::Render(RenderCommand::Light {
+                name: None,
                 color: Vec3::new(255.0, 255.0, 255.0),
                 position: Vec3::new(0.0, 0.0, 0.0),
+                knob: None,
             })
         );
     }

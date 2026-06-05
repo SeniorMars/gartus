@@ -5,6 +5,7 @@ mod mesh;
 
 pub use image::ppmify;
 pub use mesh::{
-    MaterialMesh, MaterialMeshGroup, MeshError, MeshMaterial, MeshStats, MeshUpAxis, add_mesh,
-    meshify, meshify_with_materials, normalize_mesh_transform,
+    MaterialMesh, MaterialMeshGroup, MeshError, MeshMaterial, MeshStats, MeshUpAxis,
+    TexturedMeshTriangle, TexturedMeshVertex, add_mesh, meshify, meshify_with_materials,
+    normalize_material_mesh_transform, normalize_mesh_transform,
 };

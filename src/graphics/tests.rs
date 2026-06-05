@@ -4,8 +4,9 @@ use super::{
     animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
     colors::Rgb,
     display::{Canvas, PolygonColorMode, ShadingMode},
-    draw::{triangle_color, vertex_normal, vertex_normals},
+    draw::{TexturedVertex, triangle_color, vertex_normal, vertex_normals},
     lighting::Lighting,
+    texture::Texture,
 };
 use crate::gmath::{
     edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix, vector::Vector,
@@ -529,6 +530,66 @@ fn draw_lines_no_longer_saves_animation_frames() {
     canvas.try_draw_lines(&edges);
 
     assert!(!std::path::Path::new(&format!("anim/{prefix}00000000.ppm")).exists());
+}
+
+#[test]
+fn draw_textured_quad_samples_texture_colors() {
+    let texture = Texture::from_canvas(Canvas::from_pixels(
+        2,
+        2,
+        vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
+    ));
+    let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
+    canvas.wrapped = false;
+
+    canvas.draw_textured_quad(
+        &texture,
+        [
+            (0.0, 0.0, 0.0),
+            (3.0, 0.0, 0.0),
+            (3.0, 3.0, 0.0),
+            (0.0, 3.0, 0.0),
+        ],
+    );
+
+    assert!(canvas.pixels().contains(&Rgb::BLUE));
+    assert!(canvas.pixels().contains(&Rgb::GREEN));
+}
+
+#[test]
+fn draw_textured_triangle_culls_reversed_winding() {
+    let texture = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::WHITE]));
+    let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
+
+    canvas.draw_textured_triangle(
+        &texture,
+        [
+            TexturedVertex::new(0.0, 0.0, 0.0, 0.0, 0.0),
+            TexturedVertex::new(0.0, 3.0, 0.0, 0.0, 1.0),
+            TexturedVertex::new(3.0, 0.0, 0.0, 1.0, 0.0),
+        ],
+    );
+
+    assert!(canvas.pixels().iter().all(|pixel| *pixel == Rgb::BLACK));
+}
+
+#[test]
+fn draw_textured_triangle_modulates_sampled_color() {
+    let texture = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::new(200, 100, 50)]));
+    let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
+    canvas.wrapped = false;
+
+    canvas.draw_textured_triangle_modulated(
+        &texture,
+        [
+            TexturedVertex::new(0.0, 0.0, 0.0, 0.0, 0.0),
+            TexturedVertex::new(3.0, 0.0, 0.0, 1.0, 0.0),
+            TexturedVertex::new(0.0, 3.0, 0.0, 0.0, 1.0),
+        ],
+        Rgb::new(128, 255, 64),
+    );
+
+    assert!(canvas.pixels().contains(&Rgb::new(100, 100, 13)));
 }
 
 #[test]

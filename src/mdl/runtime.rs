@@ -1,6 +1,7 @@
 //! Runtime state for executing parsed MDL commands.
 
 use super::{
+    animation::KnobMap,
     ast::{Material, Vec3},
     executor::ExecutionError,
 };
@@ -149,10 +150,12 @@ pub struct Camera {
 pub enum Symbol {
     /// Numeric knob value.
     Knob(f64),
-    /// Saved knob-list marker.
-    KnobList,
+    /// Saved knob-list values.
+    KnobList(KnobMap),
     /// Material constants.
     Constants(MaterialConstants),
+    /// Named point light.
+    Light(Light),
     /// Saved coordinate-system matrix.
     CoordSystem(Matrix),
 }
@@ -403,7 +406,25 @@ impl Runtime {
     }
 
     pub(crate) fn save_knobs(&mut self, name: String) {
-        self.scene.symbols.insert(name, Symbol::KnobList);
+        let mut knobs = self
+            .scene
+            .symbols
+            .iter()
+            .filter_map(|(name, symbol)| match symbol {
+                Symbol::Knob(value) => Some((name.clone(), *value)),
+                Symbol::KnobList(_)
+                | Symbol::Constants(_)
+                | Symbol::Light(_)
+                | Symbol::CoordSystem(_) => None,
+            })
+            .collect::<KnobMap>();
+        knobs.extend(
+            self.scene
+                .frame_knobs
+                .iter()
+                .map(|(name, value)| (name.clone(), *value)),
+        );
+        self.scene.symbols.insert(name, Symbol::KnobList(knobs));
     }
 
     pub(crate) fn save_coord_system(&mut self, name: String) {
@@ -424,7 +445,7 @@ impl Runtime {
         self.canvas.lighting_mut().ambient = rgb_from_vec3(color);
     }
 
-    pub(crate) fn add_light(&mut self, light: Light) {
+    pub(crate) fn add_light(&mut self, name: Option<String>, light: Light) {
         let first_user_light = self.scene.lights.is_empty();
         let point_light = PointLight::positional(
             crate::gmath::vector::Vector::new(light.position.x, light.position.y, light.position.z),
@@ -436,6 +457,9 @@ impl Runtime {
             lighting.point_lights.clear();
         }
         lighting.point_lights.push(point_light);
+        if let Some(name) = name {
+            self.scene.symbols.insert(name, Symbol::Light(light));
+        }
         self.scene.lights.push(light);
     }
 

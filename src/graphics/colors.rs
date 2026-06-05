@@ -16,6 +16,12 @@ pub struct Rgb {
     pub blue: u8,
 }
 
+/// A sorted list of color stops that can be sampled with linear interpolation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorRamp {
+    stops: Vec<(f64, Rgb)>,
+}
+
 impl Rgb {
     /// A black Pixel
     pub const BLACK: Rgb = Rgb {
@@ -175,6 +181,67 @@ impl Rgb {
                 + f64::from(i32::from(other.blue) - i32::from(self.blue)) * t)
                 .round() as u8,
         }
+    }
+
+    /// Multiplies each channel by `factor`, clamping the result to `0..=255`.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn scale(self, factor: f64) -> Self {
+        let scale_channel =
+            |channel: u8| (f64::from(channel) * factor).round().clamp(0.0, 255.0) as u8;
+        Self::new(
+            scale_channel(self.red),
+            scale_channel(self.green),
+            scale_channel(self.blue),
+        )
+    }
+}
+
+impl ColorRamp {
+    /// Creates a color ramp from `(position, color)` stops.
+    ///
+    /// Stop positions are sorted ascending. Sampling before the first stop returns the first
+    /// color, and sampling after the last stop returns the last color.
+    ///
+    /// # Panics
+    /// Panics if no stops are supplied or any stop position is non-finite.
+    #[must_use]
+    pub fn new(mut stops: Vec<(f64, Rgb)>) -> Self {
+        assert!(!stops.is_empty(), "color ramp must have at least one stop");
+        assert!(
+            stops.iter().all(|(position, _)| position.is_finite()),
+            "color ramp stop positions must be finite"
+        );
+        stops.sort_by(|(a, _), (b, _)| a.partial_cmp(b).expect("positions should be finite"));
+        Self { stops }
+    }
+
+    /// Samples the ramp at `position`.
+    #[must_use]
+    pub fn sample(&self, position: f64) -> Rgb {
+        if position <= self.stops[0].0 {
+            return self.stops[0].1;
+        }
+        for window in self.stops.windows(2) {
+            let (low_position, low_color) = window[0];
+            let (high_position, high_color) = window[1];
+            if position <= high_position {
+                let span = high_position - low_position;
+                let t = if span.abs() <= f64::EPSILON {
+                    0.0
+                } else {
+                    (position - low_position) / span
+                };
+                return low_color.lerp(high_color, t);
+            }
+        }
+        self.stops[self.stops.len() - 1].1
+    }
+
+    /// Returns the sorted color stops.
+    #[must_use]
+    pub fn stops(&self) -> &[(f64, Rgb)] {
+        &self.stops
     }
 }
 
@@ -626,5 +693,19 @@ mod test {
         let purple = red.lerp(blue, 0.5);
         assert_eq!(purple.red, 128);
         assert_eq!(purple.blue, 128);
+    }
+
+    #[test]
+    fn scale_clamps_channels() {
+        assert_eq!(Rgb::new(100, 120, 140).scale(2.0), Rgb::new(200, 240, 255));
+    }
+
+    #[test]
+    fn color_ramp_sorts_and_samples_stops() {
+        let ramp = ColorRamp::new(vec![(1.0, Rgb::WHITE), (0.0, Rgb::BLACK)]);
+
+        assert_eq!(ramp.sample(-1.0), Rgb::BLACK);
+        assert_eq!(ramp.sample(0.5), Rgb::new(128, 128, 128));
+        assert_eq!(ramp.sample(2.0), Rgb::WHITE);
     }
 }

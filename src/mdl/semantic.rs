@@ -2,7 +2,10 @@
 
 use super::{
     animation::{AnimationPlan, KnobMap},
-    ast::{AnimationCommand, Command, ControlCommand, Program, RenderCommand, Spanned},
+    ast::{
+        AnimationCommand, Command, ControlCommand, Program, RenderCommand, Spanned,
+        VaryInterpolation,
+    },
     diagnostic::Diagnostic,
     lexer::Span,
 };
@@ -44,6 +47,7 @@ struct VarySpec {
     end_frame: usize,
     start_val: f64,
     end_val: f64,
+    interpolation: VaryInterpolation,
     location: SourceLocation,
 }
 
@@ -78,6 +82,7 @@ enum SemanticSymbol {
     Knob(f64),
     KnobList(KnobMap),
     Constants,
+    Light,
     CoordSystem,
 }
 
@@ -177,12 +182,33 @@ pub fn compile(program: Program) -> Result<CompiledProgram, Vec<Diagnostic>> {
                     source_name,
                 });
             }
+            Command::Render(RenderCommand::Light {
+                name,
+                color,
+                position,
+                knob,
+            }) => {
+                if let Some(name) = &name {
+                    symbols.insert(name.clone(), SemanticSymbol::Light);
+                }
+                runtime_commands.push(Spanned {
+                    node: Command::Render(RenderCommand::Light {
+                        name,
+                        color,
+                        position,
+                        knob,
+                    }),
+                    span,
+                    source_name,
+                });
+            }
             Command::Animation(AnimationCommand::Vary {
                 knob,
                 start_frame,
                 end_frame,
                 start_val,
                 end_val,
+                interpolation,
             }) => {
                 animation_range_location.get_or_insert_with(|| location.clone());
                 animation_ops.push(AnimationOp::Vary(VarySpec {
@@ -191,6 +217,7 @@ pub fn compile(program: Program) -> Result<CompiledProgram, Vec<Diagnostic>> {
                     end_frame,
                     start_val,
                     end_val,
+                    interpolation,
                     location,
                 }));
             }
@@ -332,6 +359,7 @@ fn current_knobs(symbols: &HashMap<String, SemanticSymbol>) -> KnobMap {
             SemanticSymbol::Knob(value) => Some((name.clone(), *value)),
             SemanticSymbol::KnobList(_)
             | SemanticSymbol::Constants
+            | SemanticSymbol::Light
             | SemanticSymbol::CoordSystem => None,
         })
         .collect()
@@ -340,7 +368,12 @@ fn current_knobs(symbols: &HashMap<String, SemanticSymbol>) -> KnobMap {
 fn lookup_knob_list(symbols: &HashMap<String, SemanticSymbol>, name: &str) -> Option<KnobMap> {
     match symbols.get(name) {
         Some(SemanticSymbol::KnobList(knobs)) => Some(knobs.clone()),
-        Some(SemanticSymbol::Knob(_) | SemanticSymbol::Constants | SemanticSymbol::CoordSystem)
+        Some(
+            SemanticSymbol::Knob(_)
+            | SemanticSymbol::Constants
+            | SemanticSymbol::Light
+            | SemanticSymbol::CoordSystem,
+        )
         | None => None,
     }
 }
@@ -352,7 +385,21 @@ fn apply_vary(frame_knobs: &mut [KnobMap], vary: &VarySpec) {
     {
         let frame = vary.start_frame + offset;
         let t = interpolation_t(frame, vary.start_frame, vary.end_frame);
+        let t = apply_vary_interpolation(t, vary.interpolation);
         knobs.insert(vary.knob.clone(), lerp(vary.start_val, vary.end_val, t));
+    }
+}
+
+fn apply_vary_interpolation(t: f64, interpolation: VaryInterpolation) -> f64 {
+    match interpolation {
+        VaryInterpolation::Linear => t,
+        VaryInterpolation::Exponential => {
+            let curve = 4.0_f64;
+            ((curve * t).exp() - 1.0) / (curve.exp() - 1.0)
+        }
+        VaryInterpolation::Logarithmic => (1.0 + 9.0 * t).ln() / 10.0_f64.ln(),
+        VaryInterpolation::Smoothstep => t * t * (3.0 - 2.0 * t),
+        VaryInterpolation::Power(exponent) => t.powf(exponent),
     }
 }
 
@@ -468,6 +515,22 @@ mod tests {
     }
 
     #[test]
+    fn compile_applies_vary_interpolation_modes() {
+        let program = parse_script(
+            "frames 11\nvary exp 0 10 0 1 exponential\nvary log 0 10 0 1 logarithmic\nvary pow 0 10 0 1 power 3",
+        )
+        .unwrap();
+        let compiled = compile(program).unwrap();
+
+        let midpoint = &compiled.animation().frame_knobs()[5];
+        assert!(midpoint["exp"] < 0.5);
+        assert!(midpoint["log"] > 0.5);
+        assert_approx_eq(midpoint["pow"], 0.125);
+        assert_approx_eq(compiled.animation().frame_knobs()[0]["exp"], 0.0);
+        assert_approx_eq(compiled.animation().frame_knobs()[10]["log"], 1.0);
+    }
+
+    #[test]
     fn vary_only_overrides_frames_inside_its_range() {
         let program = parse_script("frames 4\nset k 5\nvary k 1 2 0 10").unwrap();
         let compiled = compile(program).unwrap();
@@ -490,6 +553,17 @@ mod tests {
         assert_approx_eq(compiled.animation().frame_knobs()[1]["spin"], 45.0);
         assert_approx_eq(compiled.animation().frame_knobs()[2]["spin"], 90.0);
         assert_approx_eq(compiled.animation().frame_knobs()[1]["grow"], 1.0);
+    }
+
+    #[test]
+    fn compile_tween_accepts_saveknobs_alias() {
+        let program =
+            parse_script("frames 2\nset spin 0\nsaveknobs start\nset spin 10\nsaveknobs end\ntween 0 1 start end")
+                .unwrap();
+        let compiled = compile(program).unwrap();
+
+        assert_approx_eq(compiled.animation().frame_knobs()[0]["spin"], 0.0);
+        assert_approx_eq(compiled.animation().frame_knobs()[1]["spin"], 10.0);
     }
 
     #[test]

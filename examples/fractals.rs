@@ -1,6 +1,6 @@
 use gartus::{
     graphics::colors::Hsl,
-    prelude::{Canvas, Rgb},
+    prelude::{Canvas, Domain2D, Rgb},
 };
 use num::complex::Complex;
 use std::{error::Error, f32::consts::PI, fs};
@@ -9,14 +9,6 @@ const WIDTH: u32 = 1000;
 const HEIGHT: u32 = 1000;
 const MAX_ITERATIONS: u16 = 420;
 const BAILOUT2: f32 = 16.0;
-
-#[derive(Clone, Copy)]
-struct View {
-    x_min: f32,
-    x_max: f32,
-    y_min: f32,
-    y_max: f32,
-}
 
 #[derive(Clone, Copy)]
 struct Escape {
@@ -49,12 +41,7 @@ fn render_mandelcos() -> Canvas {
     render_escape_fractal(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -1.95,
-            x_max: 1.15,
-            y_min: -1.55,
-            y_max: 1.55,
-        },
+        Domain2D::new(-1.95, 1.15, -1.55, 1.55),
         MAX_ITERATIONS,
         |c| {
             let mut z = Complex::new(0.0, 0.0);
@@ -74,12 +61,7 @@ fn render_nfam() -> Canvas {
     render_escape_fractal(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -1.85,
-            x_max: 1.25,
-            y_min: -1.55,
-            y_max: 1.55,
-        },
+        Domain2D::new(-1.85, 1.25, -1.55, 1.55),
         MAX_ITERATIONS,
         |c| {
             let mut z = c;
@@ -103,12 +85,7 @@ fn render_mandelbrot_nebula() -> Canvas {
     render_escape_fractal(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -0.95,
-            x_max: -0.42,
-            y_min: 0.37,
-            y_max: 0.82,
-        },
+        Domain2D::new(-0.95, -0.42, 0.37, 0.82),
         900,
         |c| {
             let mut z = Complex::new(0.0, 0.0);
@@ -128,12 +105,7 @@ fn render_burning_ship_radar() -> Canvas {
     render_escape_fractal(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -1.9,
-            x_max: -1.65,
-            y_min: -0.08,
-            y_max: 0.12,
-        },
+        Domain2D::new(-1.9, -1.65, -0.08, 0.12),
         650,
         |c| {
             let mut z = Complex::new(0.0, 0.0);
@@ -154,12 +126,7 @@ fn render_julia_lantern() -> Canvas {
     render_escape_fractal(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -1.65,
-            x_max: 1.65,
-            y_min: -1.65,
-            y_max: 1.65,
-        },
+        Domain2D::new(-1.65, 1.65, -1.65, 1.65),
         520,
         |point| {
             let c = Complex::new(-0.74543, 0.11301);
@@ -182,12 +149,7 @@ fn render_domain_lattice() -> Canvas {
     render_domain(
         WIDTH,
         HEIGHT,
-        View {
-            x_min: -3.6,
-            x_max: 3.6,
-            y_min: -3.6,
-            y_max: 3.6,
-        },
+        Domain2D::new(-3.6, 3.6, -3.6, 3.6),
         |mut z| {
             for _ in 0..18 {
                 let denom = (four * z) * (z.powi(2) - unit);
@@ -204,7 +166,7 @@ fn render_domain_lattice() -> Canvas {
 fn render_escape_fractal<F, P>(
     width: u32,
     height: u32,
-    view: View,
+    view: Domain2D,
     max_iterations: u16,
     mut iterate: F,
     palette: P,
@@ -218,27 +180,14 @@ where
     })
 }
 
-fn render_domain<F>(width: u32, height: u32, view: View, mut pixel: F) -> Canvas
+fn render_domain<F>(width: u32, height: u32, view: Domain2D, mut pixel: F) -> Canvas
 where
     F: FnMut(Complex<f32>) -> Rgb,
 {
-    let width_usize = usize::try_from(width).expect("width fits in usize");
-    let height_usize = usize::try_from(height).expect("height fits in usize");
-    let mut data = Vec::with_capacity(width_usize * height_usize);
-    let scale_x = (view.x_max - view.x_min) / width as f32;
-    let scale_y = (view.y_max - view.y_min) / height as f32;
-
-    for y in 0..height {
-        let cy = view.y_max - y as f32 * scale_y;
-        for x in 0..width {
-            let cx = view.x_min + x as f32 * scale_x;
-            data.push(pixel(Complex::new(cx, cy)));
-        }
-    }
-
-    let mut canvas = Canvas::new(width, height, Rgb::BLACK);
+    let mut canvas = Canvas::from_domain(width, height, view, |x, y| {
+        pixel(Complex::new(x as f32, y as f32))
+    });
     canvas.upper_left_origin = true;
-    canvas.fill_canvas(data);
     canvas
 }
 

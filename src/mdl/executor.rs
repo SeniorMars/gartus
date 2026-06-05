@@ -18,6 +18,7 @@ use crate::{
         animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
         colors::Rgb,
         display::{PolygonColorMode, ShadingMode as CanvasShadingMode},
+        texture::Texture,
     },
 };
 use std::{
@@ -582,7 +583,9 @@ fn execute_shape_command(
     source_name: Option<&Path>,
 ) -> Result<(), ExecutionError> {
     match command {
-        ShapeCommand::Texture { .. } => Err(ExecutionError::UnsupportedCommand("texture")),
+        ShapeCommand::Texture { filename, points } => {
+            execute_texture_shape(runtime, filename, points, source_name)
+        }
         ShapeCommand::Line { constants, p0, p1 } => {
             draw_line(runtime, constants.as_deref(), p0, p1)
         }
@@ -596,6 +599,40 @@ fn execute_shape_command(
         | ShapeCommand::Cone { .. }
         | ShapeCommand::Pyramid { .. } => execute_solid_shape(runtime, command),
     }
+}
+
+#[cfg(feature = "external")]
+fn execute_texture_shape(
+    runtime: &mut Runtime,
+    filename: &str,
+    points: &[Vec3; 4],
+    source_name: Option<&Path>,
+) -> Result<(), ExecutionError> {
+    let transform = runtime.top_transform().clone();
+    let path = runtime.resolve_mesh_path(filename, source_name);
+    let canvas = crate::external::ppmify(path_to_str(&path)?, false).map_err(|error| {
+        ExecutionError::Mesh {
+            filename: path.display().to_string(),
+            error: error.to_string(),
+        }
+    })?;
+    let texture = Texture::from_canvas(canvas);
+    let points = points.map(|point| {
+        let transformed = transform.transform_homogeneous_point(&[point.x, point.y, point.z, 1.0]);
+        (transformed[0], transformed[1], transformed[2])
+    });
+    runtime.canvas_mut().draw_textured_quad(&texture, points);
+    Ok(())
+}
+
+#[cfg(not(feature = "external"))]
+fn execute_texture_shape(
+    _runtime: &mut Runtime,
+    _filename: &str,
+    _points: &[Vec3; 4],
+    _source_name: Option<&Path>,
+) -> Result<(), ExecutionError> {
+    Err(ExecutionError::UnsupportedCommand("texture"))
 }
 
 fn execute_mesh_shape(
@@ -831,10 +868,21 @@ fn execute_render_state_command(
     match command {
         RenderCommand::Color(color) => set_color(runtime, color)?,
         RenderCommand::Ambient { color } => runtime.set_ambient(*color),
-        RenderCommand::Light { color, position } => runtime.add_light(Light {
-            color: *color,
-            position: *position,
-        }),
+        RenderCommand::Light {
+            name,
+            color,
+            position,
+            knob,
+        } => {
+            let scale = runtime.knob_value(knob.as_deref())?;
+            runtime.add_light(
+                name.clone(),
+                Light {
+                    color: *color,
+                    position: Vec3::new(position.x * scale, position.y * scale, position.z * scale),
+                },
+            );
+        }
         RenderCommand::Constants {
             name,
             material,
@@ -878,6 +926,15 @@ fn execute_filter_command(
     filter: &FilterCommand,
 ) -> Result<(), ExecutionError> {
     apply_filter(runtime, &filter.name, filter.value)
+}
+
+fn path_to_str(path: &Path) -> Result<&str, ExecutionError> {
+    path.to_str().ok_or_else(|| {
+        ExecutionError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path is not valid UTF-8: {}", path.display()),
+        ))
+    })
 }
 
 fn draw_edges(
@@ -974,7 +1031,7 @@ fn draw_mesh(
 
     for group in &mesh.groups {
         let draw_material =
-            material_with_mesh_material(material, group.material, group.diffuse_color);
+            material_with_mesh_material(material, group.material.clone(), group.diffuse_color);
         let previous = runtime.apply_draw_state(draw_material);
 
         let mut polygons = group.polygons.clone();
@@ -1198,7 +1255,7 @@ mod tests {
             animation::FrameOutputConfig,
             ast::Vec3,
             parser::parse_script,
-            runtime::{RenderConfig, Runtime, Symbol},
+            runtime::{Light, RenderConfig, Runtime, Symbol},
             semantic::compile,
         },
         prelude::AnimationRenderOptions,
@@ -1306,6 +1363,29 @@ mod tests {
         assert!((frame0.top_transform().get(0, 3) - 0.0).abs() < 1e-9);
         assert!((frame1.top_transform().get(0, 3) - 5.0).abs() < 1e-9);
         assert!((frame2.top_transform().get(0, 3) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compiled_frame_uses_vary_knobs_for_light_positions() {
+        let program =
+            parse_script("frames 2\nvary lx 0 1 0 2\nlight key 10 0 0 lx 255 255 255").unwrap();
+        let compiled = compile(program).unwrap();
+
+        let frame0 = execute_compiled_frame(
+            &compiled,
+            &RenderConfig::new(10, 10).display_enabled(false),
+            0,
+        )
+        .unwrap();
+        let frame1 = execute_compiled_frame(
+            &compiled,
+            &RenderConfig::new(10, 10).display_enabled(false),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(frame0.lights()[0].position, Vec3::new(0.0, 0.0, 0.0));
+        assert_eq!(frame1.lights()[0].position, Vec3::new(20.0, 0.0, 0.0));
     }
 
     #[test]
@@ -1635,6 +1715,22 @@ mod tests {
     }
 
     #[test]
+    fn save_coordinate_system_alias_can_transform_solid_shape() {
+        let runtime =
+            execute("move 100 100 0\nsave_coordinate_system saved\nbox 0 0 0 30 30 30 saved");
+        let saved = runtime.coord_system("saved").expect("saved coord system");
+        let drawn = runtime
+            .canvas()
+            .pixels()
+            .iter()
+            .any(|pixel| *pixel != Rgb::BLACK);
+
+        assert!((saved.get(0, 3) - 100.0).abs() < 1e-9);
+        assert!((saved.get(1, 3) - 100.0).abs() < 1e-9);
+        assert!(drawn);
+    }
+
+    #[test]
     fn constants_are_stored_and_validated() {
         let runtime = execute("constants metal 1 2 3 4 5 6 7 8 9\nsphere metal 0 0 0 20");
 
@@ -1656,6 +1752,17 @@ mod tests {
     }
 
     #[test]
+    fn saveknobs_symbol_contains_current_knob_values() {
+        let runtime = execute("set spin 12\nset grow 2\nsaveknobs pose");
+
+        assert!(matches!(
+            runtime.symbol("pose"),
+            Some(Symbol::KnobList(knobs))
+                if knobs.get("spin") == Some(&12.0) && knobs.get("grow") == Some(&2.0)
+        ));
+    }
+
+    #[test]
     fn mdl_lights_accumulate_in_canvas_lighting() {
         let runtime = execute("light 255 0 0 0 0 1\nlight 0 255 0 0 1 1");
         let lighting = runtime.canvas().lighting();
@@ -1664,6 +1771,24 @@ mod tests {
         assert_eq!(lighting.point_lights.len(), 2);
         assert_eq!(lighting.point_lights[0].color, Rgb::RED);
         assert_eq!(lighting.point_lights[1].color, Rgb::GREEN);
+    }
+
+    #[test]
+    fn named_mdl_light_is_stored_as_symbol_and_used_for_lighting() {
+        let runtime = execute("light key 1 2 3 255 128 0");
+        let lighting = runtime.canvas().lighting();
+
+        assert!(matches!(
+            runtime.symbol("key"),
+            Some(Symbol::Light(Light {
+                color,
+                position,
+            })) if *color == Vec3::new(255.0, 128.0, 0.0)
+                && *position == Vec3::new(1.0, 2.0, 3.0)
+        ));
+        assert_eq!(runtime.lights().len(), 1);
+        assert_eq!(lighting.point_lights.len(), 1);
+        assert_eq!(lighting.point_lights[0].color, Rgb::new(255, 128, 0));
     }
 
     #[test]
@@ -1743,6 +1868,33 @@ mod tests {
             .iter()
             .any(|pixel| *pixel != Rgb::BLACK);
         assert!(drawn);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn texture_command_maps_image_onto_quad() {
+        let dir = std::env::temp_dir().join(format!("gartus-mdl-texture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp texture dir");
+        let texture_path = dir.join("checker.ppm");
+        std::fs::write(
+            &texture_path,
+            b"P3\n2 2\n255\n255 0 0 0 255 0 0 0 255 255 255 255\n",
+        )
+        .expect("write texture");
+        let program = parse_script("texture checker.ppm 10 10 0 60 10 0 60 60 0 10 60 0").unwrap();
+
+        let runtime = execute_program(
+            &program,
+            &RenderConfig::new_with_bg(80, 80, Rgb::WHITE, Rgb::BLACK)
+                .display_enabled(false)
+                .source_dir(&dir),
+        )
+        .unwrap();
+
+        assert!(runtime.canvas().pixels().contains(&Rgb::BLUE));
+        assert!(runtime.canvas().pixels().contains(&Rgb::GREEN));
+        let _ = std::fs::remove_file(texture_path);
+        let _ = std::fs::remove_dir(dir);
     }
 
     #[cfg(feature = "filters")]

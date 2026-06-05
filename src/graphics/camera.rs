@@ -96,6 +96,43 @@ impl Camera3D {
             depth,
         })
     }
+
+    /// Projects transformed mesh triangle edges into colored wireframe segments.
+    ///
+    /// `color_for_triangle` receives the triangle index and average projected triangle depth.
+    pub fn project_mesh_wireframe_segments<F>(
+        &self,
+        mesh: &PolygonMatrix,
+        transform: &Matrix,
+        stride: usize,
+        mut color_for_triangle: F,
+    ) -> Vec<ProjectedSegment>
+    where
+        F: FnMut(usize, f64) -> Rgb,
+    {
+        let stride = stride.max(1);
+        let mut segments = Vec::new();
+        for (idx, (p0, p1, p2)) in mesh.transformed_triangles(transform).enumerate() {
+            if idx % stride != 0 {
+                continue;
+            }
+            let Some(a) = self.project(&p0) else {
+                continue;
+            };
+            let Some(b) = self.project(&p1) else {
+                continue;
+            };
+            let Some(c) = self.project(&p2) else {
+                continue;
+            };
+            let depth = (a.depth + b.depth + c.depth) / 3.0;
+            let color = color_for_triangle(idx, depth);
+            segments.push(ProjectedSegment { a, b, color });
+            segments.push(ProjectedSegment { a: b, b: c, color });
+            segments.push(ProjectedSegment { a: c, b: a, color });
+        }
+        segments
+    }
 }
 
 impl ProjectedSegment {
@@ -182,5 +219,44 @@ impl Canvas {
             };
             self.draw_projected_segments([ab, bc, ca]);
         }
+    }
+
+    /// Projects, depth-sorts, and draws a transformed mesh as triangle wireframe segments.
+    ///
+    /// `color_for_triangle` receives the triangle index and average projected triangle depth.
+    pub fn draw_projected_mesh_wireframe_depth_sorted<F>(
+        &mut self,
+        mesh: &PolygonMatrix,
+        transform: &Matrix,
+        camera: &Camera3D,
+        stride: usize,
+        color_for_triangle: F,
+    ) where
+        F: FnMut(usize, f64) -> Rgb,
+    {
+        let mut segments =
+            camera.project_mesh_wireframe_segments(mesh, transform, stride, color_for_triangle);
+        sort_segments_back_to_front(&mut segments);
+        self.draw_projected_segments(segments);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projected_mesh_wireframe_returns_three_segments_per_visible_triangle() {
+        let mut mesh = PolygonMatrix::new();
+        mesh.add_polygon((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0));
+        let camera = Camera3D::new(100, 100);
+        let segments = camera.project_mesh_wireframe_segments(
+            &mesh,
+            &Matrix::identity_matrix(4),
+            1,
+            |_, _| Rgb::WHITE,
+        );
+
+        assert_eq!(segments.len(), 3);
     }
 }

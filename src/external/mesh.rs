@@ -3,7 +3,7 @@ use std::{
     error::Error,
     fmt,
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
 
@@ -15,9 +15,22 @@ use crate::graphics::colors::Rgb;
 
 type MeshResult<T> = Result<T, MeshError>;
 type Point3 = (f64, f64, f64);
+type TexCoord = (f64, f64);
 type Triangle = [Point3; 3];
 
 const MESH_TRIANGLE_BATCH: usize = 4096;
+
+/// One mesh vertex with an OBJ texture coordinate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TexturedMeshVertex {
+    /// Vertex position in object space.
+    pub position: (f64, f64, f64),
+    /// Normalized texture coordinate `(s, t)`.
+    pub texcoord: (f64, f64),
+}
+
+/// One textured mesh triangle.
+pub type TexturedMeshTriangle = [TexturedMeshVertex; 3];
 
 /// Summary of triangles imported from a mesh file.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +67,19 @@ impl MaterialMesh {
             .iter()
             .any(|group| group.diffuse_color.is_some())
     }
+
+    /// Returns true if at least one group has UV triangles and a diffuse texture map.
+    #[must_use]
+    pub fn has_textures(&self) -> bool {
+        self.groups.iter().any(|group| {
+            !group.textured_triangles.is_empty()
+                && group
+                    .material
+                    .as_ref()
+                    .and_then(|material| material.diffuse_texture.as_ref())
+                    .is_some()
+        })
+    }
 }
 
 /// One material-colored chunk of a mesh.
@@ -67,10 +93,12 @@ pub struct MaterialMeshGroup {
     pub diffuse_color: Option<Rgb>,
     /// Triangles assigned to this material group.
     pub polygons: PolygonMatrix,
+    /// Triangles with per-vertex texture coordinates assigned to this material group.
+    pub textured_triangles: Vec<TexturedMeshTriangle>,
 }
 
 /// Material coefficients parsed from an MTL file.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeshMaterial {
     /// Ambient `Ka` coefficients.
     pub ambient: Option<[f64; 3]>,
@@ -78,10 +106,12 @@ pub struct MeshMaterial {
     pub diffuse: Option<[f64; 3]>,
     /// Specular `Ks` coefficients.
     pub specular: Option<[f64; 3]>,
+    /// Diffuse texture map from `map_Kd`, resolved relative to the MTL file.
+    pub diffuse_texture: Option<PathBuf>,
 }
 
 impl MeshMaterial {
-    fn diffuse_color(self) -> Option<Rgb> {
+    fn diffuse_color(&self) -> Option<Rgb> {
         self.diffuse.map(rgb_from_unit_color)
     }
 }
@@ -122,6 +152,27 @@ pub fn normalize_mesh_transform(
     source_up_axis: MeshUpAxis,
 ) -> Matrix {
     let bounds = mesh.bounds().expect("mesh should have bounds");
+    normalize_bounds_transform(bounds, target_size, source_up_axis)
+}
+
+/// Builds a transform that centers, orients, and uniformly scales a material-grouped mesh.
+///
+/// # Panics
+/// Panics if `mesh` is empty.
+pub fn normalize_material_mesh_transform(
+    mesh: &MaterialMesh,
+    target_size: f64,
+    source_up_axis: MeshUpAxis,
+) -> Matrix {
+    let bounds = mesh.bounds.expect("mesh should have bounds");
+    normalize_bounds_transform(bounds, target_size, source_up_axis)
+}
+
+fn normalize_bounds_transform(
+    bounds: Bounds3,
+    target_size: f64,
+    source_up_axis: MeshUpAxis,
+) -> Matrix {
     let center = bounds_center(bounds);
     let span = bounds_span(bounds);
     let scale = target_size / span.max(1e-9);
@@ -179,9 +230,10 @@ impl Error for MeshError {}
 
 /// Converts an OBJ or STL mesh file into a [`PolygonMatrix`].
 ///
-/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ vertex
-/// texture coordinates, vertex normals, materials, groups, objects, and smoothing directives are
-/// ignored because Gartus renders imported meshes as wireframe triangles.
+/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ faces
+/// with three or more vertices are triangulated with a fan, so quadrilateral faces are accepted.
+/// OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and smoothing
+/// directives are ignored because Gartus renders imported meshes as wireframe triangles.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -197,8 +249,9 @@ pub fn meshify(file_name: &str) -> MeshResult<PolygonMatrix> {
 
 /// Converts an OBJ or STL mesh file into material-grouped triangles.
 ///
-/// OBJ `mtllib`, `usemtl`, and MTL `Kd` diffuse colors are preserved. STL files are returned as a
-/// single uncolored group.
+/// OBJ `mtllib`, `usemtl`, and MTL `Kd` diffuse colors are preserved. OBJ faces with three or more
+/// vertices are triangulated with a fan, so quadrilateral faces are accepted. STL files are returned
+/// as a single uncolored group.
 ///
 /// # Errors
 /// Returns an error if the mesh cannot be read, has an unsupported extension, or contains malformed
@@ -226,6 +279,7 @@ pub fn meshify_with_materials(file_name: &str) -> MeshResult<MaterialMesh> {
                     material: None,
                     diffuse_color: None,
                     polygons,
+                    textured_triangles: Vec::new(),
                 }],
                 bounds,
             })
@@ -254,9 +308,10 @@ fn bounds_span(bounds: Bounds3) -> f64 {
 
 /// Appends an OBJ or STL mesh file to an existing [`PolygonMatrix`].
 ///
-/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ vertex
-/// texture coordinates, vertex normals, materials, groups, objects, and smoothing directives are
-/// ignored because Gartus renders imported meshes as wireframe triangles.
+/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ faces
+/// with three or more vertices are triangulated with a fan, so quadrilateral faces are accepted.
+/// OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and smoothing
+/// directives are ignored because Gartus renders imported meshes as wireframe triangles.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -286,11 +341,13 @@ pub fn add_mesh(file_name: &str, polygons: &mut PolygonMatrix) -> MeshResult<Mes
                 .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
             parse_obj(BufReader::new(file), path, polygons)
         }
-        "stl" if is_binary_stl(path)? => parse_binary_stl(path, polygons),
         "stl" => {
-            let file = File::open(path)
-                .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
-            parse_stl(BufReader::new(file), path, polygons)
+            let (file, is_binary) = open_stl_file(path)?;
+            if is_binary {
+                parse_binary_stl(file, path, polygons)
+            } else {
+                parse_stl(BufReader::new(file), path, polygons)
+            }
         }
         _ => Err(MeshError::at_path(
             path,
@@ -313,14 +370,10 @@ fn parse_obj<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix)
     let mut vertices = Vec::new();
     let mut triangle_batch = Vec::with_capacity(MESH_TRIANGLE_BATCH);
 
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let line = line.map_err(|err| {
-            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
-        })?;
-        let line = strip_obj_comment(&line).trim();
+    for_each_text_line(reader, source, |line_num, line| {
+        let line = strip_obj_comment(line).trim();
         if line.is_empty() || line.starts_with('#') {
-            continue;
+            return Ok(());
         }
 
         let mut parts = line.split_whitespace();
@@ -344,28 +397,38 @@ fn parse_obj<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix)
                 vertices.push((x / w, y / w, z / w));
             }
             Some("f") => {
-                let face = parts
-                    .map(|part| parse_obj_vertex_index(part, vertices.len(), source, line_num))
-                    .collect::<MeshResult<Vec<_>>>()?;
-                if face.len() < 3 {
-                    return Err(MeshError::at_line(
-                        source,
-                        line_num,
-                        "OBJ face has fewer than 3 vertices",
-                    ));
-                }
-
-                let first = vertices[face[0]];
-                for indices in face[1..].windows(2) {
-                    triangle_batch.push([first, vertices[indices[0]], vertices[indices[1]]]);
+                triangulate_obj_face(parts, &vertices, source, line_num, |triangle| {
+                    triangle_batch.push(triangle);
                     flush_triangle_batch(polygons, &mut triangle_batch);
-                }
+                })?;
             }
             _ => {}
         }
-    }
+        Ok(())
+    })?;
 
     polygons.push_polygons(triangle_batch.as_slice());
+    Ok(())
+}
+
+fn for_each_text_line<R, F>(mut reader: R, source: &Path, mut visit: F) -> MeshResult<()>
+where
+    R: BufRead,
+    F: FnMut(usize, &str) -> MeshResult<()>,
+{
+    let mut line = String::new();
+    let mut line_num = 0;
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line).map_err(|err| {
+            MeshError::at_line(source, line_num + 1, format!("could not read line: {err}"))
+        })?;
+        if bytes_read == 0 {
+            break;
+        }
+        line_num += 1;
+        visit(line_num, &line)?;
+    }
     Ok(())
 }
 
@@ -374,6 +437,7 @@ struct MaterialGroupBuilder {
     material_name: Option<String>,
     polygons: PolygonMatrix,
     triangle_batch: Vec<Triangle>,
+    textured_triangles: Vec<TexturedMeshTriangle>,
 }
 
 impl MaterialGroupBuilder {
@@ -382,6 +446,7 @@ impl MaterialGroupBuilder {
             material_name,
             polygons: PolygonMatrix::new(),
             triangle_batch: Vec::with_capacity(MESH_TRIANGLE_BATCH),
+            textured_triangles: Vec::new(),
         }
     }
 
@@ -389,8 +454,15 @@ impl MaterialGroupBuilder {
         self.polygons.cols() == 0 && self.triangle_batch.is_empty()
     }
 
-    fn push_triangle(&mut self, triangle: Triangle) {
+    fn push_triangle(
+        &mut self,
+        triangle: Triangle,
+        textured_triangle: Option<TexturedMeshTriangle>,
+    ) {
         self.triangle_batch.push(triangle);
+        if let Some(textured_triangle) = textured_triangle {
+            self.textured_triangles.push(textured_triangle);
+        }
         if self.triangle_batch.len() >= MESH_TRIANGLE_BATCH {
             self.flush();
         }
@@ -406,31 +478,29 @@ impl MaterialGroupBuilder {
         let material = self
             .material_name
             .as_ref()
-            .and_then(|name| materials.get(name).copied());
-        let diffuse_color = material.and_then(MeshMaterial::diffuse_color);
+            .and_then(|name| materials.get(name).cloned());
+        let diffuse_color = material.as_ref().and_then(MeshMaterial::diffuse_color);
         MaterialMeshGroup {
             material_name: self.material_name,
             material,
             diffuse_color,
             polygons: self.polygons,
+            textured_triangles: self.textured_triangles,
         }
     }
 }
 
 fn parse_obj_with_materials<R: BufRead>(reader: R, source: &Path) -> MeshResult<MaterialMesh> {
     let mut vertices = Vec::new();
+    let mut texcoords = Vec::new();
     let mut materials = HashMap::new();
     let mut groups = Vec::new();
     let mut current_group = MaterialGroupBuilder::new(None);
 
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let line = line.map_err(|err| {
-            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
-        })?;
-        let line = strip_obj_comment(&line).trim();
+    for_each_text_line(reader, source, |line_num, line| {
+        let line = strip_obj_comment(line).trim();
         if line.is_empty() {
-            continue;
+            return Ok(());
         }
 
         let mut parts = line.split_whitespace();
@@ -452,10 +522,11 @@ fn parse_obj_with_materials<R: BufRead>(reader: R, source: &Path) -> MeshResult<
                         "missing OBJ material name",
                     ));
                 }
-                if !current_group.is_empty() {
-                    groups.push(current_group.finish(&materials));
+                let finished_group =
+                    std::mem::replace(&mut current_group, MaterialGroupBuilder::new(Some(name)));
+                if !finished_group.is_empty() {
+                    groups.push(finished_group.finish(&materials));
                 }
-                current_group = MaterialGroupBuilder::new(Some(name));
             }
             Some("v") => {
                 let x = parse_f64_arg(parts.next(), source, line_num, "x")?;
@@ -475,30 +546,34 @@ fn parse_obj_with_materials<R: BufRead>(reader: R, source: &Path) -> MeshResult<
                 }
                 vertices.push((x / w, y / w, z / w));
             }
+            Some("vt") => {
+                let s = parse_f64_arg(parts.next(), source, line_num, "texture s")?;
+                let t = parts
+                    .next()
+                    .map(|token| parse_f64_arg(Some(token), source, line_num, "texture t"))
+                    .transpose()?
+                    .unwrap_or(0.0);
+                if let Some(token) = parts.next() {
+                    let _ = parse_f64_arg(Some(token), source, line_num, "texture w")?;
+                }
+                texcoords.push((s, t));
+            }
             Some("f") => {
-                let face = parts
-                    .map(|part| parse_obj_vertex_index(part, vertices.len(), source, line_num))
-                    .collect::<MeshResult<Vec<_>>>()?;
-                if face.len() < 3 {
-                    return Err(MeshError::at_line(
-                        source,
-                        line_num,
-                        "OBJ face has fewer than 3 vertices",
-                    ));
-                }
-
-                let first = vertices[face[0]];
-                for indices in face[1..].windows(2) {
-                    current_group.push_triangle([
-                        first,
-                        vertices[indices[0]],
-                        vertices[indices[1]],
-                    ]);
-                }
+                triangulate_obj_face_with_texcoords(
+                    parts,
+                    &vertices,
+                    &texcoords,
+                    source,
+                    line_num,
+                    |triangle, textured_triangle| {
+                        current_group.push_triangle(triangle, textured_triangle);
+                    },
+                )?;
             }
             _ => {}
         }
-    }
+        Ok(())
+    })?;
 
     if !current_group.is_empty() {
         groups.push(current_group.finish(&materials));
@@ -544,14 +619,10 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
     let mut materials = HashMap::new();
     let mut current_material = None::<String>;
 
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let line = line.map_err(|err| {
-            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
-        })?;
-        let line = strip_obj_comment(&line).trim();
+    for_each_text_line(reader, source, |line_num, line| {
+        let line = strip_obj_comment(line).trim();
         if line.is_empty() {
-            continue;
+            return Ok(());
         }
 
         let mut parts = line.split_whitespace();
@@ -591,9 +662,26 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                         .specular = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
+            Some("map_Kd") => {
+                if let Some(name) = current_material.as_ref() {
+                    let filename = parts.collect::<Vec<_>>().join(" ");
+                    if filename.is_empty() {
+                        return Err(MeshError::at_line(
+                            source,
+                            line_num,
+                            "missing diffuse texture filename",
+                        ));
+                    }
+                    materials
+                        .entry(name.clone())
+                        .or_insert(empty_mesh_material())
+                        .diffuse_texture = Some(resolve_sibling_path(source, &filename));
+                }
+            }
             _ => {}
         }
-    }
+        Ok(())
+    })?;
 
     Ok(materials)
 }
@@ -603,6 +691,7 @@ fn empty_mesh_material() -> MeshMaterial {
         ambient: None,
         diffuse: None,
         specular: None,
+        diffuse_texture: None,
     }
 }
 
@@ -632,6 +721,49 @@ fn strip_obj_comment(line: &str) -> &str {
         .map_or(line, |(before_comment, _comment)| before_comment)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ObjFaceRef {
+    vertex: usize,
+    texcoord: Option<usize>,
+}
+
+fn parse_obj_index(
+    raw: &str,
+    count: usize,
+    source: &Path,
+    line_num: usize,
+    label: &str,
+) -> MeshResult<usize> {
+    let index = raw.parse::<i64>().map_err(|_| {
+        MeshError::at_line(
+            source,
+            line_num,
+            format!("OBJ {label} index is not an integer"),
+        )
+    })?;
+
+    if index == 0 {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            format!("OBJ {label} index cannot be zero"),
+        ));
+    }
+
+    let count = i64::try_from(count).map_err(|_| MeshError::new("OBJ has too many elements"))?;
+    let resolved = if index > 0 { index - 1 } else { count + index };
+
+    if !(0..count).contains(&resolved) {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            format!("OBJ {label} index is out of bounds"),
+        ));
+    }
+
+    usize::try_from(resolved).map_err(|_| MeshError::new("OBJ face index overflowed usize"))
+}
+
 fn parse_obj_vertex_index(
     token: &str,
     vertex_count: usize,
@@ -645,38 +777,201 @@ fn parse_obj_vertex_index(
         .ok_or_else(|| {
             MeshError::at_line(source, line_num, "OBJ face index is missing a vertex")
         })?;
-    let index = raw
-        .parse::<i64>()
-        .map_err(|_| MeshError::at_line(source, line_num, "OBJ face index is not an integer"))?;
-
-    if index == 0 {
-        return Err(MeshError::at_line(
-            source,
-            line_num,
-            "OBJ face index cannot be zero",
-        ));
-    }
-
-    let vertex_count =
-        i64::try_from(vertex_count).map_err(|_| MeshError::new("OBJ has too many vertices"))?;
-    let resolved = if index > 0 {
-        index - 1
-    } else {
-        vertex_count + index
-    };
-
-    if !(0..vertex_count).contains(&resolved) {
-        return Err(MeshError::at_line(
-            source,
-            line_num,
-            "OBJ face index is out of bounds",
-        ));
-    }
-
-    usize::try_from(resolved).map_err(|_| MeshError::new("OBJ face index overflowed usize"))
+    parse_obj_index(raw, vertex_count, source, line_num, "face")
 }
 
-fn is_binary_stl(path: &Path) -> MeshResult<bool> {
+fn parse_obj_face_ref(
+    token: &str,
+    vertex_count: usize,
+    texcoord_count: usize,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<ObjFaceRef> {
+    let mut parts = token.split('/');
+    let vertex_raw = parts
+        .next()
+        .filter(|part| !part.is_empty())
+        .ok_or_else(|| {
+            MeshError::at_line(source, line_num, "OBJ face index is missing a vertex")
+        })?;
+    let texcoord_raw = parts.next().filter(|part| !part.is_empty());
+
+    Ok(ObjFaceRef {
+        vertex: parse_obj_index(vertex_raw, vertex_count, source, line_num, "face")?,
+        texcoord: texcoord_raw
+            .map(|raw| parse_obj_index(raw, texcoord_count, source, line_num, "texture"))
+            .transpose()?,
+    })
+}
+
+fn triangulate_obj_face<'a, I, F>(
+    mut parts: I,
+    vertices: &[Point3],
+    source: &Path,
+    line_num: usize,
+    mut push_triangle: F,
+) -> MeshResult<()>
+where
+    I: Iterator<Item = &'a str>,
+    F: FnMut(Triangle),
+{
+    let Some(first_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+    let Some(second_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+    let Some(third_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+
+    let first = parse_obj_vertex_index(first_token, vertices.len(), source, line_num)?;
+    let mut previous = parse_obj_vertex_index(second_token, vertices.len(), source, line_num)?;
+    let mut current = parse_obj_vertex_index(third_token, vertices.len(), source, line_num)?;
+
+    push_triangle([vertices[first], vertices[previous], vertices[current]]);
+    previous = current;
+
+    for token in parts {
+        current = parse_obj_vertex_index(token, vertices.len(), source, line_num)?;
+        push_triangle([vertices[first], vertices[previous], vertices[current]]);
+        previous = current;
+    }
+
+    Ok(())
+}
+
+fn triangulate_obj_face_with_texcoords<'a, I, F>(
+    mut parts: I,
+    vertices: &[Point3],
+    texcoords: &[TexCoord],
+    source: &Path,
+    line_num: usize,
+    mut push_triangle: F,
+) -> MeshResult<()>
+where
+    I: Iterator<Item = &'a str>,
+    F: FnMut(Triangle, Option<TexturedMeshTriangle>),
+{
+    let Some(first_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+    let Some(second_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+    let Some(third_token) = parts.next() else {
+        return Err(MeshError::at_line(
+            source,
+            line_num,
+            "OBJ face has fewer than 3 vertices",
+        ));
+    };
+
+    let first = parse_obj_face_ref(
+        first_token,
+        vertices.len(),
+        texcoords.len(),
+        source,
+        line_num,
+    )?;
+    let mut previous = parse_obj_face_ref(
+        second_token,
+        vertices.len(),
+        texcoords.len(),
+        source,
+        line_num,
+    )?;
+    let mut current = parse_obj_face_ref(
+        third_token,
+        vertices.len(),
+        texcoords.len(),
+        source,
+        line_num,
+    )?;
+
+    push_obj_ref_triangle(
+        first,
+        previous,
+        current,
+        vertices,
+        texcoords,
+        &mut push_triangle,
+    );
+    previous = current;
+
+    for token in parts {
+        current = parse_obj_face_ref(token, vertices.len(), texcoords.len(), source, line_num)?;
+        push_obj_ref_triangle(
+            first,
+            previous,
+            current,
+            vertices,
+            texcoords,
+            &mut push_triangle,
+        );
+        previous = current;
+    }
+
+    Ok(())
+}
+
+fn push_obj_ref_triangle<F>(
+    first: ObjFaceRef,
+    second: ObjFaceRef,
+    third: ObjFaceRef,
+    vertices: &[Point3],
+    texcoords: &[TexCoord],
+    push_triangle: &mut F,
+) where
+    F: FnMut(Triangle, Option<TexturedMeshTriangle>),
+{
+    let triangle = [
+        vertices[first.vertex],
+        vertices[second.vertex],
+        vertices[third.vertex],
+    ];
+    let textured_triangle = match (first.texcoord, second.texcoord, third.texcoord) {
+        (Some(first_texcoord), Some(second_texcoord), Some(third_texcoord)) => Some([
+            TexturedMeshVertex {
+                position: vertices[first.vertex],
+                texcoord: texcoords[first_texcoord],
+            },
+            TexturedMeshVertex {
+                position: vertices[second.vertex],
+                texcoord: texcoords[second_texcoord],
+            },
+            TexturedMeshVertex {
+                position: vertices[third.vertex],
+                texcoord: texcoords[third_texcoord],
+            },
+        ]),
+        _ => None,
+    };
+
+    push_triangle(triangle, textured_triangle);
+}
+
+fn open_stl_file(path: &Path) -> MeshResult<(File, bool)> {
     let mut file = File::open(path)
         .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
     let metadata = file
@@ -687,34 +982,39 @@ fn is_binary_stl(path: &Path) -> MeshResult<bool> {
         .read(&mut header)
         .map_err(|err| MeshError::at_path(path, format!("could not read STL header: {err}")))?;
 
+    let is_binary = classify_stl_header(&header, bytes_read, metadata.len());
+
+    file.rewind()
+        .map_err(|err| MeshError::at_path(path, format!("could not rewind STL file: {err}")))?;
+    Ok((file, is_binary))
+}
+
+fn classify_stl_header(header: &[u8; 84], bytes_read: usize, metadata_len: u64) -> bool {
     if header[..bytes_read].contains(&0) {
-        return Ok(true);
+        return true;
     }
 
     if bytes_read == header.len() {
         let triangle_count = u32::from_le_bytes([header[80], header[81], header[82], header[83]]);
         let expected_len = 84_u64 + u64::from(triangle_count) * 50;
-        if expected_len == metadata.len() {
-            return Ok(true);
-        }
+        return expected_len == metadata_len;
     }
 
-    Ok(false)
+    false
 }
 
-fn parse_binary_stl(path: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()> {
-    let mut file = File::open(path)
-        .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+fn parse_binary_stl(file: File, path: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()> {
     let metadata = file
         .metadata()
         .map_err(|err| MeshError::at_path(path, format!("could not stat file: {err}")))?;
+    let mut reader = BufReader::new(file);
 
     let mut header = [0_u8; 80];
-    file.read_exact(&mut header).map_err(|err| {
+    reader.read_exact(&mut header).map_err(|err| {
         MeshError::at_path(path, format!("could not read binary STL header: {err}"))
     })?;
 
-    let triangle_count = read_binary_stl_u32(&mut file, path)?;
+    let triangle_count = read_binary_stl_u32(&mut reader, path)?;
     let expected_len = 84_u64 + u64::from(triangle_count) * 50;
     if metadata.len() != expected_len {
         return Err(MeshError::at_path(
@@ -728,17 +1028,17 @@ fn parse_binary_stl(path: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()>
 
     let mut triangle_batch = Vec::with_capacity(MESH_TRIANGLE_BATCH);
     for triangle_index in 0..triangle_count {
-        let _normal = read_binary_stl_point(&mut file, path, triangle_index, "normal")?;
-        let p0 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
-        let p1 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
-        let p2 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
-        let mut attribute = [0_u8; 2];
-        file.read_exact(&mut attribute).map_err(|err| {
+        let mut record = [0_u8; 50];
+        reader.read_exact(&mut record).map_err(|err| {
             MeshError::at_path(
                 path,
-                format!("could not read binary STL attribute byte count: {err}"),
+                format!("could not read binary STL triangle {triangle_index}: {err}"),
             )
         })?;
+        let _normal = read_binary_stl_record_point(&record, path, triangle_index, "normal", 0)?;
+        let p0 = read_binary_stl_record_point(&record, path, triangle_index, "vertex", 12)?;
+        let p1 = read_binary_stl_record_point(&record, path, triangle_index, "vertex", 24)?;
+        let p2 = read_binary_stl_record_point(&record, path, triangle_index, "vertex", 36)?;
 
         triangle_batch.push([p0, p1, p2]);
         flush_triangle_batch(polygons, &mut triangle_batch);
@@ -759,32 +1059,33 @@ fn read_binary_stl_u32(reader: &mut impl Read, source: &Path) -> MeshResult<u32>
     Ok(u32::from_le_bytes(bytes))
 }
 
-fn read_binary_stl_point(
-    reader: &mut impl Read,
+fn read_binary_stl_record_point(
+    record: &[u8; 50],
     source: &Path,
     triangle_index: u32,
     label: &str,
+    offset: usize,
 ) -> MeshResult<Point3> {
-    let x = read_binary_stl_f32(reader, source, triangle_index, label, "x")?;
-    let y = read_binary_stl_f32(reader, source, triangle_index, label, "y")?;
-    let z = read_binary_stl_f32(reader, source, triangle_index, label, "z")?;
+    let x = read_binary_stl_record_f32(record, source, triangle_index, label, "x", offset)?;
+    let y = read_binary_stl_record_f32(record, source, triangle_index, label, "y", offset + 4)?;
+    let z = read_binary_stl_record_f32(record, source, triangle_index, label, "z", offset + 8)?;
     Ok((f64::from(x), f64::from(y), f64::from(z)))
 }
 
-fn read_binary_stl_f32(
-    reader: &mut impl Read,
+fn read_binary_stl_record_f32(
+    record: &[u8; 50],
     source: &Path,
     triangle_index: u32,
     label: &str,
     axis: &str,
+    offset: usize,
 ) -> MeshResult<f32> {
-    let mut bytes = [0_u8; 4];
-    reader.read_exact(&mut bytes).map_err(|err| {
-        MeshError::at_path(
-            source,
-            format!("could not read binary STL triangle {triangle_index} {label} {axis}: {err}"),
-        )
-    })?;
+    let bytes = [
+        record[offset],
+        record[offset + 1],
+        record[offset + 2],
+        record[offset + 3],
+    ];
     let value = f32::from_le_bytes(bytes);
     if value.is_finite() {
         Ok(value)
@@ -800,11 +1101,7 @@ fn parse_stl<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix)
     let mut triangle = Vec::with_capacity(3);
     let mut triangle_batch = Vec::with_capacity(MESH_TRIANGLE_BATCH);
 
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let line = line.map_err(|err| {
-            MeshError::at_line(source, line_num, format!("could not read line: {err}"))
-        })?;
+    for_each_text_line(reader, source, |line_num, line| {
         let mut parts = line.split_whitespace();
         match parts.next() {
             Some(keyword) if keyword.eq_ignore_ascii_case("facet") && triangle.is_empty() => {}
@@ -842,7 +1139,8 @@ fn parse_stl<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix)
             }
             _ => {}
         }
-    }
+        Ok(())
+    })?;
 
     if !triangle.is_empty() {
         return Err(MeshError::at_path(
@@ -1142,7 +1440,7 @@ endsolid bad
 
         fs::write(
             &mtl_path,
-            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nnewmtl green\nKd 0 0.5 0\n",
+            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nmap_Kd textures/red.ppm\nnewmtl green\nKd 0 0.5 0\n",
         )
         .expect("write temp mtl");
         fs::write(
@@ -1154,10 +1452,14 @@ v 0 0 0
 v 1 0 0
 v 0 1 0
 v 1 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
 usemtl red
-f 1 2 3
+f 1/1 2/2 3/3
 usemtl green
-f 2 4 3
+f 1/1 2/2 4/4 3/3
 "
             ),
         )
@@ -1166,14 +1468,28 @@ f 2 4 3
         let mesh = meshify_with_materials(obj_path.to_str().expect("utf8 path"))
             .expect("load material mesh");
 
-        assert_eq!(mesh.triangle_count(), 2);
+        assert_eq!(mesh.triangle_count(), 3);
         assert_eq!(mesh.groups.len(), 2);
+        assert_eq!(mesh.groups[1].polygons.triangle_count(), 2);
+        assert_eq!(mesh.groups[0].textured_triangles.len(), 1);
+        assert_eq!(mesh.groups[1].textured_triangles.len(), 2);
         assert_eq!(mesh.groups[0].material_name.as_deref(), Some("red"));
         assert_eq!(mesh.groups[0].diffuse_color, Some(Rgb::RED));
-        let red_material = mesh.groups[0].material.expect("red material");
+        let red_material = mesh.groups[0].material.as_ref().expect("red material");
         assert_eq!(red_material.ambient, Some([0.1, 0.2, 0.3]));
         assert_eq!(red_material.diffuse, Some([1.0, 0.0, 0.0]));
         assert_eq!(red_material.specular, Some([0.4, 0.5, 0.6]));
+        assert_eq!(
+            red_material.diffuse_texture,
+            Some(
+                mtl_path
+                    .parent()
+                    .expect("mtl parent")
+                    .join("textures/red.ppm")
+            )
+        );
+        assert_eq!(mesh.groups[0].textured_triangles[0][2].texcoord, (1.0, 1.0));
+        assert!(mesh.has_textures());
         assert_eq!(mesh.groups[1].material_name.as_deref(), Some("green"));
         assert_eq!(mesh.groups[1].diffuse_color, Some(Rgb::new(0, 128, 0)));
         assert!(mesh.has_material_colors());
