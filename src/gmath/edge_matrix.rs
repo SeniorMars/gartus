@@ -1,8 +1,7 @@
-use super::matrix::Matrix;
 use super::parametric::Parametric;
+use super::{helpers::binom, matrix::Matrix};
 use std::f64::consts::PI;
 use std::fmt;
-use std::iter::once;
 
 /// Default curve increment matching the `10_mdl` reference parser's `step = 100`.
 pub const DEFAULT_CURVE_STEP: f64 = 0.01;
@@ -298,27 +297,14 @@ impl EdgeMatrix {
     /// See <http://en.wikipedia.org/wiki/B%C3%A9zier_curve#Polynomial_form>
     #[allow(clippy::cast_precision_loss)]
     fn generate_n_degree_bezier_polynomials_coeff(n_degree: usize, points: &[f64]) -> Vec<f64> {
-        assert!(
-            n_degree <= 170,
-            "Bezier degree {n_degree} exceeds f64 factorial precision (max 170)"
-        );
         let mut coeffs = Vec::with_capacity(n_degree + 1);
-        let dp = once(1)
-            .chain(1..=n_degree)
-            .scan(1.0, |acc, i| {
-                *acc *= i as f64;
-                Some(*acc)
-            })
-            .collect::<Vec<_>>();
         for curr_deg in 0..=n_degree {
-            let lhs = dp[n_degree] / dp[n_degree - curr_deg];
-            let rhs = (0..=curr_deg).fold(0.0, |acc, i| {
+            let outer = binom(n_degree, curr_deg) as f64;
+            let inner = (0..=curr_deg).fold(0.0, |acc, i| {
                 let sign = if (i + curr_deg) % 2 == 0 { 1.0 } else { -1.0 };
-                let numerator = points[i] * sign;
-                let denum = dp[i] * dp[curr_deg - i];
-                acc + numerator / denum
+                acc + points[i] * sign * binom(curr_deg, i) as f64
             });
-            coeffs.push(lhs * rhs);
+            coeffs.push(outer * inner);
         }
         coeffs
     }

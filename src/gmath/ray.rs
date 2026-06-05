@@ -1,32 +1,30 @@
-use super::vector::Vector;
+use super::vector::{Point, Vector};
 
 #[derive(Clone, Debug, Copy)]
-/// A ray that composes of an origin vector and direction vector
+/// A ray composed of an origin point and a direction vector.
 pub struct Ray {
-    origin: Vector,
+    origin: Point,
     direction: Vector,
 }
 
-#[allow(dead_code)]
 impl Ray {
-    /// Returns a new Ray consisting of an origin and a direction
+    /// Returns a new ray consisting of an origin and a direction.
     ///
     /// # Arguments
     ///
-    /// * `origin` - The origin vector
+    /// * `origin` - The point where the ray starts
     /// * `direction` - The direction of the ray
     ///
     /// # Examples
     ///
     /// ```
-    /// use crate::gartus::gmath::vector::Vector;
-    /// use crate::gartus::gmath::ray::Ray;
-    /// let one = Vector::new(1.0, 1.0, 1.0);
-    /// let two = Vector::new(1.0, 1.0, 1.0);
-    /// let ray = Ray::new(one, two);
+    /// use gartus::gmath::{ray::Ray, vector::{Point, Vector}};
+    /// let origin = Point::new(0.0, 0.0, 0.0);
+    /// let direction = Vector::new(1.0, 1.0, 1.0);
+    /// let ray = Ray::new(origin, direction);
     /// ```
     #[must_use]
-    pub fn new(origin: Vector, direction: Vector) -> Self {
+    pub fn new(origin: Point, direction: Vector) -> Self {
         Self { origin, direction }
     }
 
@@ -38,36 +36,34 @@ impl Ray {
 
     /// Get a reference to the ray's origin.
     #[must_use]
-    pub fn origin(&self) -> &Vector {
+    pub fn origin(&self) -> &Point {
         &self.origin
     }
 
     /// Get a reference to the ray's origin.
     #[deprecated(note = "use origin instead")]
     #[must_use]
-    pub fn orgin(&self) -> &Vector {
+    pub fn orgin(&self) -> &Point {
         self.origin()
     }
 
-    /// Returns the position a ray will be located given a real number
+    /// Returns the position along the ray at parameter `t`.
     ///
     /// # Arguments
     ///
-    /// * `t` - A real number that will determines where
-    ///   the ray will be located
+    /// * `t` - A real number that determines where along the ray to sample
     ///
     /// # Examples
     ///
     /// ```
-    /// use crate::gartus::gmath::vector::Vector;
-    /// use crate::gartus::gmath::ray::Ray;
-    /// let one = Vector::new(1.0, 1.0, 1.0);
-    /// let two = Vector::new(1.0, 1.0, 1.0);
-    /// let ray = Ray::new(one, two);
+    /// use gartus::gmath::{ray::Ray, vector::{Point, Vector}};
+    /// let origin = Point::new(1.0, 1.0, 1.0);
+    /// let direction = Vector::new(1.0, 1.0, 1.0);
+    /// let ray = Ray::new(origin, direction);
     /// let new_loc = ray.at(10.00);
     /// ```
     #[must_use]
-    pub fn at(&self, t: f64) -> Vector {
+    pub fn at(&self, t: f64) -> Point {
         self.origin + t * self.direction
     }
 }

@@ -1,4 +1,11 @@
-use super::{colors::Rgb, display::Canvas, draw::triangle_normal, texture::Texture};
+use super::{
+    colors::Rgb,
+    display::{Canvas, ShadingMode},
+    draw::triangle_normal,
+    lighting::PreparedLighting,
+    texture::Texture,
+};
+use crate::gmath::vector::Vector;
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
 
@@ -20,9 +27,13 @@ pub struct TexturedVertex {
 }
 
 impl TexturedVertex {
-    /// Creates a textured vertex.
+    /// Creates a textured vertex with reciprocal depth derived from `abs(z)`.
+    ///
+    /// This is convenient for affine or simple depth-based examples. For real perspective-correct
+    /// texture mapping, prefer [`Self::from_projected`] and pass the reciprocal clip-space `w`
+    /// produced by the projection step.
     #[must_use]
-    pub fn new(x_coord: f64, y_coord: f64, z_coord: f64, s_coord: f64, t_coord: f64) -> Self {
+    pub const fn new(x_coord: f64, y_coord: f64, z_coord: f64, s_coord: f64, t_coord: f64) -> Self {
         Self::from_projected(
             x_coord,
             y_coord,
@@ -115,7 +126,9 @@ impl Canvas {
             return;
         }
 
-        self.raster_textured_triangle_unculled(texture, vertices, &mut color);
+        self.raster_textured_triangle_unculled(texture, vertices, &mut |fragment| {
+            color(fragment.sample)
+        });
     }
 
     /// Draws a textured triangle without backface culling.
@@ -167,6 +180,63 @@ impl Canvas {
         });
     }
 
+    pub(crate) fn draw_textured_triangle_shaded(
+        &mut self,
+        texture: &Texture,
+        vertices: [TexturedVertex; 3],
+        shading_mode: ShadingMode,
+        lighting: &PreparedLighting,
+        normals: [Vector; 3],
+    ) {
+        match shading_mode {
+            ShadingMode::Wireframe => {
+                let color = self.line_color();
+                self.draw_line_z(
+                    color,
+                    vertices[0].position_tuple(),
+                    vertices[1].position_tuple(),
+                );
+                self.draw_line_z(
+                    color,
+                    vertices[1].position_tuple(),
+                    vertices[2].position_tuple(),
+                );
+                self.draw_line_z(
+                    color,
+                    vertices[2].position_tuple(),
+                    vertices[0].position_tuple(),
+                );
+            }
+            ShadingMode::Flat => {
+                let modulation = flat_textured_modulation(lighting, vertices);
+                self.draw_textured_triangle_modulated(texture, vertices, modulation);
+            }
+            ShadingMode::Gouraud => {
+                let vertex_colors = std::array::from_fn(|index| {
+                    lighting.illuminate_unit_at(
+                        normals[index],
+                        tuple_to_vector(vertices[index].position_tuple()),
+                    )
+                });
+                self.draw_textured_triangle_with_fragment_color(texture, vertices, |fragment| {
+                    let modulation = interpolate_rgb(vertex_colors, fragment.weights);
+                    Some(modulate_rgb(fragment.sample, modulation))
+                });
+            }
+            ShadingMode::Phong | ShadingMode::Toon => {
+                self.draw_textured_triangle_with_fragment_color(texture, vertices, |fragment| {
+                    let normal = interpolate_normal(normals, fragment.weights);
+                    let modulation = if shading_mode == ShadingMode::Toon {
+                        lighting.illuminate_toon_at(normal, fragment.point)
+                    } else {
+                        lighting.illuminate_at(normal, fragment.point)
+                    };
+                    Some(modulate_rgb(fragment.sample, modulation))
+                });
+            }
+        }
+    }
+
     fn draw_textured_triangle_unculled_with_optional_color(
         &mut self,
         texture: &Texture,
@@ -174,6 +244,30 @@ impl Canvas {
         mut color: impl FnMut(Rgb) -> Option<Rgb>,
     ) {
         if !vertices.iter().all(TexturedVertex::is_finite) {
+            return;
+        }
+
+        self.raster_textured_triangle_unculled(texture, vertices, &mut |fragment| {
+            color(fragment.sample)
+        });
+    }
+
+    fn draw_textured_triangle_with_fragment_color(
+        &mut self,
+        texture: &Texture,
+        vertices: [TexturedVertex; 3],
+        mut color: impl FnMut(TexturedFragment) -> Option<Rgb>,
+    ) {
+        if !vertices.iter().all(TexturedVertex::is_finite) {
+            return;
+        }
+
+        let normal = triangle_normal(
+            vertices[0].position_tuple(),
+            vertices[1].position_tuple(),
+            vertices[2].position_tuple(),
+        );
+        if normal[2] <= 0.0 {
             return;
         }
 
@@ -207,7 +301,7 @@ impl Canvas {
         &mut self,
         texture: &Texture,
         vertices: [TexturedVertex; 3],
-        color: &mut impl FnMut(Rgb) -> Option<Rgb>,
+        color: &mut impl FnMut(TexturedFragment) -> Option<Rgb>,
     ) {
         let mut min_x = vertices
             .iter()
@@ -328,7 +422,11 @@ impl Canvas {
                         0.0
                     };
                     let sample = sampler.sample(s, t, lod);
-                    if let Some(color) = color(sample) {
+                    if let Some(color) = color(TexturedFragment {
+                        sample,
+                        weights: [w0, w1, w2],
+                        point: Vector::new(x as f64, y as f64, z),
+                    }) {
                         self.plot_z_index_unchecked(index, color, z);
                     }
                 }
@@ -340,6 +438,13 @@ impl Canvas {
             }
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct TexturedFragment {
+    sample: Rgb,
+    weights: [f64; 3],
+    point: Vector,
 }
 
 struct TextureBounds {
@@ -534,8 +639,47 @@ fn texture_lod(
     texture.lod_from_derivatives(right_s - s, right_t - t, down_s - s, down_t - t)
 }
 
-fn texture_inv_depth_from_z(z: f64) -> f64 {
-    let depth = z.abs();
+fn flat_textured_modulation(lighting: &PreparedLighting, vertices: [TexturedVertex; 3]) -> Rgb {
+    let p0 = vertices[0].position_tuple();
+    let p1 = vertices[1].position_tuple();
+    let p2 = vertices[2].position_tuple();
+    let normal = triangle_normal(p0, p1, p2);
+    let point = Vector::new(
+        (p0.0 + p1.0 + p2.0) / 3.0,
+        (p0.1 + p1.1 + p2.1) / 3.0,
+        (p0.2 + p1.2 + p2.2) / 3.0,
+    );
+    lighting.illuminate_at(normal, point)
+}
+
+fn interpolate_normal(normals: [Vector; 3], weights: [f64; 3]) -> Vector {
+    normals[0] * weights[0] + normals[1] * weights[1] + normals[2] * weights[2]
+}
+
+fn interpolate_rgb(colors: [Rgb; 3], weights: [f64; 3]) -> Rgb {
+    let channel = |channel: fn(Rgb) -> u8| {
+        let value = weights[0].mul_add(
+            f64::from(channel(colors[0])),
+            weights[1].mul_add(
+                f64::from(channel(colors[1])),
+                weights[2] * f64::from(channel(colors[2])),
+            ),
+        );
+        value.round().clamp(0.0, 255.0) as u8
+    };
+    Rgb::new(
+        channel(|color| color.red),
+        channel(|color| color.green),
+        channel(|color| color.blue),
+    )
+}
+
+fn tuple_to_vector(point: (f64, f64, f64)) -> Vector {
+    Vector::new(point.0, point.1, point.2)
+}
+
+const fn texture_inv_depth_from_z(z: f64) -> f64 {
+    let depth = if z < 0.0 { -z } else { z };
     if depth < PERSPECTIVE_EPS {
         1.0
     } else {

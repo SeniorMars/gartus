@@ -22,6 +22,16 @@ pub use crate::{
     mdl::ast::VaryInterpolation,
 };
 
+#[cfg(feature = "fancy_math")]
+pub use crate::{
+    gmath::ray::Ray,
+    graphics::camera::RayCamera,
+    graphics::raytracing::{
+        LinearColor, WIDESCREEN_ASPECT_RATIO, first_sphere_color, hit_sphere, render_first_sphere,
+        render_unit_gradient, sky_gradient,
+    },
+};
+
 #[cfg(feature = "external")]
 pub use crate::external::{
     MaterialMesh, MaterialMeshGroup, MeshMaterial, MeshStats, MeshUpAxis, TexturedMeshTriangle,

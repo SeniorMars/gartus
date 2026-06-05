@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Display},
-    ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 /// Represents a point in 3D space.
@@ -17,6 +17,24 @@ impl Point {
     #[must_use]
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self { data: [x, y, z] }
+    }
+
+    /// Returns the point's x coordinate.
+    #[must_use]
+    pub fn x(self) -> f64 {
+        self.data[0]
+    }
+
+    /// Returns the point's y coordinate.
+    #[must_use]
+    pub fn y(self) -> f64 {
+        self.data[1]
+    }
+
+    /// Returns the point's z coordinate.
+    #[must_use]
+    pub fn z(self) -> f64 {
+        self.data[2]
     }
 }
 
@@ -44,6 +62,24 @@ impl Vector {
     #[must_use]
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self { data: [x, y, z] }
+    }
+
+    /// Returns the vector's x component.
+    #[must_use]
+    pub fn x(self) -> f64 {
+        self[0]
+    }
+
+    /// Returns the vector's y component.
+    #[must_use]
+    pub fn y(self) -> f64 {
+        self[1]
+    }
+
+    /// Returns the vector's z component.
+    #[must_use]
+    pub fn z(self) -> f64 {
+        self[2]
     }
 
     /// Calculates the vector between two points (p1 - p0).
@@ -77,7 +113,13 @@ impl Vector {
     /// Returns the mathematical length (magnitude) of a vector.
     #[must_use]
     pub fn length(self) -> f64 {
-        self.dot(self).sqrt()
+        self.length_squared().sqrt()
+    }
+
+    /// Returns the squared magnitude of a vector.
+    #[must_use]
+    pub fn length_squared(self) -> f64 {
+        self.dot(self)
     }
 
     /// Returns a normalized vector.
@@ -127,6 +169,15 @@ impl Sub for Vector {
     fn sub(self, other: Self) -> Self::Output {
         Self {
             data: [self[0] - other[0], self[1] - other[1], self[2] - other[2]],
+        }
+    }
+}
+
+impl Neg for Vector {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self {
+            data: [-self[0], -self[1], -self[2]],
         }
     }
 }
@@ -202,6 +253,13 @@ impl Add<Vector> for Point {
             self.data[1] + other[1],
             self.data[2] + other[2],
         )
+    }
+}
+
+impl Sub<Vector> for Point {
+    type Output = Point;
+    fn sub(self, other: Vector) -> Point {
+        self + -other
     }
 }
 

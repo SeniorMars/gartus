@@ -1,8 +1,15 @@
 use super::colors::Rgb;
+#[cfg(feature = "fancy_math")]
+use crate::gmath::{
+    ray::Ray,
+    vector::{Point, Vector},
+};
 use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
 };
+#[cfg(feature = "fancy_math")]
+use std::io::{self, Write};
 
 /// A simple perspective camera for projecting 3D points onto a 2D canvas.
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +42,18 @@ pub struct ProjectedSegment {
     pub b: ScreenPoint,
     /// Segment draw color.
     pub color: Rgb,
+}
+
+/// A simple pinhole camera that emits one ray through each image pixel.
+#[cfg(feature = "fancy_math")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayCamera {
+    image_width: u32,
+    image_height: u32,
+    camera_center: Point,
+    pixel00_loc: Point,
+    pixel_delta_u: Vector,
+    pixel_delta_v: Vector,
 }
 
 impl Camera3D {
@@ -132,6 +151,132 @@ impl Camera3D {
             segments.push(ProjectedSegment { a: c, b: a, color });
         }
         segments
+    }
+}
+
+#[cfg(feature = "fancy_math")]
+impl RayCamera {
+    /// Creates a camera with the requested image width and ideal aspect ratio.
+    ///
+    /// The image height is rounded down from `image_width / aspect_ratio`, with a
+    /// minimum height of one pixel. The viewport is sized from the actual integer
+    /// image dimensions so pixel spacing remains square.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `image_width` is zero or `aspect_ratio` is not positive and finite.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn new(image_width: u32, aspect_ratio: f64) -> Self {
+        assert!(image_width > 0, "image width must be positive");
+        assert!(
+            aspect_ratio.is_finite() && aspect_ratio > 0.0,
+            "aspect ratio must be positive and finite"
+        );
+
+        let image_height = ((f64::from(image_width) / aspect_ratio) as u32).max(1);
+        let focal_length = 1.0;
+        let viewport_height = 2.0;
+        let viewport_width = viewport_height * (f64::from(image_width) / f64::from(image_height));
+        let camera_center = Point::new(0.0, 0.0, 0.0);
+
+        let viewport_u = Vector::new(viewport_width, 0.0, 0.0);
+        let viewport_v = Vector::new(0.0, -viewport_height, 0.0);
+        let pixel_delta_u = viewport_u / f64::from(image_width);
+        let pixel_delta_v = viewport_v / f64::from(image_height);
+
+        let viewport_upper_left = camera_center
+            - Vector::new(0.0, 0.0, focal_length)
+            - viewport_u / 2.0
+            - viewport_v / 2.0;
+        let pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
+
+        Self {
+            image_width,
+            image_height,
+            camera_center,
+            pixel00_loc,
+            pixel_delta_u,
+            pixel_delta_v,
+        }
+    }
+
+    /// Returns the rendered image width in pixels.
+    #[must_use]
+    pub fn image_width(self) -> u32 {
+        self.image_width
+    }
+
+    /// Returns the rendered image height in pixels.
+    #[must_use]
+    pub fn image_height(self) -> u32 {
+        self.image_height
+    }
+
+    /// Returns the camera origin point.
+    #[must_use]
+    pub fn camera_center(self) -> Point {
+        self.camera_center
+    }
+
+    /// Returns a ray from the camera center through the center of pixel `(x, y)`.
+    ///
+    /// Pixel coordinates are in storage order: `(0, 0)` is the upper-left pixel,
+    /// rows scan left to right, and rows advance downward.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` or `y` is outside the camera image dimensions.
+    #[must_use]
+    pub fn ray_for_pixel(self, x: u32, y: u32) -> Ray {
+        assert!(x < self.image_width, "pixel x must be inside the image");
+        assert!(y < self.image_height, "pixel y must be inside the image");
+
+        let pixel_center = self.pixel00_loc
+            + f64::from(x) * self.pixel_delta_u
+            + f64::from(y) * self.pixel_delta_v;
+        Ray::new(self.camera_center, pixel_center - self.camera_center)
+    }
+
+    /// Renders a canvas by evaluating `ray_color` for each emitted camera ray.
+    #[must_use]
+    pub fn render<F>(self, mut ray_color: F) -> Canvas
+    where
+        F: FnMut(&Ray) -> Vector,
+    {
+        Canvas::from_fn(self.image_width, self.image_height, |x, y| {
+            Rgb::from(ray_color(&self.ray_for_pixel(x, y)))
+        })
+    }
+
+    /// Renders a canvas while writing scanline progress messages to `log`.
+    ///
+    /// Use `std::io::stderr()` for book-style progress reporting that stays separate
+    /// from generated PPM image output.
+    ///
+    /// # Errors
+    ///
+    /// Returns any write error produced by `log`.
+    pub fn render_with_progress<F, W>(self, mut log: W, mut ray_color: F) -> io::Result<Canvas>
+    where
+        F: FnMut(&Ray) -> Vector,
+        W: Write,
+    {
+        let mut pixels = Vec::with_capacity(self.image_width as usize * self.image_height as usize);
+        for y in 0..self.image_height {
+            write!(log, "\rScanlines remaining: {} ", self.image_height - y)?;
+            log.flush()?;
+            for x in 0..self.image_width {
+                pixels.push(Rgb::from(ray_color(&self.ray_for_pixel(x, y))));
+            }
+        }
+        writeln!(log, "\rDone.                 ")?;
+
+        Ok(Canvas::from_pixels(
+            self.image_width,
+            self.image_height,
+            pixels,
+        ))
     }
 }
 
@@ -258,5 +403,32 @@ mod tests {
         );
 
         assert_eq!(segments.len(), 3);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    fn assert_close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-10);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_uses_actual_integer_image_ratio() {
+        let camera = RayCamera::new(400, 16.0 / 9.0);
+        assert_eq!(camera.image_width(), 400);
+        assert_eq!(camera.image_height(), 225);
+    }
+
+    #[cfg(feature = "fancy_math")]
+    #[test]
+    fn ray_camera_sends_center_pixel_forward() {
+        let camera = RayCamera::new(400, 16.0 / 9.0);
+        let ray = camera.ray_for_pixel(200, 112);
+
+        assert_close(ray.origin().x(), 0.0);
+        assert_close(ray.origin().y(), 0.0);
+        assert_close(ray.origin().z(), 0.0);
+        assert!(ray.direction().z() < 0.0);
+        assert!(ray.direction().x().abs() < 0.01);
+        assert!(ray.direction().y().abs() < 0.01);
     }
 }

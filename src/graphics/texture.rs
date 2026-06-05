@@ -114,9 +114,7 @@ impl Texture {
             return Rgb::BLACK;
         }
 
-        let s = apply_wrap(s, self.wrap_s);
-        let t = apply_wrap(t, self.wrap_t);
-        sample_canvas(&self.image, s, t, self.filter)
+        sample_canvas(&self.image, s, t, self.filter, self.wrap_s, self.wrap_t)
     }
 
     /// Samples a mipmap level selected by `lod`, where `0.0` is the base image.
@@ -129,16 +127,35 @@ impl Texture {
             return Rgb::BLACK;
         }
 
-        let s = apply_wrap(s, self.wrap_s);
-        let t = apply_wrap(t, self.wrap_t);
         if self.filter == TextureFilter::Linear && self.level_count() > 1 {
             let (lower, upper, blend) = mip_level_pair_from_lod(lod, self.level_count() - 1);
-            let lower_sample = sample_canvas(self.level_image(lower), s, t, TextureFilter::Linear);
-            let upper_sample = sample_canvas(self.level_image(upper), s, t, TextureFilter::Linear);
+            let lower_sample = sample_canvas(
+                self.level_image(lower),
+                s,
+                t,
+                TextureFilter::Linear,
+                self.wrap_s,
+                self.wrap_t,
+            );
+            let upper_sample = sample_canvas(
+                self.level_image(upper),
+                s,
+                t,
+                TextureFilter::Linear,
+                self.wrap_s,
+                self.wrap_t,
+            );
             lower_sample.lerp(upper_sample, blend)
         } else {
             let level = mip_level_from_lod(lod, self.level_count() - 1);
-            sample_canvas(self.level_image(level), s, t, self.filter)
+            sample_canvas(
+                self.level_image(level),
+                s,
+                t,
+                self.filter,
+                self.wrap_s,
+                self.wrap_t,
+            )
         }
     }
 
@@ -237,7 +254,7 @@ impl ActiveTextureSampler<'_> {
                 if image.is_empty() {
                     return Rgb::BLACK;
                 }
-                sample_linear(image, apply_wrap(s, *wrap_s), apply_wrap(t, *wrap_t))
+                sample_linear(image, s, t, *wrap_s, *wrap_t)
             }
             Self::NearestMip {
                 texture,
@@ -264,21 +281,30 @@ impl ActiveTextureSampler<'_> {
                 if texture.image.is_empty() {
                     return Rgb::BLACK;
                 }
-                let s = apply_wrap(s, *wrap_s);
-                let t = apply_wrap(t, *wrap_t);
                 let (lower, upper, blend) = mip_level_pair_from_lod(lod, *max_level);
-                let lower_sample = sample_linear(texture.level_image(lower), s, t);
-                let upper_sample = sample_linear(texture.level_image(upper), s, t);
+                let lower_sample =
+                    sample_linear(texture.level_image(lower), s, t, *wrap_s, *wrap_t);
+                let upper_sample =
+                    sample_linear(texture.level_image(upper), s, t, *wrap_s, *wrap_t);
                 lower_sample.lerp(upper_sample, blend)
             }
         }
     }
 }
 
-fn sample_canvas(image: &Canvas, s: f64, t: f64, filter: TextureFilter) -> Rgb {
+fn sample_canvas(
+    image: &Canvas,
+    s: f64,
+    t: f64,
+    filter: TextureFilter,
+    wrap_s: TextureWrap,
+    wrap_t: TextureWrap,
+) -> Rgb {
     match filter {
-        TextureFilter::Nearest => sample_nearest(image, s, t),
-        TextureFilter::Linear => sample_linear(image, s, t),
+        TextureFilter::Nearest => {
+            sample_nearest(image, apply_wrap(s, wrap_s), apply_wrap(t, wrap_t))
+        }
+        TextureFilter::Linear => sample_linear(image, s, t, wrap_s, wrap_t),
     }
 }
 
@@ -292,21 +318,34 @@ fn sample_nearest(image: &Canvas, s: f64, t: f64) -> Rgb {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn sample_linear(image: &Canvas, s: f64, t: f64) -> Rgb {
+fn sample_linear(image: &Canvas, s: f64, t: f64, wrap_s: TextureWrap, wrap_t: TextureWrap) -> Rgb {
     let width = image.width();
     let height = image.height();
-    let x = s * f64::from(width.saturating_sub(1));
-    let y = (1.0 - t) * f64::from(height.saturating_sub(1));
-    let x0 = x.floor() as u32;
-    let y0 = y.floor() as u32;
-    let x1 = (x0 + 1).min(width - 1);
-    let y1 = (y0 + 1).min(height - 1);
+    let (x, x0, x1) = linear_axis(s, width, wrap_s);
+    let (y, y0, y1) = linear_axis(1.0 - t, height, wrap_t);
     let tx = x - f64::from(x0);
     let ty = y - f64::from(y0);
 
     let top = pixel_at_storage(image, x0, y0).lerp(pixel_at_storage(image, x1, y0), tx);
     let bottom = pixel_at_storage(image, x0, y1).lerp(pixel_at_storage(image, x1, y1), tx);
     top.lerp(bottom, ty)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn linear_axis(value: f64, size: u32, wrap: TextureWrap) -> (f64, u32, u32) {
+    match wrap {
+        TextureWrap::Clamp => {
+            let coord = value.clamp(0.0, 1.0) * f64::from(size.saturating_sub(1));
+            let low = coord.floor() as u32;
+            (coord, low, (low + 1).min(size - 1))
+        }
+        TextureWrap::Repeat => {
+            let coord = value.rem_euclid(1.0) * f64::from(size);
+            let low = (coord.floor() as u32).min(size - 1);
+            let high = if low + 1 == size { 0 } else { low + 1 };
+            (coord, low, high)
+        }
+    }
 }
 
 fn pixel_at_storage(image: &Canvas, x: u32, y: u32) -> Rgb {
@@ -446,6 +485,17 @@ mod tests {
         .filter(TextureFilter::Linear);
 
         assert_eq!(texture.sample(0.5, 0.5), Rgb::new(50, 50, 0));
+    }
+
+    #[test]
+    fn linear_repeat_wraps_neighbor_texels_across_seam() {
+        let texture = Texture::from_canvas(Canvas::from_pixels(2, 1, vec![Rgb::RED, Rgb::GREEN]))
+            .wrap(TextureWrap::Repeat, TextureWrap::Repeat)
+            .filter(TextureFilter::Linear);
+
+        let sample = texture.sample(0.99, 0.0);
+
+        assert!(sample.red > sample.green);
     }
 
     #[test]

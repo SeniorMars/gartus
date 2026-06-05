@@ -86,6 +86,10 @@ required-features = ["external"]
 name = "curve_cathedral"
 required-features = ["old_parser"]
 
+[[example]]
+name = "raytracing_weekend"
+required-features = ["fancy_math"]
+
 # [[bench]]
 # name = "derp"
 # harness = false

@@ -26,10 +26,13 @@ use std::{
 };
 
 #[cfg(feature = "external")]
-use super::{ast::Material, runtime::MaterialConstants};
+use super::{
+    ast::Material,
+    runtime::{AssetCaches, MaterialConstants},
+};
 #[cfg(feature = "external")]
 use crate::{
-    external::{MaterialMeshGroup, MeshMaterial, TexturedMeshTriangle, TexturedMeshVertex},
+    external::{MaterialMeshGroup, MaterialMeshTriangle, MeshMaterial, TexturedMeshTriangle},
     gmath::vector::Vector,
     graphics::draw::TexturedVertex,
 };
@@ -309,9 +312,19 @@ fn execute_compiled_frames_with_options_parallel(
 
     let config = config.save_enabled(false);
     let basename = compiled.animation().basename().to_string();
+    #[cfg(feature = "external")]
+    let asset_caches = preload_compiled_assets(compiled, &config)?;
     let mut paths = (0..compiled.animation().frames())
         .into_par_iter()
         .map(|frame| {
+            #[cfg(feature = "external")]
+            let runtime = execute_compiled_frame_from_config_with_asset_caches(
+                compiled,
+                &config,
+                frame,
+                asset_caches.clone(),
+            )?;
+            #[cfg(not(feature = "external"))]
             let runtime = execute_compiled_frame_from_config(compiled, &config, frame)?;
             let path = output.frame_path(&basename, frame);
             runtime.save_to_path(&path)?;
@@ -421,6 +434,18 @@ fn execute_compiled_frame_from_config(
     Ok(runtime)
 }
 
+#[cfg(feature = "external")]
+fn execute_compiled_frame_from_config_with_asset_caches(
+    compiled: &CompiledProgram,
+    config: &RenderConfig,
+    frame: usize,
+    asset_caches: AssetCaches,
+) -> Result<Runtime, ExecutionError> {
+    let mut runtime = Runtime::with_asset_caches(config, asset_caches);
+    execute_compiled_frame_into(&mut runtime, compiled, frame)?;
+    Ok(runtime)
+}
+
 fn execute_compiled_frame_into(
     runtime: &mut Runtime,
     compiled: &CompiledProgram,
@@ -439,6 +464,52 @@ fn execute_compiled_frame_into(
     runtime.set_frames(compiled.animation().frames());
     runtime.seed_frame_knobs(frame_knobs.iter());
     execute_compiled_into(runtime, compiled)
+}
+
+#[cfg(feature = "external")]
+fn preload_compiled_assets(
+    compiled: &CompiledProgram,
+    config: &RenderConfig,
+) -> Result<AssetCaches, ExecutionError> {
+    let mut runtime = Runtime::new(config);
+    for command in compiled.commands() {
+        if command.node.is_quit() {
+            break;
+        }
+
+        let Command::Shape(shape) = &command.node else {
+            continue;
+        };
+
+        match shape {
+            ShapeCommand::Mesh { filename, .. } | ShapeCommand::MeshReverse { filename, .. } => {
+                let path = runtime.resolve_mesh_path(filename, command.source_name.as_deref());
+                let mesh = runtime.load_mesh_cached(&path)?;
+                for group in &mesh.groups {
+                    if let Some(texture_path) = group
+                        .material
+                        .as_ref()
+                        .and_then(|material| material.diffuse_texture.as_ref())
+                    {
+                        runtime.load_texture_cached(texture_path)?;
+                    }
+                }
+            }
+            ShapeCommand::Texture { filename, .. } => {
+                let path = runtime.resolve_mesh_path(filename, command.source_name.as_deref());
+                runtime.load_texture_cached(&path)?;
+            }
+            ShapeCommand::Line { .. }
+            | ShapeCommand::Box { .. }
+            | ShapeCommand::Sphere { .. }
+            | ShapeCommand::Torus { .. }
+            | ShapeCommand::Cylinder { .. }
+            | ShapeCommand::Cone { .. }
+            | ShapeCommand::Pyramid { .. } => {}
+        }
+    }
+
+    Ok(runtime.asset_caches())
 }
 
 /// Executes a parsed MDL program into an existing runtime.
@@ -1067,16 +1138,12 @@ fn draw_mesh(
     for group in &mesh.groups {
         let draw_material =
             material_with_mesh_material(material, group.material.as_ref(), group.diffuse_color);
-        let texture = if group.textured_triangles.is_empty() {
-            None
-        } else {
-            group
-                .material
-                .as_ref()
-                .and_then(|material| material.diffuse_texture.as_ref())
-                .map(|path| runtime.load_texture_cached(path))
-                .transpose()?
-        };
+        let texture = group
+            .material
+            .as_ref()
+            .and_then(|material| material.diffuse_texture.as_ref())
+            .map(|path| runtime.load_texture_cached(path))
+            .transpose()?;
         let previous = runtime.apply_draw_state(draw_material);
 
         if let Some(texture) = texture {
@@ -1089,7 +1156,11 @@ fn draw_mesh(
                 }
                 polygons.apply_in_place(&transform);
             });
-            runtime.draw_tmp_polygons();
+            if reverse {
+                runtime.draw_tmp_polygons();
+            } else {
+                runtime.draw_tmp_polygons_with_vertex_normal_plan(&group.normal_plan);
+            }
         }
 
         runtime.restore_draw_state(previous);
@@ -1106,64 +1177,155 @@ fn draw_textured_mesh_group(
     transform: &Matrix,
     reverse: bool,
 ) {
-    for triangle in &group.textured_triangles {
-        let mut vertices = textured_vertices_from_triangle(*triangle, transform);
-        if reverse {
-            vertices.swap(1, 2);
+    let shading_mode = runtime.canvas().shading_mode();
+    let smooth_normals = textured_group_vertex_normals(group, transform, shading_mode, reverse);
+
+    if group.triangles.is_empty() {
+        let prepared_lighting = runtime.canvas().lighting_ref().prepare();
+        for triangle in &group.textured_triangles {
+            let vertices = textured_vertices_from_legacy_triangle(*triangle, transform);
+            let normals = textured_vertex_normals(None, 0, vertices);
+            draw_textured_mesh_triangle(
+                runtime,
+                texture,
+                vertices,
+                normals,
+                shading_mode,
+                &prepared_lighting,
+                reverse,
+            );
         }
-        let modulation = {
-            let lighting = runtime.canvas().lighting_ref();
-            textured_triangle_lighting(lighting, vertices)
-        };
-        runtime
-            .canvas_mut()
-            .draw_textured_triangle_modulated(texture, vertices, modulation);
+        return;
+    }
+
+    let mut untextured_triangles = Vec::new();
+    let prepared_lighting = runtime.canvas().lighting_ref().prepare();
+    for (index, triangle) in group.triangles.iter().enumerate() {
+        if let Some(vertices) = textured_vertices_from_material_triangle(*triangle, transform) {
+            let normals = textured_vertex_normals(smooth_normals.as_deref(), index, vertices);
+            draw_textured_mesh_triangle(
+                runtime,
+                texture,
+                vertices,
+                normals,
+                shading_mode,
+                &prepared_lighting,
+                reverse,
+            );
+        } else {
+            untextured_triangles.push(triangle.positions);
+        }
+    }
+
+    if !untextured_triangles.is_empty() {
+        runtime.with_tmp_polygons(|polygons| {
+            polygons.push_polygons(&untextured_triangles);
+            if reverse {
+                polygons.reverse_winding();
+            }
+            polygons.apply_in_place(transform);
+        });
+        runtime.draw_tmp_polygons();
     }
 }
 
 #[cfg(feature = "external")]
-fn textured_vertices_from_triangle(
+fn draw_textured_mesh_triangle(
+    runtime: &mut Runtime,
+    texture: &crate::graphics::texture::Texture,
+    mut vertices: [TexturedVertex; 3],
+    mut normals: [Vector; 3],
+    shading_mode: CanvasShadingMode,
+    lighting: &crate::graphics::lighting::PreparedLighting,
+    reverse: bool,
+) {
+    if reverse {
+        vertices.swap(1, 2);
+        normals.swap(1, 2);
+    }
+    runtime.canvas_mut().draw_textured_triangle_shaded(
+        texture,
+        vertices,
+        shading_mode,
+        lighting,
+        normals,
+    );
+}
+
+#[cfg(feature = "external")]
+fn textured_vertices_from_material_triangle(
+    triangle: MaterialMeshTriangle,
+    transform: &Matrix,
+) -> Option<[TexturedVertex; 3]> {
+    let texcoords = triangle.texcoords?;
+    Some(std::array::from_fn(|index| {
+        textured_vertex_from_parts(triangle.positions[index], texcoords[index], transform)
+    }))
+}
+
+#[cfg(feature = "external")]
+fn textured_vertices_from_legacy_triangle(
     triangle: TexturedMeshTriangle,
     transform: &Matrix,
 ) -> [TexturedVertex; 3] {
-    triangle.map(|vertex| textured_vertex_from_mesh_vertex(vertex, transform))
+    triangle.map(|vertex| textured_vertex_from_parts(vertex.position, vertex.texcoord, transform))
 }
 
 #[cfg(feature = "external")]
-fn textured_vertex_from_mesh_vertex(
-    vertex: TexturedMeshVertex,
+fn textured_vertex_from_parts(
+    position: (f64, f64, f64),
+    texcoord: (f64, f64),
     transform: &Matrix,
 ) -> TexturedVertex {
-    let point = transform.transform_homogeneous_point(&[
-        vertex.position.0,
-        vertex.position.1,
-        vertex.position.2,
-        1.0,
-    ]);
-    TexturedVertex::new(
-        point[0],
-        point[1],
-        point[2],
-        vertex.texcoord.0,
-        vertex.texcoord.1,
-    )
+    let point = transform.transform_homogeneous_point(&[position.0, position.1, position.2, 1.0]);
+    TexturedVertex::from_projected(point[0], point[1], point[2], 1.0, texcoord.0, texcoord.1)
 }
 
 #[cfg(feature = "external")]
-fn textured_triangle_lighting(
-    lighting: &crate::graphics::lighting::Lighting,
+fn textured_group_vertex_normals(
+    group: &MaterialMeshGroup,
+    transform: &Matrix,
+    shading_mode: CanvasShadingMode,
+    reverse: bool,
+) -> Option<Vec<Vector>> {
+    if reverse
+        || !matches!(
+            shading_mode,
+            CanvasShadingMode::Gouraud | CanvasShadingMode::Phong | CanvasShadingMode::Toon
+        )
+    {
+        return None;
+    }
+
+    let mut polygons = group.polygons.clone();
+    polygons.apply_in_place(transform);
+    group
+        .normal_plan
+        .normals_for_polygon_data(polygons.as_matrix().data())
+}
+
+#[cfg(feature = "external")]
+fn textured_vertex_normals(
+    vertex_normals: Option<&[Vector]>,
+    triangle_index: usize,
     vertices: [TexturedVertex; 3],
-) -> Rgb {
+) -> [Vector; 3] {
+    if let Some(vertex_normals) = vertex_normals {
+        let base = triangle_index * 3;
+        if base + 2 < vertex_normals.len() {
+            return [
+                vertex_normals[base],
+                vertex_normals[base + 1],
+                vertex_normals[base + 2],
+            ];
+        }
+    }
+
     let p0 = vertices[0].position_tuple();
     let p1 = vertices[1].position_tuple();
     let p2 = vertices[2].position_tuple();
-    let normal = triangle_normal(p0, p1, p2);
-    let point = Vector::new(
-        (p0.0 + p1.0 + p2.0) / 3.0,
-        (p0.1 + p1.1 + p2.1) / 3.0,
-        (p0.2 + p1.2 + p2.2) / 3.0,
-    );
-    lighting.illuminate_at(normal, point)
+    let normal = triangle_normal(p0, p1, p2).normalized();
+    [normal; 3]
 }
 
 #[cfg(feature = "external")]
@@ -1749,6 +1911,151 @@ mod tests {
         .unwrap();
 
         assert_eq!(frames, vec![0, 1]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(all(feature = "external", feature = "rayon"))]
+    #[test]
+    fn preloaded_asset_caches_can_seed_parallel_frame_runtimes() {
+        let dir = std::env::temp_dir().join(format!(
+            "gartus-mdl-parallel-mesh-cache-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mesh = dir.join("tri.obj");
+        std::fs::write(&mesh, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+
+        let program = parse_script(&format!(
+            "frames 2\nvary k 0 1 0 1\nmesh :{}",
+            mesh.display()
+        ))
+        .unwrap();
+        let compiled = compile(program).unwrap();
+        let config = RenderConfig::new(5, 5)
+            .display_enabled(false)
+            .save_enabled(false);
+        let caches = super::preload_compiled_assets(&compiled, &config).unwrap();
+        std::fs::remove_file(&mesh).unwrap();
+
+        let runtime = super::execute_compiled_frame_from_config_with_asset_caches(
+            &compiled, &config, 1, caches,
+        )
+        .unwrap();
+
+        assert_eq!(runtime.canvas().width(), 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn runtime_loaded_textures_clamp_at_uv_one() {
+        let path = std::env::temp_dir().join(format!(
+            "gartus-mdl-texture-clamp-{}.ppm",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            b"P3\n2 2\n255\n255 0 0   0 255 0\n0 0 255   255 255 255\n",
+        )
+        .unwrap();
+
+        let mut runtime = Runtime::new(&RenderConfig::new(2, 2).display_enabled(false));
+        let texture = runtime.load_texture_cached(&path).unwrap();
+
+        assert_eq!(texture.sample(1.0, 1.0), Rgb::GREEN);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn runtime_loaded_textures_can_opt_into_repeat_wrap() {
+        let path = std::env::temp_dir().join(format!(
+            "gartus-mdl-texture-repeat-{}.ppm",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            b"P3\n2 2\n255\n255 0 0   0 255 0\n0 0 255   255 255 255\n",
+        )
+        .unwrap();
+
+        let config = RenderConfig::new(2, 2).display_enabled(false).texture_wrap(
+            crate::graphics::texture::TextureWrap::Repeat,
+            crate::graphics::texture::TextureWrap::Repeat,
+        );
+        let mut runtime = Runtime::new(&config);
+        let texture = runtime.load_texture_cached(&path).unwrap();
+
+        assert_eq!(texture.sample(1.0, 1.0), Rgb::RED);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn textured_obj_group_renders_uv_and_non_uv_faces() {
+        let dir = std::env::temp_dir().join(format!(
+            "gartus-mdl-mixed-texture-render-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let texture = dir.join("tex.ppm");
+        let mtl = dir.join("mat.mtl");
+        let obj = dir.join("mixed.obj");
+        std::fs::write(&texture, b"P3\n1 1\n255\n255 255 255\n").unwrap();
+        std::fs::write(&mtl, b"newmtl tex\nKd 1 1 1\nmap_Kd tex.ppm\n").unwrap();
+        std::fs::write(
+            &obj,
+            b"mtllib mat.mtl
+v 1 1 0
+v 8 1 0
+v 1 8 0
+v 11 1 0
+v 18 1 0
+v 11 8 0
+vt 0 0
+vt 1 0
+vt 0 1
+usemtl tex
+f 1/1 2/2 3/3
+f 4 5 6
+",
+        )
+        .unwrap();
+
+        let program = parse_script(&format!("mesh :{}", obj.display())).unwrap();
+        let runtime = execute_program(
+            &program,
+            &RenderConfig::new(20, 20)
+                .display_enabled(false)
+                .save_enabled(false),
+        )
+        .unwrap();
+
+        let left_visible = (0..10).any(|x| {
+            (0..20).any(|y| {
+                runtime
+                    .canvas()
+                    .get_pixel(x, y)
+                    .is_some_and(|p| *p != Rgb::BLACK)
+            })
+        });
+        let right_visible = (10..20).any(|x| {
+            (0..20).any(|y| {
+                runtime
+                    .canvas()
+                    .get_pixel(x, y)
+                    .is_some_and(|p| *p != Rgb::BLACK)
+            })
+        });
+
+        assert!(left_visible, "textured triangle should render");
+        assert!(
+            right_visible,
+            "non-UV triangle in textured group should render"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

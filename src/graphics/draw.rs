@@ -7,13 +7,101 @@ use crate::graphics::{
     lighting::PreparedLighting,
 };
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, hash_map::Entry},
     hash::{BuildHasherDefault, Hasher},
 };
 
 pub use super::textured_raster::TexturedVertex;
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
+
+/// Cached vertex-normal adjacency for a polygon mesh.
+///
+/// The plan stores which triangle vertex occurrences should share an accumulated smoothed normal.
+/// It can be reused when the same mesh is transformed and redrawn across frames; transformed
+/// triangle normals are still recomputed from the current polygon data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VertexNormalPlan {
+    normal_indices: Vec<usize>,
+    normal_count: usize,
+}
+
+impl VertexNormalPlan {
+    /// Builds a vertex-normal plan for polygon matrix data.
+    ///
+    /// # Panics
+    /// Panics if `data` is not a sequence of homogeneous triangle vertices.
+    #[must_use]
+    pub fn from_polygon_data(data: &[f64]) -> Self {
+        assert!(
+            data.len().is_multiple_of(12),
+            "polygon data must contain multiples of 3 homogeneous points"
+        );
+
+        let point_count = data.len() / 4;
+        let mut normal_indices = Vec::with_capacity(point_count);
+        let mut normal_by_vertex = VertexNormalMap::<usize>::with_capacity_and_hasher(
+            point_count,
+            BuildHasherDefault::default(),
+        );
+
+        for c in data.chunks_exact(12) {
+            let points = [(c[0], c[1], c[2]), (c[4], c[5], c[6]), (c[8], c[9], c[10])];
+            for point in points {
+                let next_index = normal_by_vertex.len();
+                let normal_index = match normal_by_vertex.entry(vertex_key(point)) {
+                    Entry::Occupied(entry) => *entry.get(),
+                    Entry::Vacant(entry) => *entry.insert(next_index),
+                };
+                normal_indices.push(normal_index);
+            }
+        }
+
+        Self {
+            normal_indices,
+            normal_count: normal_by_vertex.len(),
+        }
+    }
+
+    /// Returns one normalized vertex normal per polygon point occurrence for `data`.
+    ///
+    /// Returns `None` if the plan was not built for the same number of point occurrences.
+    #[must_use]
+    pub fn normals_for_polygon_data(&self, data: &[f64]) -> Option<Vec<Vector>> {
+        if data.len() / 4 != self.normal_indices.len() || !data.len().is_multiple_of(12) {
+            return None;
+        }
+
+        let mut accumulated = vec![Vector::default(); self.normal_count];
+        for (triangle_index, c) in data.chunks_exact(12).enumerate() {
+            let points = [(c[0], c[1], c[2]), (c[4], c[5], c[6]), (c[8], c[9], c[10])];
+            let normal = triangle_normal(points[0], points[1], points[2]);
+            if normal.dot(normal) < f64::EPSILON * f64::EPSILON {
+                continue;
+            }
+
+            let base = triangle_index * 3;
+            for offset in 0..3 {
+                accumulated[self.normal_indices[base + offset]] += normal;
+            }
+        }
+
+        for normal in &mut accumulated {
+            *normal = if normal.dot(*normal) < f64::EPSILON * f64::EPSILON {
+                Vector::new(0.0, 0.0, 1.0)
+            } else {
+                normal.normalized()
+            };
+        }
+
+        Some(
+            self.normal_indices
+                .iter()
+                .map(|&normal_index| accumulated[normal_index])
+                .collect(),
+        )
+    }
+}
 
 #[derive(Clone, Copy)]
 struct ScanPoint {
@@ -112,25 +200,12 @@ impl NormalScanState {
     }
 }
 
-struct WrappedRestore<'a> {
-    wrapped: *mut bool,
-    original: bool,
-    _marker: std::marker::PhantomData<&'a mut bool>,
-}
-
-impl Drop for WrappedRestore<'_> {
-    fn drop(&mut self) {
-        // SAFETY: the guard is created from `self.wrapped` and never outlives the
-        // `fill` call that owns the mutable `Canvas` borrow.
-        unsafe {
-            *self.wrapped = self.original;
-        }
-    }
-}
-
 #[allow(dead_code)]
 impl Canvas {
     /// Fills in the area of a 2D figure given a random point inside the figure.
+    ///
+    /// This delegates to [`Self::scanline_fill`], which avoids the extra per-pixel visited set
+    /// used by the older stack-based flood fill implementation.
     ///
     /// # Arguments
     ///
@@ -151,34 +226,7 @@ impl Canvas {
     /// image.fill(10, 10, color, background_color)
     /// ```
     pub fn fill(&mut self, x: i64, y: i64, fill_color: Rgb, boundary_color: Rgb) {
-        let wrapped_ptr: *mut bool = std::ptr::addr_of_mut!(self.wrapped);
-        let _wrapped_restore = WrappedRestore {
-            original: self.wrapped,
-            wrapped: wrapped_ptr,
-            _marker: std::marker::PhantomData,
-        };
-        self.wrapped = false;
-
-        let mut points = vec![(x, y)];
-        let mut visited = HashSet::from([(x, y)]);
-        while let Some((x, y)) = points.pop() {
-            let Some(pixel) = self.get_pixel(x, y) else {
-                continue;
-            };
-            if *pixel == boundary_color || *pixel == fill_color {
-                continue;
-            }
-            self.plot(&fill_color, x, y);
-            for (nx, ny) in [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)] {
-                if visited.insert((nx, ny)) {
-                    points.push((nx, ny));
-                }
-            }
-            // points.push((x - 1, y - 1));
-            // points.push((x - 1, y + 1));
-            // points.push((x + 1, y - 1));
-            // points.push((x + 1, y + 1));
-        }
+        self.scanline_fill(x, y, fill_color, boundary_color);
     }
 
     /// Fills in the area of a 2D figure using a faster scanline-based algorithm.
@@ -193,13 +241,7 @@ impl Canvas {
             return;
         }
 
-        // We use a similar guard as `fill` to disable wrapping during the operation
-        let wrapped_ptr: *mut bool = std::ptr::addr_of_mut!(self.wrapped);
-        let _wrapped_restore = WrappedRestore {
-            original: self.wrapped,
-            wrapped: wrapped_ptr,
-            _marker: std::marker::PhantomData,
-        };
+        let previous_wrapped = self.wrapped;
         self.wrapped = false;
 
         let mut stack = vec![(x, y)];
@@ -236,6 +278,8 @@ impl Canvas {
             self.scanline_seed_helper(&mut stack, lx, rx, y + 1, fill_color, boundary_color);
             self.scanline_seed_helper(&mut stack, lx, rx, y - 1, fill_color, boundary_color);
         }
+
+        self.wrapped = previous_wrapped;
     }
 
     fn scanline_seed_helper(
@@ -341,6 +385,21 @@ impl Canvas {
     /// # Panics
     /// Panics if the polygon matrix does not contain a multiple of 3 points.
     pub fn draw_polygons(&mut self, polygons: &PolygonMatrix) {
+        self.draw_polygons_with_vertex_normal_plan(polygons, None);
+    }
+
+    /// Fills all triangles in `polygons` using a cached vertex-normal plan when supplied.
+    ///
+    /// If `vertex_normal_plan` does not match the polygon point count, this falls back to building
+    /// normals from the current polygon data.
+    ///
+    /// # Panics
+    /// Panics if the polygon matrix does not contain a multiple of 3 points.
+    pub fn draw_polygons_with_vertex_normal_plan(
+        &mut self,
+        polygons: &PolygonMatrix,
+        vertex_normal_plan: Option<&VertexNormalPlan>,
+    ) {
         let data = polygons.as_matrix().data();
         assert!(
             data.len().is_multiple_of(12),
@@ -365,7 +424,11 @@ impl Canvas {
             shading_mode,
             ShadingMode::Gouraud | ShadingMode::Phong | ShadingMode::Toon
         ) {
-            Some(vertex_normals_by_point(data))
+            Some(
+                vertex_normal_plan
+                    .and_then(|plan| plan.normals_for_polygon_data(data))
+                    .unwrap_or_else(|| vertex_normals_by_point(data)),
+            )
         } else {
             None
         };

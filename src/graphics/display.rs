@@ -100,7 +100,6 @@ pub(crate) struct ZSpan {
 pub struct Canvas {
     width: u32,
     height: u32,
-    // always 255 — field kept for internal use only
     pixels: Vec<Rgb>,
     zbuffer: Vec<f64>,
     /// When true, (0,0) is top-left. When false (default), (0,0) is bottom-left.

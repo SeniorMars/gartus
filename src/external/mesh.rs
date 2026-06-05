@@ -11,7 +11,7 @@ use crate::gmath::{
     matrix::Matrix,
     polygon_matrix::{Bounds3, PolygonMatrix},
 };
-use crate::graphics::colors::Rgb;
+use crate::graphics::{colors::Rgb, draw::VertexNormalPlan};
 
 type MeshResult<T> = Result<T, MeshError>;
 type Point3 = (f64, f64, f64);
@@ -31,6 +31,15 @@ pub struct TexturedMeshVertex {
 
 /// One textured mesh triangle.
 pub type TexturedMeshTriangle = [TexturedMeshVertex; 3];
+
+/// One material mesh triangle, optionally carrying per-vertex texture coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaterialMeshTriangle {
+    /// Triangle vertex positions in object space.
+    pub positions: [(f64, f64, f64); 3],
+    /// Optional normalized texture coordinates `(s, t)` for each vertex.
+    pub texcoords: Option<[(f64, f64); 3]>,
+}
 
 /// Summary of triangles imported from a mesh file.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,6 +102,10 @@ pub struct MaterialMeshGroup {
     pub diffuse_color: Option<Rgb>,
     /// Triangles assigned to this material group.
     pub polygons: PolygonMatrix,
+    /// Cached vertex-normal adjacency for `polygons`.
+    pub normal_plan: VertexNormalPlan,
+    /// Triangles assigned to this material group, preserving whether each triangle had UVs.
+    pub triangles: Vec<MaterialMeshTriangle>,
     /// Triangles with per-vertex texture coordinates assigned to this material group.
     pub textured_triangles: Vec<TexturedMeshTriangle>,
 }
@@ -280,7 +293,9 @@ pub fn meshify_with_materials(file_name: &str) -> MeshResult<MaterialMesh> {
                     material_name: None,
                     material: None,
                     diffuse_color: None,
+                    normal_plan: VertexNormalPlan::from_polygon_data(polygons.as_matrix().data()),
                     polygons,
+                    triangles: Vec::new(),
                     textured_triangles: Vec::new(),
                 }],
                 bounds,
@@ -440,6 +455,7 @@ struct MaterialGroupBuilder {
     material_name: Option<String>,
     polygons: PolygonMatrix,
     triangle_batch: Vec<Triangle>,
+    triangles: Vec<MaterialMeshTriangle>,
     textured_triangles: Vec<TexturedMeshTriangle>,
 }
 
@@ -449,6 +465,7 @@ impl MaterialGroupBuilder {
             material_name,
             polygons: PolygonMatrix::new(),
             triangle_batch: Vec::with_capacity(MESH_TRIANGLE_BATCH),
+            triangles: Vec::new(),
             textured_triangles: Vec::new(),
         }
     }
@@ -463,6 +480,10 @@ impl MaterialGroupBuilder {
         textured_triangle: Option<TexturedMeshTriangle>,
     ) {
         self.triangle_batch.push(triangle);
+        self.triangles.push(MaterialMeshTriangle {
+            positions: triangle,
+            texcoords: textured_triangle.map(|triangle| triangle.map(|vertex| vertex.texcoord)),
+        });
         if let Some(textured_triangle) = textured_triangle {
             self.textured_triangles.push(textured_triangle);
         }
@@ -483,11 +504,14 @@ impl MaterialGroupBuilder {
             .as_ref()
             .and_then(|name| materials.get(name).cloned());
         let diffuse_color = material.as_ref().and_then(MeshMaterial::diffuse_color);
+        let normal_plan = VertexNormalPlan::from_polygon_data(self.polygons.as_matrix().data());
         MaterialMeshGroup {
             material_name: self.material_name,
             material,
             diffuse_color,
             polygons: self.polygons,
+            normal_plan,
+            triangles: self.triangles,
             textured_triangles: self.textured_triangles,
         }
     }
@@ -645,7 +669,7 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                 if let Some(name) = current_material.as_ref() {
                     materials
                         .entry(name.clone())
-                        .or_insert(empty_mesh_material())
+                        .or_insert_with(empty_mesh_material)
                         .diffuse = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
@@ -653,7 +677,7 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                 if let Some(name) = current_material.as_ref() {
                     materials
                         .entry(name.clone())
-                        .or_insert(empty_mesh_material())
+                        .or_insert_with(empty_mesh_material)
                         .ambient = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
@@ -661,7 +685,7 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                 if let Some(name) = current_material.as_ref() {
                     materials
                         .entry(name.clone())
-                        .or_insert(empty_mesh_material())
+                        .or_insert_with(empty_mesh_material)
                         .specular = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
@@ -670,7 +694,7 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                     let filename = parse_mtl_texture_filename(parts, source, line_num)?;
                     materials
                         .entry(name.clone())
-                        .or_insert(empty_mesh_material())
+                        .or_insert_with(empty_mesh_material)
                         .diffuse_texture = Some(resolve_sibling_path(source, &filename));
                 }
             }
@@ -1572,6 +1596,53 @@ f 1/1 2/2 4/4 3/3
         assert_eq!(mesh.groups[1].material_name.as_deref(), Some("green"));
         assert_eq!(mesh.groups[1].diffuse_color, Some(Rgb::new(0, 128, 0)));
         assert!(mesh.has_material_colors());
+        let _ = fs::remove_file(obj_path);
+        let _ = fs::remove_file(mtl_path);
+    }
+
+    #[test]
+    fn material_group_preserves_mixed_uv_and_non_uv_triangles() {
+        let obj_path = temp_file("mixed-uv", "obj");
+        let mtl_path = obj_path.with_extension("mtl");
+        let mtl_name = mtl_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("utf8 mtl filename");
+
+        fs::write(&mtl_path, b"newmtl tex\nKd 1 1 1\nmap_Kd texture.ppm\n")
+            .expect("write temp mtl");
+        fs::write(
+            &obj_path,
+            format!(
+                "\
+mtllib {mtl_name}
+v 0 0 0
+v 1 0 0
+v 0 1 0
+v 2 0 0
+v 3 0 0
+v 2 1 0
+vt 0 0
+vt 1 0
+vt 0 1
+usemtl tex
+f 1/1 2/2 3/3
+f 4 5 6
+"
+            ),
+        )
+        .expect("write temp obj");
+
+        let mesh = meshify_with_materials(obj_path.to_str().expect("utf8 path"))
+            .expect("load material mesh");
+        let group = &mesh.groups[0];
+
+        assert_eq!(group.polygons.triangle_count(), 2);
+        assert_eq!(group.textured_triangles.len(), 1);
+        assert_eq!(group.triangles.len(), 2);
+        assert!(group.triangles[0].texcoords.is_some());
+        assert!(group.triangles[1].texcoords.is_none());
+
         let _ = fs::remove_file(obj_path);
         let _ = fs::remove_file(mtl_path);
     }

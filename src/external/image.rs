@@ -3,6 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    str::FromStr,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -99,7 +100,7 @@ fn dimension_glitch(canvas: &Canvas) -> Canvas {
     glitched
 }
 
-fn next_token(buffer: &[u8], cursor: &mut usize) -> Option<String> {
+fn next_token<'a>(buffer: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
     loop {
         while *cursor < buffer.len() && buffer[*cursor].is_ascii_whitespace() {
             *cursor += 1;
@@ -127,7 +128,15 @@ fn next_token(buffer: &[u8], cursor: &mut usize) -> Option<String> {
         *cursor += 1;
     }
 
-    Some(String::from_utf8_lossy(&buffer[start..*cursor]).into_owned())
+    Some(&buffer[start..*cursor])
+}
+
+fn parse_token<T>(token: &[u8]) -> Result<T, Box<dyn Error>>
+where
+    T: FromStr,
+    T::Err: Error + 'static,
+{
+    Ok(std::str::from_utf8(token)?.parse::<T>()?)
 }
 
 fn scale_channel(value: u16, maxval: u16) -> Result<u8, Box<dyn Error>> {
@@ -159,15 +168,15 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
     let mut cursor = 0;
 
     let magic = next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing magic")?;
-    let width = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing width")?
-        .parse::<u32>()?;
-    let height = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing height")?
-        .parse::<u32>()?;
-    let maxval = next_token(&buffer, &mut cursor)
-        .ok_or("Invalid PPM file: missing maxval")?
-        .parse::<u16>()?;
+    let width = parse_token::<u32>(
+        next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing width")?,
+    )?;
+    let height = parse_token::<u32>(
+        next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing height")?,
+    )?;
+    let maxval = parse_token::<u16>(
+        next_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing maxval")?,
+    )?;
 
     if maxval == 0 {
         return Err("unsupported PPM maxval 0; maxval must be 1..=65535".into());
@@ -175,20 +184,23 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
 
     let pixel_count = u64::from(width) * u64::from(height);
     let pixel_count = usize::try_from(pixel_count).map_err(|_| "PPM image too large")?;
-    let mut pixels = Vec::with_capacity(pixel_count);
 
-    match magic.as_str() {
-        "P3" => {
+    let pixels = match magic {
+        b"P3" => {
+            let mut pixels = Vec::with_capacity(pixel_count.min(buffer.len()));
             for _ in 0..pixel_count {
-                let red = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing red channel")?
-                    .parse::<u16>()?;
-                let green = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing green channel")?
-                    .parse::<u16>()?;
-                let blue = next_token(&buffer, &mut cursor)
-                    .ok_or("Invalid PPM file: missing blue channel")?
-                    .parse::<u16>()?;
+                let red = parse_token::<u16>(
+                    next_token(&buffer, &mut cursor)
+                        .ok_or("Invalid PPM file: missing red channel")?,
+                )?;
+                let green = parse_token::<u16>(
+                    next_token(&buffer, &mut cursor)
+                        .ok_or("Invalid PPM file: missing green channel")?,
+                )?;
+                let blue = parse_token::<u16>(
+                    next_token(&buffer, &mut cursor)
+                        .ok_or("Invalid PPM file: missing blue channel")?,
+                )?;
 
                 pixels.push(Rgb::new(
                     scale_channel(red, maxval)?,
@@ -196,8 +208,9 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
                     scale_channel(blue, maxval)?,
                 ));
             }
+            pixels
         }
-        "P6" => {
+        b"P6" => {
             consume_p6_separator(&buffer, &mut cursor)?;
 
             let bytes_per_sample = if maxval < 256 { 1 } else { 2 };
@@ -213,6 +226,7 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
                 .into());
             }
 
+            let mut pixels = Vec::with_capacity(pixel_count);
             if bytes_per_sample == 1 {
                 for chunk in buffer[cursor..cursor + needed].chunks_exact(3) {
                     pixels.push(Rgb::new(
@@ -233,9 +247,16 @@ fn parse_ppm(path: &Path) -> Result<Canvas, Box<dyn Error>> {
                     ));
                 }
             }
+            pixels
         }
-        _ => return Err(format!("Invalid PPM file: unsupported magic {magic}").into()),
-    }
+        _ => {
+            return Err(format!(
+                "Invalid PPM file: unsupported magic {}",
+                String::from_utf8_lossy(magic)
+            )
+            .into());
+        }
+    };
 
     Ok(Canvas::from_pixels(width, height, pixels))
 }
@@ -254,6 +275,13 @@ mod tests {
             "gartus-external-{name}-{}.{}",
             std::process::id(),
             extension
+        ))
+    }
+
+    fn visual_test_temp_file(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "gartus-external-visual-{name}-{}.ppm",
+            std::process::id()
         ))
     }
 
@@ -336,6 +364,28 @@ mod tests {
     }
 
     #[test]
+    fn oversized_truncated_p6_returns_error_before_allocating_pixels() {
+        let path = temp_file("oversized-truncated-p6", "ppm");
+        fs::write(&path, b"P6\n100000 100000\n255\n").expect("write temp ppm");
+
+        let error = ppmify(path.to_str().expect("utf8 path"), false).expect_err("should fail");
+
+        assert!(error.to_string().contains("expected 30000000000 bytes"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn oversized_truncated_p3_returns_error_before_large_preallocation() {
+        let path = temp_file("oversized-truncated-p3", "ppm");
+        fs::write(&path, b"P3\n100000 100000\n255\n").expect("write temp ppm");
+
+        let error = ppmify(path.to_str().expect("utf8 path"), false).expect_err("should fail");
+
+        assert!(error.to_string().contains("missing red channel"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn pos_glitch_is_applied_after_parsing() {
         let path = temp_file("glitch", "ppm");
         fs::write(&path, b"P3\n2 1\n255\n1 2 3 4 5 6\n").expect("write temp ppm");
@@ -347,58 +397,50 @@ mod tests {
         assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3), Rgb::new(4, 5, 6)]);
         let _ = fs::remove_file(path);
     }
-}
 
-#[cfg(test)]
-fn visual_test_temp_file(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "gartus-external-visual-{name}-{}.ppm",
-        std::process::id()
-    ))
-}
+    #[test]
+    fn sobel_detects_edge_after_dimension_glitch_parse() {
+        let path = visual_test_temp_file("sobel-glitch");
+        fs::write(&path, b"P3\n2 1\n255\n0 0 0 255 255 255\n").expect("write temp ppm");
 
-#[test]
-fn external_fun() {
-    let path = visual_test_temp_file("sobel-glitch");
-    fs::write(&path, b"P3\n2 1\n255\n0 0 0 255 255 255\n").expect("write temp ppm");
+        let canvas = ppmify(path.to_str().expect("utf8 path"), true).expect("parse ppm");
+        let sobel = canvas.sobel();
 
-    let canvas = ppmify(path.to_str().expect("utf8 path"), true).expect("parse ppm");
-    let sobel = canvas.sobel();
+        assert_eq!(canvas.width(), 1);
+        assert_eq!(canvas.height(), 2);
+        assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+        let _ = fs::remove_file(path);
+    }
 
-    assert_eq!(canvas.width(), 1);
-    assert_eq!(canvas.height(), 2);
-    assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
-    let _ = fs::remove_file(path);
-}
+    #[test]
+    fn sobel_detects_edge_after_regular_parse() {
+        let path = visual_test_temp_file("sobel");
+        fs::write(&path, b"P3\n3 1\n255\n0 0 0 128 128 128 255 255 255\n").expect("write temp ppm");
 
-#[test]
-fn command_block() {
-    let path = visual_test_temp_file("sobel");
-    fs::write(&path, b"P3\n3 1\n255\n0 0 0 128 128 128 255 255 255\n").expect("write temp ppm");
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+        let sobel = canvas.sobel();
 
-    let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-    let sobel = canvas.sobel();
+        assert_eq!(canvas.width(), 3);
+        assert_eq!(canvas.height(), 1);
+        assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+        let _ = fs::remove_file(path);
+    }
 
-    assert_eq!(canvas.width(), 3);
-    assert_eq!(canvas.height(), 1);
-    assert!(sobel.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
-    let _ = fs::remove_file(path);
-}
+    #[test]
+    fn laplacian_detects_edge_after_regular_parse() {
+        let path = visual_test_temp_file("laplacian");
+        fs::write(
+            &path,
+            b"P3\n2 2\n255\n0 0 0 255 255 255 255 255 255 0 0 0\n",
+        )
+        .expect("write temp ppm");
 
-#[test]
-fn parse_and_display() {
-    let path = visual_test_temp_file("laplacian");
-    fs::write(
-        &path,
-        b"P3\n2 2\n255\n0 0 0 255 255 255 255 255 255 0 0 0\n",
-    )
-    .expect("write temp ppm");
+        let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
+        let edge = canvas.laplacian_edge_detection();
 
-    let canvas = ppmify(path.to_str().expect("utf8 path"), false).expect("parse ppm");
-    let edge = canvas.laplacian_edge_detection();
-
-    assert_eq!(canvas.width(), 2);
-    assert_eq!(canvas.height(), 2);
-    assert!(edge.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
-    let _ = fs::remove_file(path);
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 2);
+        assert!(edge.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+        let _ = fs::remove_file(path);
+    }
 }

@@ -29,6 +29,13 @@ use {
     std::sync::Arc,
 };
 
+#[cfg(feature = "external")]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AssetCaches {
+    mesh_cache: HashMap<PathBuf, Arc<MaterialMesh>>,
+    texture_cache: HashMap<PathBuf, Arc<Texture>>,
+}
+
 /// Rendering configuration for one MDL execution.
 #[derive(Debug, Clone)]
 pub struct RenderConfig {
@@ -41,6 +48,8 @@ pub struct RenderConfig {
     source_dir: Option<PathBuf>,
     save_enabled: bool,
     save_override: Option<PathBuf>,
+    #[cfg(feature = "external")]
+    texture_wrap: (TextureWrap, TextureWrap),
 }
 
 impl RenderConfig {
@@ -58,6 +67,8 @@ impl RenderConfig {
             source_dir: None,
             save_enabled: true,
             save_override: None,
+            #[cfg(feature = "external")]
+            texture_wrap: (TextureWrap::Clamp, TextureWrap::Clamp),
         }
     }
 
@@ -74,6 +85,8 @@ impl RenderConfig {
             source_dir: None,
             save_enabled: true,
             save_override: None,
+            #[cfg(feature = "external")]
+            texture_wrap: (TextureWrap::Clamp, TextureWrap::Clamp),
         }
     }
 
@@ -109,6 +122,14 @@ impl RenderConfig {
     #[must_use]
     pub fn save_override(mut self, output: impl Into<PathBuf>) -> Self {
         self.save_override = Some(output.into());
+        self
+    }
+
+    /// Sets wrap behavior for runtime-loaded textures.
+    #[cfg(feature = "external")]
+    #[must_use]
+    pub fn texture_wrap(mut self, wrap_s: TextureWrap, wrap_t: TextureWrap) -> Self {
+        self.texture_wrap = (wrap_s, wrap_t);
         self
     }
 
@@ -208,6 +229,8 @@ struct OutputState {
     source_dir: Option<PathBuf>,
     save_enabled: bool,
     save_override: Option<PathBuf>,
+    #[cfg(feature = "external")]
+    texture_wrap: (TextureWrap, TextureWrap),
 }
 
 #[derive(Debug)]
@@ -247,6 +270,24 @@ impl Runtime {
             mesh_cache: HashMap::new(),
             #[cfg(feature = "external")]
             texture_cache: HashMap::new(),
+        }
+    }
+
+    #[cfg(feature = "external")]
+    #[must_use]
+    pub(crate) fn with_asset_caches(config: &RenderConfig, caches: AssetCaches) -> Self {
+        let mut runtime = Self::new(config);
+        runtime.mesh_cache = caches.mesh_cache;
+        runtime.texture_cache = caches.texture_cache;
+        runtime
+    }
+
+    #[cfg(feature = "external")]
+    #[must_use]
+    pub(crate) fn asset_caches(&self) -> AssetCaches {
+        AssetCaches {
+            mesh_cache: self.mesh_cache.clone(),
+            texture_cache: self.texture_cache.clone(),
         }
     }
 
@@ -589,6 +630,15 @@ impl Runtime {
         self.canvas.draw_polygons(&self.scratch.tmp_polygon);
     }
 
+    #[cfg(feature = "external")]
+    pub(crate) fn draw_tmp_polygons_with_vertex_normal_plan(
+        &mut self,
+        plan: &crate::graphics::draw::VertexNormalPlan,
+    ) {
+        self.canvas
+            .draw_polygons_with_vertex_normal_plan(&self.scratch.tmp_polygon, Some(plan));
+    }
+
     pub(crate) fn display(&self) -> Result<(), ExecutionError> {
         if self.output.display_enabled {
             self.canvas.display().map_err(ExecutionError::Io)?;
@@ -690,7 +740,7 @@ impl Runtime {
         })?;
         let texture = Arc::new(
             Texture::from_canvas(image)
-                .wrap(TextureWrap::Repeat, TextureWrap::Repeat)
+                .wrap(self.output.texture_wrap.0, self.output.texture_wrap.1)
                 .filter(TextureFilter::Linear)
                 .mipmapped(),
         );
@@ -751,6 +801,8 @@ impl OutputState {
             source_dir: config.source_dir.clone(),
             save_enabled: config.save_enabled,
             save_override: config.save_override.clone(),
+            #[cfg(feature = "external")]
+            texture_wrap: config.texture_wrap,
         }
     }
 

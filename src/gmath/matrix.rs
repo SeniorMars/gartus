@@ -101,57 +101,8 @@ impl Matrix {
             return None;
         }
         let n = self.rows;
-        let mut inv_data = vec![0.0; n * n];
-
-        // Perform LU decomposition ONCE
         let (l_mat, u_mat, p_vec, _) = self.lu_decomp()?;
-
-        // Solve AX = I for each column of I using the precomputed LU
-        for col in 0..n {
-            let mut target_b = Matrix::zeros(n, 1);
-            target_b[(col, 0)] = 1.0;
-
-            // Re-implementing 'solve' logic here to avoid re-computing LU
-            let mut permuted_b = Matrix::zeros(n, 1);
-            for i in 0..n {
-                permuted_b[(i, 0)] = target_b[(p_vec[i], 0)];
-            }
-
-            let mut y_vec = Matrix::zeros(n, 1);
-            for i in 0..n {
-                let mut sum = 0.0;
-                for j in 0..i {
-                    unsafe {
-                        sum += l_mat.get_unchecked(i, j) * y_vec.get_unchecked(j, 0);
-                    }
-                }
-                unsafe {
-                    y_vec.set_unchecked(i, 0, permuted_b.get_unchecked(i, 0) - sum);
-                }
-            }
-
-            let mut x_vec = Matrix::zeros(n, 1);
-            for i in (0..n).rev() {
-                let mut sum = 0.0;
-                for j in i + 1..n {
-                    unsafe {
-                        sum += u_mat.get_unchecked(i, j) * x_vec.get_unchecked(j, 0);
-                    }
-                }
-                unsafe {
-                    let val = (y_vec.get_unchecked(i, 0) - sum) / u_mat.get_unchecked(i, i);
-                    x_vec.set_unchecked(i, 0, val);
-                }
-            }
-
-            for row in 0..n {
-                unsafe {
-                    inv_data[col * n + row] = x_vec.get_unchecked(row, 0);
-                }
-            }
-        }
-
-        Some(Matrix::new(n, n, inv_data))
+        Self::solve_with_lu(&l_mat, &u_mat, &p_vec, &Self::identity_matrix(n))
     }
 
     /// Returns the trace of the [`Matrix`].
@@ -203,46 +154,7 @@ impl Matrix {
     /// Returns the reduced row-echelon form of the [`Matrix`] using `eps` as the zero tolerance.
     pub fn rref_with_tolerance(&self, eps: f64) -> Self {
         let mut matrix = self.clone();
-        let mut lead = 0;
-
-        for row in 0..matrix.rows {
-            if lead >= matrix.cols {
-                break;
-            }
-
-            let mut pivot_row = row;
-            while matrix[(pivot_row, lead)].abs() <= eps {
-                pivot_row += 1;
-                if pivot_row == matrix.rows {
-                    pivot_row = row;
-                    lead += 1;
-                    if lead == matrix.cols {
-                        return matrix;
-                    }
-                }
-            }
-
-            matrix.swap_rows(row, pivot_row);
-            let pivot = matrix[(row, lead)];
-            if pivot.abs() > eps {
-                for col in 0..matrix.cols {
-                    matrix[(row, col)] /= pivot;
-                }
-            }
-
-            for other_row in 0..matrix.rows {
-                if other_row != row {
-                    let factor = matrix[(other_row, lead)];
-                    if factor.abs() > eps {
-                        for col in 0..matrix.cols {
-                            matrix[(other_row, col)] -= factor * matrix[(row, col)];
-                        }
-                    }
-                }
-            }
-
-            lead += 1;
-        }
+        let _full_rank = Self::gauss_jordan_general(&mut matrix, eps);
 
         for value in &mut matrix.data {
             if value.abs() <= eps {
@@ -275,21 +187,8 @@ impl Matrix {
             return None;
         }
 
-        let n = self.rows;
-        let mut x_data = vec![0.0; n * b_mat.cols];
-
-        for col in 0..b_mat.cols {
-            let mut b_col = Matrix::zeros(n, 1);
-            for row in 0..n {
-                b_col[(row, 0)] = b_mat[(row, col)];
-            }
-            let x_vec = self.solve(&b_col)?;
-            for row in 0..n {
-                x_data[col * n + row] = x_vec[(row, 0)];
-            }
-        }
-
-        Some(Matrix::new(n, b_mat.cols, x_data))
+        let (l_mat, u_mat, p_vec, _) = self.lu_decomp()?;
+        Self::solve_with_lu(&l_mat, &u_mat, &p_vec, b_mat)
     }
 
     /// Returns the determinant of a squared [Matrix].
@@ -374,32 +273,57 @@ impl Matrix {
         }
 
         let (l_mat, u_mat, p_vec, _) = self.lu_decomp()?;
-        let n_dim = self.rows;
+        Self::solve_with_lu(&l_mat, &u_mat, &p_vec, target_b)
+    }
 
-        let mut permuted_b = Matrix::zeros(n_dim, 1);
-        for i in 0..n_dim {
-            permuted_b[(i, 0)] = target_b[(p_vec[i], 0)];
+    fn solve_with_lu(
+        l_mat: &Matrix,
+        u_mat: &Matrix,
+        p_vec: &[usize],
+        target_b: &Matrix,
+    ) -> Option<Matrix> {
+        let n = l_mat.rows;
+        if l_mat.rows != l_mat.cols
+            || u_mat.rows != n
+            || u_mat.cols != n
+            || p_vec.len() != n
+            || target_b.rows != n
+        {
+            return None;
         }
 
-        let mut y_vec = Matrix::zeros(n_dim, 1);
-        for i in 0..n_dim {
-            let mut sum = 0.0;
-            for j in 0..i {
-                sum += l_mat[(i, j)] * y_vec[(j, 0)];
+        let mut y_data = vec![0.0; n * target_b.cols];
+        let mut x_data = vec![0.0; n * target_b.cols];
+
+        for col in 0..target_b.cols {
+            for i in 0..n {
+                let mut sum = 0.0;
+                for j in 0..i {
+                    unsafe {
+                        sum += l_mat.get_unchecked(i, j) * *y_data.get_unchecked(col * n + j);
+                    }
+                }
+                unsafe {
+                    *y_data.get_unchecked_mut(col * n + i) =
+                        target_b.get_unchecked(p_vec[i], col) - sum;
+                }
             }
-            y_vec[(i, 0)] = permuted_b[(i, 0)] - sum;
-        }
 
-        let mut x_vec = Matrix::zeros(n_dim, 1);
-        for i in (0..n_dim).rev() {
-            let mut sum = 0.0;
-            for j in i + 1..n_dim {
-                sum += u_mat[(i, j)] * x_vec[(j, 0)];
+            for i in (0..n).rev() {
+                let mut sum = 0.0;
+                for j in i + 1..n {
+                    unsafe {
+                        sum += u_mat.get_unchecked(i, j) * *x_data.get_unchecked(col * n + j);
+                    }
+                }
+                unsafe {
+                    *x_data.get_unchecked_mut(col * n + i) =
+                        (*y_data.get_unchecked(col * n + i) - sum) / u_mat.get_unchecked(i, i);
+                }
             }
-            x_vec[(i, 0)] = (y_vec[(i, 0)] - sum) / u_mat[(i, i)];
         }
 
-        Some(x_vec)
+        Some(Matrix::new(n, target_b.cols, x_data))
     }
 
     /// Returns the QR decomposition of a squared [`Matrix`].
@@ -411,6 +335,10 @@ impl Matrix {
         let n = self.rows;
         let mut q_mat = Self::identity_matrix(n);
         let mut r_mat = self.clone();
+
+        if n <= 1 {
+            return Some((q_mat, r_mat));
+        }
 
         for i in 0..n - 1 {
             let mut v_data = Vec::with_capacity(n - i);
@@ -790,9 +718,12 @@ impl Matrix {
                     .enumerate()
                     .for_each(|(j, result_col)| {
                         for k in 0..self.cols {
-                            let b = other[(k, j)];
-                            for i in 0..self.rows {
-                                result_col[i] += self[(i, k)] * b;
+                            unsafe {
+                                let b = other.get_unchecked(k, j);
+                                for i in 0..self.rows {
+                                    *result_col.get_unchecked_mut(i) +=
+                                        self.get_unchecked(i, k) * b;
+                                }
                             }
                         }
                     });
@@ -1179,6 +1110,17 @@ mod tests {
     }
 
     #[test]
+    fn solve_matrix_handles_multiple_rhs_columns() {
+        let a = Matrix::new(2, 2, vec![2.0, 1.0, 1.0, 3.0]);
+        let expected_x = Matrix::new(2, 2, vec![1.0, 3.0, 2.0, 4.0]);
+        let b = a.mult_matrix(&expected_x);
+
+        let actual_x = a.solve_matrix(&b).expect("matrix should be invertible");
+
+        assert!(actual_x.approx_eq(&expected_x, 1e-10));
+    }
+
+    #[test]
     fn qr_decomp_test() {
         let a = Matrix::new(
             3,
@@ -1190,6 +1132,25 @@ mod tests {
         assert!(qt_q.approx_eq(&Matrix::identity_matrix(3), 1e-10));
         let q_r = q * r;
         assert!(q_r.approx_eq(&a, 1e-10));
+    }
+
+    #[test]
+    fn qr_decomp_handles_zero_by_zero_matrix() {
+        let a = Matrix::new(0, 0, Vec::new());
+        let (q, r) = a.qr_decomp().expect("square matrix");
+
+        assert_eq!(q.rows(), 0);
+        assert_eq!(q.cols(), 0);
+        assert_eq!(r.rows(), 0);
+        assert_eq!(r.cols(), 0);
+    }
+
+    #[test]
+    fn eigenvalues_handles_zero_by_zero_matrix() {
+        let a = Matrix::new(0, 0, Vec::new());
+        let ev = a.eigenvalues().expect("symmetric matrix");
+
+        assert!(ev.is_empty());
     }
 
     #[test]

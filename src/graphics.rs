@@ -18,6 +18,9 @@ pub mod filters;
 pub mod lighting;
 /// Small 2D primitives and bitmap text helpers.
 pub mod primitives;
+/// Minimal path/ray tracing helpers.
+#[cfg(feature = "fancy_math")]
+pub mod raytracing;
 #[cfg(test)]
 mod tests;
 /// 2D texture sampling helpers.

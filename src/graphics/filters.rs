@@ -287,41 +287,71 @@ impl Canvas {
     #[allow(clippy::cast_possible_truncation)]
     /// Pixelate / Mosaic effect.
     pub fn pixelate(&self, block_size: usize) -> Canvas {
-        let mut result = self.blank_like();
+        assert!(block_size > 0, "pixelate block size must be positive");
         let w = self.width() as usize;
         let h = self.height() as usize;
+        let blocks_x = w.div_ceil(block_size);
+        let blocks_y = h.div_ceil(block_size);
 
-        for by in (0..h).step_by(block_size) {
-            for bx in (0..w).step_by(block_size) {
-                let mut r_sum = 0u32;
-                let mut g_sum = 0u32;
-                let mut b_sum = 0u32;
-                let mut count = 0u32;
+        let block_colors = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..blocks_x * blocks_y)
+                    .into_par_iter()
+                    .map(|idx| {
+                        let bx = (idx % blocks_x) * block_size;
+                        let by = (idx / blocks_x) * block_size;
+                        self.pixelate_block_color(bx, by, block_size, w, h)
+                    })
+                    .collect::<Vec<_>>()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..blocks_x * blocks_y)
+                    .map(|idx| {
+                        let bx = (idx % blocks_x) * block_size;
+                        let by = (idx / blocks_x) * block_size;
+                        self.pixelate_block_color(bx, by, block_size, w, h)
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
 
-                for y in by..min(by + block_size, h) {
-                    for x in bx..min(bx + block_size, w) {
-                        let p = self[y * w + x];
-                        r_sum += u32::from(p.red);
-                        g_sum += u32::from(p.green);
-                        b_sum += u32::from(p.blue);
-                        count += 1;
-                    }
-                }
+        self.map_pixels_with_position_independent(|x, y, _| {
+            let block_x = x as usize / block_size;
+            let block_y = y as usize / block_size;
+            block_colors[Self::idx(blocks_x, block_x, block_y)]
+        })
+    }
 
-                let avg = Rgb::new(
-                    (r_sum / count) as u8,
-                    (g_sum / count) as u8,
-                    (b_sum / count) as u8,
-                );
+    fn pixelate_block_color(
+        &self,
+        bx: usize,
+        by: usize,
+        block_size: usize,
+        width: usize,
+        height: usize,
+    ) -> Rgb {
+        let mut r_sum = 0u32;
+        let mut g_sum = 0u32;
+        let mut b_sum = 0u32;
+        let mut count = 0u32;
 
-                for y in by..min(by + block_size, h) {
-                    for x in bx..min(bx + block_size, w) {
-                        result[y * w + x] = avg;
-                    }
-                }
+        for y in by..min(by + block_size, height) {
+            for x in bx..min(bx + block_size, width) {
+                let p = self[y * width + x];
+                r_sum += u32::from(p.red);
+                g_sum += u32::from(p.green);
+                b_sum += u32::from(p.blue);
+                count += 1;
             }
         }
-        result
+
+        Rgb::new(
+            (r_sum / count) as u8,
+            (g_sum / count) as u8,
+            (b_sum / count) as u8,
+        )
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -395,40 +425,35 @@ impl Canvas {
     #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
     /// Median filter for noise reduction.
     pub fn median_filter(&self, radius: usize) -> Canvas {
-        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
         let window_len = (2 * radius + 1).pow(2);
-        let mut rs = Vec::with_capacity(window_len);
-        let mut gs = Vec::with_capacity(window_len);
-        let mut bs = Vec::with_capacity(window_len);
 
-        for y in 0..h {
-            for x in 0..w {
-                rs.clear();
-                gs.clear();
-                bs.clear();
+        self.map_pixels_with_position_independent(|x, y, _| {
+            let x = x as isize;
+            let y = y as isize;
+            let mut rs = Vec::with_capacity(window_len);
+            let mut gs = Vec::with_capacity(window_len);
+            let mut bs = Vec::with_capacity(window_len);
 
-                for dy in -(radius as isize)..=(radius as isize) {
-                    for dx in -(radius as isize)..=(radius as isize) {
-                        let nx = (x + dx).clamp(0, w - 1);
-                        let ny = (y + dy).clamp(0, h - 1);
-                        let p = self[(ny * w + nx) as usize];
-                        rs.push(p.red);
-                        gs.push(p.green);
-                        bs.push(p.blue);
-                    }
+            for dy in -(radius as isize)..=(radius as isize) {
+                for dx in -(radius as isize)..=(radius as isize) {
+                    let nx = (x + dx).clamp(0, w - 1);
+                    let ny = (y + dy).clamp(0, h - 1);
+                    let p = self[(ny * w + nx) as usize];
+                    rs.push(p.red);
+                    gs.push(p.green);
+                    bs.push(p.blue);
                 }
-
-                rs.sort_unstable();
-                gs.sort_unstable();
-                bs.sort_unstable();
-
-                let mid = rs.len() / 2;
-                result[(y * w + x) as usize] = Rgb::new(rs[mid], gs[mid], bs[mid]);
             }
-        }
-        result
+
+            rs.sort_unstable();
+            gs.sort_unstable();
+            bs.sort_unstable();
+
+            let mid = rs.len() / 2;
+            Rgb::new(rs[mid], gs[mid], bs[mid])
+        })
     }
 
     /// Applies an Oil Painting Filter.
@@ -448,48 +473,42 @@ impl Canvas {
     /// Panics if `levels` is 0.
     pub fn oil_painting_custom(&self, radius: usize, levels: usize) -> Canvas {
         assert!(levels > 0, "oil painting levels must be positive");
-        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
         let radius = radius as isize;
-        let mut counts = vec![0u32; levels];
-        let mut red_sums = vec![0u32; levels];
-        let mut green_sums = vec![0u32; levels];
-        let mut blue_sums = vec![0u32; levels];
 
-        for y in 0..h {
-            for x in 0..w {
-                counts.fill(0);
-                red_sums.fill(0);
-                green_sums.fill(0);
-                blue_sums.fill(0);
+        self.map_pixels_with_position_independent(|x, y, _| {
+            let x = x as isize;
+            let y = y as isize;
+            let mut counts = vec![0u32; levels];
+            let mut red_sums = vec![0u32; levels];
+            let mut green_sums = vec![0u32; levels];
+            let mut blue_sums = vec![0u32; levels];
 
-                for dy in -radius..=radius {
-                    for dx in -radius..=radius {
-                        let nx = (x + dx).clamp(0, w - 1);
-                        let ny = (y + dy).clamp(0, h - 1);
-                        let p = self[(ny * w + nx) as usize];
-                        let bucket = (usize::from(p.luminance()) * levels / 256).min(levels - 1);
-                        counts[bucket] += 1;
-                        red_sums[bucket] += u32::from(p.red);
-                        green_sums[bucket] += u32::from(p.green);
-                        blue_sums[bucket] += u32::from(p.blue);
-                    }
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let nx = (x + dx).clamp(0, w - 1);
+                    let ny = (y + dy).clamp(0, h - 1);
+                    let p = self[(ny * w + nx) as usize];
+                    let bucket = (usize::from(p.luminance()) * levels / 256).min(levels - 1);
+                    counts[bucket] += 1;
+                    red_sums[bucket] += u32::from(p.red);
+                    green_sums[bucket] += u32::from(p.green);
+                    blue_sums[bucket] += u32::from(p.blue);
                 }
-                let bucket = counts
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, count)| *count)
-                    .map_or(0, |(bucket, _)| bucket);
-                let count = counts[bucket].max(1);
-                result[(y * w + x) as usize] = Rgb::new(
-                    (red_sums[bucket] / count) as u8,
-                    (green_sums[bucket] / count) as u8,
-                    (blue_sums[bucket] / count) as u8,
-                );
             }
-        }
-        result
+            let bucket = counts
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, count)| *count)
+                .map_or(0, |(bucket, _)| bucket);
+            let count = counts[bucket].max(1);
+            Rgb::new(
+                (red_sums[bucket] / count) as u8,
+                (green_sums[bucket] / count) as u8,
+                (blue_sums[bucket] / count) as u8,
+            )
+        })
     }
 
     #[allow(
@@ -499,37 +518,35 @@ impl Canvas {
     )]
     /// Applies a Watercolor Effect.
     pub fn watercolor(&self) -> Canvas {
-        let mut result = self.blank_like();
         let w = self.width() as isize;
         let h = self.height() as isize;
         let radius = 3;
 
-        for y in 0..h {
-            for x in 0..w {
-                let mut r_sum = 0u32;
-                let mut g_sum = 0u32;
-                let mut b_sum = 0u32;
-                let mut count = 0u32;
+        self.map_pixels_with_position_independent(|x, y, _| {
+            let x = x as isize;
+            let y = y as isize;
+            let mut r_sum = 0u32;
+            let mut g_sum = 0u32;
+            let mut b_sum = 0u32;
+            let mut count = 0u32;
 
-                for dy in -radius..=radius {
-                    for dx in -radius..=radius {
-                        let nx = (x + dx).clamp(0, w - 1);
-                        let ny = (y + dy).clamp(0, h - 1);
-                        let p = self[(ny * w + nx) as usize];
-                        r_sum += u32::from(p.red);
-                        g_sum += u32::from(p.green);
-                        b_sum += u32::from(p.blue);
-                        count += 1;
-                    }
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let nx = (x + dx).clamp(0, w - 1);
+                    let ny = (y + dy).clamp(0, h - 1);
+                    let p = self[(ny * w + nx) as usize];
+                    r_sum += u32::from(p.red);
+                    g_sum += u32::from(p.green);
+                    b_sum += u32::from(p.blue);
+                    count += 1;
                 }
-                result[(y * w + x) as usize] = Rgb::new(
-                    (r_sum / count) as u8,
-                    (g_sum / count) as u8,
-                    (b_sum / count) as u8,
-                );
             }
-        }
-        result
+            Rgb::new(
+                (r_sum / count) as u8,
+                (g_sum / count) as u8,
+                (b_sum / count) as u8,
+            )
+        })
     }
 
     // --- REFACTORED EXISTING FILTERS ---
@@ -751,43 +768,41 @@ impl Canvas {
         let radius = radius as isize;
         let two_sigma_space_squared = 2.0 * sigma_space * sigma_space;
         let two_sigma_color_squared = 2.0 * sigma_color * sigma_color;
-        let mut result = self.blank_like();
 
-        for y in 0..height {
-            for x in 0..width {
-                let center = self[(y * width + x) as usize];
-                let mut r_sum = 0.0;
-                let mut g_sum = 0.0;
-                let mut b_sum = 0.0;
-                let mut weight_sum = 0.0;
+        self.map_pixels_with_position_independent(|x, y, _| {
+            let x = x as isize;
+            let y = y as isize;
+            let center = self[(y * width + x) as usize];
+            let mut r_sum = 0.0;
+            let mut g_sum = 0.0;
+            let mut b_sum = 0.0;
+            let mut weight_sum = 0.0;
 
-                for dy in -radius..=radius {
-                    for dx in -radius..=radius {
-                        let nx = (x + dx).clamp(0, width - 1);
-                        let ny = (y + dy).clamp(0, height - 1);
-                        let pixel = self[(ny * width + nx) as usize];
-                        let spatial_distance = (dx * dx + dy * dy) as f32;
-                        let color_distance = (f32::from(pixel.red) - f32::from(center.red)).powi(2)
-                            + (f32::from(pixel.green) - f32::from(center.green)).powi(2)
-                            + (f32::from(pixel.blue) - f32::from(center.blue)).powi(2);
-                        let weight = (-spatial_distance / two_sigma_space_squared).exp()
-                            * (-color_distance / two_sigma_color_squared).exp();
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let nx = (x + dx).clamp(0, width - 1);
+                    let ny = (y + dy).clamp(0, height - 1);
+                    let pixel = self[(ny * width + nx) as usize];
+                    let spatial_distance = (dx * dx + dy * dy) as f32;
+                    let color_distance = (f32::from(pixel.red) - f32::from(center.red)).powi(2)
+                        + (f32::from(pixel.green) - f32::from(center.green)).powi(2)
+                        + (f32::from(pixel.blue) - f32::from(center.blue)).powi(2);
+                    let weight = (-spatial_distance / two_sigma_space_squared).exp()
+                        * (-color_distance / two_sigma_color_squared).exp();
 
-                        r_sum += f32::from(pixel.red) * weight;
-                        g_sum += f32::from(pixel.green) * weight;
-                        b_sum += f32::from(pixel.blue) * weight;
-                        weight_sum += weight;
-                    }
+                    r_sum += f32::from(pixel.red) * weight;
+                    g_sum += f32::from(pixel.green) * weight;
+                    b_sum += f32::from(pixel.blue) * weight;
+                    weight_sum += weight;
                 }
-
-                result[(y * width + x) as usize] = Rgb::new(
-                    Self::clamp_u8(r_sum / weight_sum),
-                    Self::clamp_u8(g_sum / weight_sum),
-                    Self::clamp_u8(b_sum / weight_sum),
-                );
             }
-        }
-        result
+
+            Rgb::new(
+                Self::clamp_u8(r_sum / weight_sum),
+                Self::clamp_u8(g_sum / weight_sum),
+                Self::clamp_u8(b_sum / weight_sum),
+            )
+        })
     }
 
     /// Unsharp-mask sharpening: original + amount * (original - blurred).
@@ -860,30 +875,47 @@ impl Canvas {
         let height = self.height() as usize;
         let tiles_x = width.div_ceil(tile_size);
         let tiles_y = height.div_ceil(tile_size);
-        let mut luts = vec![[0u8; 256]; tiles_x * tiles_y];
 
-        for tile_y in 0..tiles_y {
-            for tile_x in 0..tiles_x {
-                let x0 = tile_x * tile_size;
-                let y0 = tile_y * tile_size;
-                let x1 = min(x0 + tile_size, width);
-                let y1 = min(y0 + tile_size, height);
-                luts[Self::idx(tiles_x, tile_x, tile_y)] =
-                    self.clahe_tile_lut(x0, y0, x1, y1, clip_limit);
+        let luts = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..tiles_x * tiles_y)
+                    .into_par_iter()
+                    .map(|idx| {
+                        let tile_x = idx % tiles_x;
+                        let tile_y = idx / tiles_x;
+                        let x0 = tile_x * tile_size;
+                        let y0 = tile_y * tile_size;
+                        let x1 = min(x0 + tile_size, width);
+                        let y1 = min(y0 + tile_size, height);
+                        self.clahe_tile_lut(x0, y0, x1, y1, clip_limit)
+                    })
+                    .collect::<Vec<_>>()
             }
-        }
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..tiles_x * tiles_y)
+                    .map(|idx| {
+                        let tile_x = idx % tiles_x;
+                        let tile_y = idx / tiles_x;
+                        let x0 = tile_x * tile_size;
+                        let y0 = tile_y * tile_size;
+                        let x1 = min(x0 + tile_size, width);
+                        let y1 = min(y0 + tile_size, height);
+                        self.clahe_tile_lut(x0, y0, x1, y1, clip_limit)
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
 
-        let mut result = self.blank_like();
-        for y in 0..height {
-            for x in 0..width {
-                let tile_x = (x / tile_size).min(tiles_x - 1);
-                let tile_y = (y / tile_size).min(tiles_y - 1);
-                let lut = &luts[Self::idx(tiles_x, tile_x, tile_y)];
-                result[Self::idx(width, x, y)] =
-                    Self::equalized_luminance_pixel(self[Self::idx(width, x, y)], lut);
-            }
-        }
-        result
+        self.map_pixels_with_position_independent(|x, y, pixel| {
+            let x = x as usize;
+            let y = y as usize;
+            let tile_x = (x / tile_size).min(tiles_x - 1);
+            let tile_y = (y / tile_size).min(tiles_y - 1);
+            let lut = &luts[Self::idx(tiles_x, tile_x, tile_y)];
+            Self::equalized_luminance_pixel(pixel, lut)
+        })
     }
 
     #[allow(clippy::cast_precision_loss)]
