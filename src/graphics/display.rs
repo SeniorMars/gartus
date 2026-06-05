@@ -8,6 +8,18 @@ use std::{
     process::{Command, Stdio},
 };
 
+/// Controls how filled polygon triangles choose their draw color.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PolygonColorMode {
+    /// Use the canvas line color for every triangle.
+    #[default]
+    LineColor,
+    /// Generate a stable pseudo-random color from each triangle index.
+    DeterministicRandom,
+    /// Generate stable color variation blended from the canvas line color.
+    TintedFromLine,
+}
+
 #[derive(Clone, Debug)]
 /// An art [Canvas] / computer screen is represented here.
 #[must_use]
@@ -16,6 +28,7 @@ pub struct Canvas {
     height: u32,
     // always 255 — field kept for internal use only
     pixels: Vec<Rgb>,
+    zbuffer: Vec<f64>,
     /// When true, (0,0) is top-left. When false (default), (0,0) is bottom-left.
     pub upper_left_origin: bool,
     /// When true (default), coordinates wrap around canvas edges. When false, out-of-bounds plots are clipped.
@@ -24,6 +37,7 @@ pub struct Canvas {
     pub line: Rgb,
     /// Width of drawn lines in pixels. Default 1.0.
     line_width: f64,
+    polygon_color_mode: PolygonColorMode,
 }
 
 impl Default for Canvas {
@@ -32,10 +46,12 @@ impl Default for Canvas {
             width: 0,
             height: 0,
             pixels: Vec::new(),
+            zbuffer: Vec::new(),
             upper_left_origin: false,
             wrapped: true,
             line: Rgb::default(),
             line_width: 1.0,
+            polygon_color_mode: PolygonColorMode::default(),
         }
     }
 }
@@ -109,10 +125,12 @@ impl Canvas {
             width,
             height,
             pixels,
+            zbuffer: vec![f64::NEG_INFINITY; Self::pixel_count(width, height)],
             upper_left_origin: false,
             wrapped: true,
             line: Rgb::default(),
             line_width: 1.0,
+            polygon_color_mode: PolygonColorMode::default(),
         }
     }
 
@@ -126,10 +144,12 @@ impl Canvas {
             width: self.width,
             height: self.height,
             pixels,
+            zbuffer: vec![f64::NEG_INFINITY; self.pixels.len()],
             upper_left_origin: self.upper_left_origin,
             wrapped: self.wrapped,
             line: self.line,
             line_width: self.line_width,
+            polygon_color_mode: self.polygon_color_mode,
         }
     }
 
@@ -242,6 +262,13 @@ impl Canvas {
         Some(&mut self.pixels[y as usize * width as usize + x as usize])
     }
 
+    /// Returns the z-buffer value at `(x, y)`, or `None` if out of bounds.
+    #[must_use]
+    pub fn get_zbuffer(&self, x: i64, y: i64) -> Option<f64> {
+        let (x, y) = self.normalize_coords(x, y)?;
+        Some(self.zbuffer[y as usize * self.width as usize + x as usize])
+    }
+
     /// Maps external coordinates (potentially negative or out-of-bounds) to
     /// internal canvas coordinates based on wrapping and origin settings.
     ///
@@ -289,27 +316,68 @@ impl Canvas {
     /// image.plot(&pixel, 250, 250);
     /// ```
     pub fn plot(&mut self, pixel: &Rgb, x: i64, y: i64) {
-        if let Some(target) = self.get_pixel_mut(x, y) {
-            *target = *pixel;
+        self.plot_z(pixel, x, y, 0.0);
+    }
+
+    /// Sets the pixel at `(x, y)` if `z` is closer than the current z-buffer value.
+    pub fn plot_z(&mut self, pixel: &Rgb, x: i64, y: i64, z: f64) {
+        if !z.is_finite() {
+            return;
+        }
+
+        if let Some((x, y)) = self.normalize_coords(x, y) {
+            let index = y as usize * self.width as usize + x as usize;
+            if z > self.zbuffer[index] {
+                self.pixels[index] = *pixel;
+                self.zbuffer[index] = z;
+            }
         }
     }
 
-    pub(crate) fn plot_clipped_horizontal_span(&mut self, pixel: Rgb, x0: i64, x1: i64, y: i64) {
-        if x0 > x1 {
+    /// Draws a clipped, non-wrapping horizontal z-buffered span.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    pub(crate) fn plot_z_span_clipped(
+        &mut self,
+        pixel: Rgb,
+        mut x0: i64,
+        mut x1: i64,
+        y: i64,
+        mut z: f64,
+        dz: f64,
+    ) {
+        let width = i64::from(self.width);
+        let height = i64::from(self.height);
+        if width == 0 || height == 0 || y < 0 || y >= height || x0 > x1 || !z.is_finite() {
             return;
         }
 
-        let Some((x0, row)) = self.normalize_coords(x0, y) else {
+        if x1 < 0 || x0 >= width {
             return;
-        };
-        let Some((x1, _)) = self.normalize_coords(x1, y) else {
-            return;
-        };
+        }
 
-        let width = self.width as usize;
-        let start = row as usize * width + x0 as usize;
-        let end = row as usize * width + x1 as usize;
-        self.pixels[start..=end].fill(pixel);
+        if x0 < 0 {
+            z += dz * (-x0) as f64;
+            x0 = 0;
+        }
+        x1 = x1.min(width - 1);
+
+        let storage_y = if self.upper_left_origin {
+            y
+        } else {
+            height - 1 - y
+        };
+        let start = storage_y as usize * self.width as usize + x0 as usize;
+        for (index, _) in (start..).zip(x0..=x1) {
+            if z > self.zbuffer[index] {
+                self.pixels[index] = pixel;
+                self.zbuffer[index] = z;
+            }
+            z += dz;
+        }
     }
 
     /// Returns a flat representation of all the pixels in the [Canvas].
@@ -327,6 +395,12 @@ impl Canvas {
         self.pixels.as_ref()
     }
 
+    /// Returns the canvas z-buffer.
+    #[must_use]
+    pub fn zbuffer(&self) -> &[f64] {
+        self.zbuffer.as_ref()
+    }
+
     /// Overwrites all pixels in the canvas with the given pixel data.
     ///
     /// # Panics
@@ -338,6 +412,7 @@ impl Canvas {
             "new pixel data must match canvas size"
         );
         self.pixels = pixels;
+        self.clear_zbuffer();
     }
 
     /// Returns a new canvas with every pixel transformed by `f`.
@@ -441,12 +516,29 @@ impl Canvas {
     /// ```
     pub fn clear_canvas(&mut self) {
         self.pixels.fill(Rgb::default());
+        self.clear_zbuffer();
+    }
+
+    /// Resets every z-buffer entry to negative infinity.
+    pub fn clear_zbuffer(&mut self) {
+        self.zbuffer.fill(f64::NEG_INFINITY);
     }
 
     /// Returns the current drawing line color.
     #[must_use]
     pub fn line_color(&self) -> Rgb {
         self.line
+    }
+
+    /// Sets how filled polygon triangles choose colors.
+    pub fn set_polygon_color_mode(&mut self, mode: PolygonColorMode) {
+        self.polygon_color_mode = mode;
+    }
+
+    /// Returns how filled polygon triangles choose colors.
+    #[must_use]
+    pub fn polygon_color_mode(&self) -> PolygonColorMode {
+        self.polygon_color_mode
     }
 
     /// Sets the current drawing line width.
@@ -649,6 +741,7 @@ pub struct CanvasBuilder {
     background: Rgb,
     line_color: Rgb,
     line_width: f64,
+    polygon_color_mode: PolygonColorMode,
     upper_left_origin: bool,
     wrapped: bool,
 }
@@ -662,6 +755,7 @@ impl CanvasBuilder {
             background: Rgb::default(),
             line_color: Rgb::default(),
             line_width: 1.0,
+            polygon_color_mode: PolygonColorMode::default(),
             upper_left_origin: false,
             wrapped: true,
         }
@@ -685,6 +779,12 @@ impl CanvasBuilder {
         self
     }
 
+    /// Sets how filled polygon triangles choose colors.
+    pub fn polygon_color_mode(mut self, mode: PolygonColorMode) -> Self {
+        self.polygon_color_mode = mode;
+        self
+    }
+
     /// Sets whether the origin is at the top-left (true) or bottom-left (false).
     pub fn upper_left_origin(mut self, upper_left: bool) -> Self {
         self.upper_left_origin = upper_left;
@@ -700,14 +800,17 @@ impl CanvasBuilder {
     /// Consumes the builder and returns a new [Canvas].
     pub fn build(self) -> Canvas {
         let pixels = vec![self.background; Canvas::pixel_count(self.width, self.height)];
+        let zbuffer = vec![f64::NEG_INFINITY; pixels.len()];
         Canvas {
             width: self.width,
             height: self.height,
             pixels,
+            zbuffer,
             upper_left_origin: self.upper_left_origin,
             wrapped: self.wrapped,
             line: self.line_color,
             line_width: self.line_width,
+            polygon_color_mode: self.polygon_color_mode,
         }
     }
 }
@@ -731,6 +834,7 @@ mod tests {
             .background(Rgb::new(10, 20, 30))
             .line_color(Rgb::new(40, 50, 60))
             .line_width(3.0)
+            .polygon_color_mode(PolygonColorMode::DeterministicRandom)
             .upper_left_origin(true)
             .wrapped(false)
             .build();
@@ -740,8 +844,24 @@ mod tests {
         assert_eq!(mapped.pixels(), &[Rgb::new(30, 20, 10)]);
         assert_eq!(mapped.line_color(), Rgb::new(40, 50, 60));
         assert!((mapped.line_width() - 3.0).abs() < f64::EPSILON);
+        assert_eq!(
+            mapped.polygon_color_mode(),
+            PolygonColorMode::DeterministicRandom
+        );
         assert!(mapped.upper_left_origin);
         assert!(!mapped.wrapped);
+    }
+
+    #[test]
+    fn polygon_color_mode_defaults_to_line_color_and_can_change() {
+        let mut canvas = Canvas::new(1, 1, Rgb::WHITE);
+
+        assert_eq!(canvas.polygon_color_mode(), PolygonColorMode::LineColor);
+        canvas.set_polygon_color_mode(PolygonColorMode::TintedFromLine);
+        assert_eq!(
+            canvas.polygon_color_mode(),
+            PolygonColorMode::TintedFromLine
+        );
     }
 
     #[test]
@@ -752,5 +872,34 @@ mod tests {
         assert_eq!(canvas.get_pixel(0, 0), None);
         canvas.plot(&Rgb::WHITE, 0, 0);
         assert!(canvas.is_empty());
+    }
+
+    #[test]
+    fn plot_z_only_replaces_farther_pixels() {
+        let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+
+        canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
+        canvas.plot_z(&Rgb::BLUE, 0, 0, 4.0);
+        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::RED));
+        assert_eq!(canvas.get_zbuffer(0, 0), Some(5.0));
+
+        canvas.plot_z(&Rgb::GREEN, 0, 0, 6.0);
+        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::GREEN));
+        assert_eq!(canvas.get_zbuffer(0, 0), Some(6.0));
+    }
+
+    #[test]
+    fn clear_canvas_resets_zbuffer() {
+        let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+
+        canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
+        canvas.clear_canvas();
+
+        assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::BLACK));
+        assert_eq!(canvas.get_zbuffer(0, 0), Some(f64::NEG_INFINITY));
     }
 }

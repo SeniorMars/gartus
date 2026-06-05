@@ -113,5 +113,6 @@ move
 100 -125 0
 box
 -50 0 40 50 120 80
+display
 save
 solid.png

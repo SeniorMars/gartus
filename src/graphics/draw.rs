@@ -1,6 +1,6 @@
-use super::colors::Rgb;
+use super::colors::{Hsl, Rgb};
 use crate::gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix};
-use crate::graphics::display::Canvas;
+use crate::graphics::display::{Canvas, PolygonColorMode};
 use std::collections::HashSet;
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
@@ -9,6 +9,7 @@ const PERSPECTIVE_EPS: f64 = 1e-12;
 struct ScanPoint {
     x: f64,
     y: i32,
+    z: f64,
 }
 
 struct WrappedRestore<'a> {
@@ -205,7 +206,7 @@ impl Canvas {
         );
 
         for (p0, p1) in edges.iter_edges() {
-            self.draw_line(self.line, p0[0], p0[1], p1[0], p1[1]);
+            self.draw_line_z(self.line, (p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2]));
         }
     }
 
@@ -225,13 +226,13 @@ impl Canvas {
         );
 
         for (p0, p1) in edges.iter_edges() {
-            let Some((x0, y0)) = perspective_xy(p0) else {
+            let Some((x0, y0, z0)) = perspective_xyz(p0) else {
                 continue;
             };
-            let Some((x1, y1)) = perspective_xy(p1) else {
+            let Some((x1, y1, z1)) = perspective_xyz(p1) else {
                 continue;
             };
-            self.draw_line(self.line, x0, y0, x1, y1);
+            self.draw_line_z(self.line, (x0, y0, z0), (x1, y1, z1));
         }
     }
 
@@ -246,17 +247,28 @@ impl Canvas {
             "polygon matrix must contain multiples of 3 points"
         );
 
-        for c in data.chunks_exact(12) {
+        for (index, c) in data.chunks_exact(12).enumerate() {
             let vis = (c[4] - c[0]) * (c[9] - c[1]) - (c[5] - c[1]) * (c[8] - c[0]) > 0.0;
             if vis {
-                self.draw_scanline_triangle(c[0], c[1], c[4], c[5], c[8], c[9]);
+                self.draw_scanline_triangle(
+                    triangle_color(self.polygon_color_mode(), self.line, index),
+                    (c[0], c[1], c[2]),
+                    (c[4], c[5], c[6]),
+                    (c[8], c[9], c[10]),
+                );
             }
         }
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn draw_scanline_triangle(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64) {
-        if ![x0, y0, x1, y1, x2, y2]
+    fn draw_scanline_triangle(
+        &mut self,
+        color: Rgb,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        if ![p0.0, p0.1, p0.2, p1.0, p1.1, p1.2, p2.0, p2.1, p2.2]
             .iter()
             .all(|value| value.is_finite())
         {
@@ -265,74 +277,81 @@ impl Canvas {
 
         let mut points = [
             ScanPoint {
-                x: x0.round(),
-                y: y0.round() as i32,
+                x: p0.0.round(),
+                y: p0.1.round() as i32,
+                z: p0.2,
             },
             ScanPoint {
-                x: x1.round(),
-                y: y1.round() as i32,
+                x: p1.0.round(),
+                y: p1.1.round() as i32,
+                z: p1.2,
             },
             ScanPoint {
-                x: x2.round(),
-                y: y2.round() as i32,
+                x: p2.0.round(),
+                y: p2.1.round() as i32,
+                z: p2.2,
             },
         ];
         points.sort_by_key(|point| point.y);
 
         let [bottom, middle, top] = points;
         if bottom.y == top.y {
-            let min_x = bottom.x.min(middle.x).min(top.x);
-            let max_x = bottom.x.max(middle.x).max(top.x);
-            self.draw_horizontal_span(self.line, min_x, max_x, bottom.y);
+            points.sort_by(|a, b| a.x.total_cmp(&b.x));
+            self.draw_scanline(color, points[0], points[2], bottom.y);
             return;
         }
 
         for y in bottom.y..=top.y {
-            let x0 = x_on_edge(bottom, top, y);
-            let x1 = if y <= middle.y {
-                x_on_edge(bottom, middle, y)
+            let p0 = point_on_edge(bottom, top, y);
+            let p1 = if y <= middle.y {
+                point_on_edge(bottom, middle, y)
             } else {
-                x_on_edge(middle, top, y)
+                point_on_edge(middle, top, y)
             };
-            self.draw_horizontal_span(self.line, x0, x1, y);
+            self.draw_scanline(color, p0, p1, y);
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    fn draw_horizontal_span(&mut self, color: Rgb, x0: f64, x1: f64, y: i32) {
-        let (mut x0, mut x1) = (x0.round() as i64, x1.round() as i64);
-        if x0 > x1 {
-            std::mem::swap(&mut x0, &mut x1);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn draw_scanline(&mut self, color: Rgb, mut p0: ScanPoint, mut p1: ScanPoint, y: i32) {
+        if p0.x > p1.x {
+            std::mem::swap(&mut p0, &mut p1);
         }
 
+        let x0 = p0.x.round() as i64;
+        let x1 = p1.x.round() as i64;
+        if x0 > x1 {
+            return;
+        }
+
+        let steps = x1 - x0;
+        let dz = if steps == 0 {
+            0.0
+        } else {
+            (p1.z - p0.z) / steps as f64
+        };
         let line_radius = self.line_radius();
         let y = i64::from(y);
+        let z = p0.z;
 
         if !self.wrapped {
-            let width = i64::from(self.width());
             let height = i64::from(self.height());
-            if width == 0 || height == 0 || y + line_radius < 0 || y - line_radius >= height {
-                return;
-            }
-            x0 = x0.max(0);
-            x1 = x1.min(width - 1);
-            if x0 > x1 {
+            if height == 0 || y + line_radius < 0 || y - line_radius >= height {
                 return;
             }
 
             for dy in -line_radius..=line_radius {
-                let y = y + dy;
-                if y >= 0 && y < height {
-                    self.plot_clipped_horizontal_span(color, x0, x1, y);
-                }
+                self.plot_z_span_clipped(color, x0, x1, y + dy, z, dz);
             }
             return;
         }
 
         for dy in -line_radius..=line_radius {
             let y = y + dy;
+            let mut z = z;
             for x in x0..=x1 {
-                self.plot(&color, x, y);
+                self.plot_z(&color, x, y, z);
+                z += dz;
             }
         }
     }
@@ -359,12 +378,25 @@ impl Canvas {
     /// ```
     #[allow(clippy::cast_possible_truncation)]
     pub fn draw_line(&mut self, color: Rgb, x0: f64, y0: f64, x1: f64, y1: f64) {
+        self.draw_line_z(color, (x0, y0, 0.0), (x1, y1, 0.0));
+    }
+
+    /// Draws a z-buffered line onto the [Canvas] from `(x, y, z)` to `(x, y, z)`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    pub fn draw_line_z(&mut self, color: Rgb, p0: (f64, f64, f64), p1: (f64, f64, f64)) {
         let line_radius = self.line_radius();
 
-        let (x0, y0, x1, y1) = if x0 > x1 {
-            (x1, y1, x0, y0)
+        if ![p0.0, p0.1, p0.2, p1.0, p1.1, p1.2]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return;
+        }
+
+        let (x0, y0, z0, x1, y1, z1) = if p0.0 > p1.0 {
+            (p1.0, p1.1, p1.2, p0.0, p0.1, p0.2)
         } else {
-            (x0, y0, x1, y1)
+            (p0.0, p0.1, p0.2, p1.0, p1.1, p1.2)
         };
 
         let (mut x0, mut y0, x1, y1) = (
@@ -377,58 +409,83 @@ impl Canvas {
         let (delta_y, delta_x) = (2 * (y1 - y0), -2 * (x1 - x0));
 
         if (x1 - x0).abs() >= (y1 - y0).abs() {
+            let steps = (x1 - x0).abs();
+            let dz = if steps == 0 {
+                0.0
+            } else {
+                (z1 - z0) / steps as f64
+            };
+            let mut z = z0;
             if delta_y > 0 {
                 // octant 1
                 let mut d = delta_y + delta_x / 2;
                 for x in x0..=x1 {
                     for dx in -line_radius..=line_radius {
-                        self.plot(&color, x, y0 + dx);
+                        self.plot_z(&color, x, y0 + dx, z);
                     }
                     if d > 0 {
                         y0 += 1;
                         d += delta_x;
                     }
                     d += delta_y;
+                    z += dz;
                 }
             } else {
                 // octant 8
                 let mut d = delta_y - delta_x / 2;
                 for x in x0..=x1 {
                     for dx in -line_radius..=line_radius {
-                        self.plot(&color, x, y0 + dx);
+                        self.plot_z(&color, x, y0 + dx, z);
                     }
                     if d < 0 {
                         y0 -= 1;
                         d -= delta_x;
                     }
                     d += delta_y;
+                    z += dz;
                 }
             }
         } else if delta_y > 0 {
             // octant 2
+            let steps = (y1 - y0).abs();
+            let dz = if steps == 0 {
+                0.0
+            } else {
+                (z1 - z0) / steps as f64
+            };
+            let mut z = z0;
             let mut d = delta_y / 2 + delta_x;
             for y in y0..=y1 {
                 for dy in -line_radius..=line_radius {
-                    self.plot(&color, x0 + dy, y);
+                    self.plot_z(&color, x0 + dy, y, z);
                 }
                 if d < 0 {
                     x0 += 1;
                     d += delta_y;
                 }
                 d += delta_x;
+                z += dz;
             }
         } else {
             // octant 7
+            let steps = (y1 - y0).abs();
+            let dz = if steps == 0 {
+                0.0
+            } else {
+                (z1 - z0) / steps as f64
+            };
+            let mut z = z0;
             let mut d = delta_y / 2 - delta_x;
             for y in (y1..=y0).rev() {
                 for dy in -line_radius..=line_radius {
-                    self.plot(&color, x0 + dy, y);
+                    self.plot_z(&color, x0 + dy, y, z);
                 }
                 if d > 0 {
                     x0 += 1;
                     d += delta_y;
                 }
                 d -= delta_x;
+                z += dz;
             }
         }
     }
@@ -441,22 +498,74 @@ impl Canvas {
     }
 }
 
-fn perspective_xy(point: &[f64]) -> Option<(f64, f64)> {
+fn perspective_xyz(point: &[f64]) -> Option<(f64, f64, f64)> {
     let w = point[3];
     if w.abs() < PERSPECTIVE_EPS {
         return None;
     }
-    Some((point[0] / w, point[1] / w))
+    Some((point[0] / w, point[1] / w, point[2] / w))
 }
 
-fn x_on_edge(start: ScanPoint, end: ScanPoint, y: i32) -> f64 {
+fn point_on_edge(start: ScanPoint, end: ScanPoint, y: i32) -> ScanPoint {
     let dy = end.y - start.y;
     if dy == 0 {
-        return end.x;
+        return end;
     }
 
     let t = f64::from(y - start.y) / f64::from(dy);
-    start.x + (end.x - start.x) * t
+    ScanPoint {
+        x: start.x + (end.x - start.x) * t,
+        y,
+        z: start.z + (end.z - start.z) * t,
+    }
+}
+
+fn triangle_color(mode: PolygonColorMode, base: Rgb, index: usize) -> Rgb {
+    match mode {
+        PolygonColorMode::LineColor => base,
+        PolygonColorMode::DeterministicRandom => random_triangle_color(index),
+        PolygonColorMode::TintedFromLine => tinted_triangle_color(base, index),
+    }
+}
+
+fn random_triangle_color(index: usize) -> Rgb {
+    let seed = triangle_color_seed(index);
+    Rgb::new(
+        ((seed >> 16) & 0xff) as u8,
+        ((seed >> 8) & 0xff) as u8,
+        (seed & 0xff) as u8,
+    )
+}
+
+fn tinted_triangle_color(base: Rgb, index: usize) -> Rgb {
+    if index.is_multiple_of(8) {
+        return base;
+    }
+
+    let base_hsl = Hsl::from(base);
+    let seed = triangle_color_seed(index);
+    let hue = (u32::from(base_hsl.hue) + seed % 360) % 360;
+    let saturation_jitter = i32::try_from((seed >> 12) % 31).expect("jitter fits i32") - 15;
+    let light_jitter = i32::try_from((seed >> 20) % 29).expect("jitter fits i32") - 14;
+
+    let saturation = (i32::from(base_hsl.saturation) + 20 + saturation_jitter).clamp(45, 95);
+    let light = (i32::from(base_hsl.light) + light_jitter).clamp(30, 78);
+    let varied = Rgb::from(Hsl::new(
+        u16::try_from(hue).expect("hue is less than 360"),
+        u16::try_from(saturation).expect("saturation is clamped to 0..=100"),
+        u16::try_from(light).expect("light is clamped to 0..=100"),
+    ));
+
+    base.lerp(varied, 0.68)
+}
+
+fn triangle_color_seed(index: usize) -> u32 {
+    let mut x = u32::try_from(index).unwrap_or(u32::MAX) ^ 0x9e37_79b9;
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^ (x >> 16)
 }
 
 #[cfg(test)]
@@ -479,6 +588,18 @@ mod tests {
         for y in 0..canvas.height() {
             for x in 0..canvas.width() {
                 if canvas.get_pixel(x.into(), y.into()) == Some(&Rgb::BLACK) {
+                    points.insert((x.into(), y.into()));
+                }
+            }
+        }
+        points
+    }
+
+    fn non_background_points(canvas: &Canvas, background: Rgb) -> BTreeSet<(i64, i64)> {
+        let mut points = BTreeSet::new();
+        for y in 0..canvas.height() {
+            for x in 0..canvas.width() {
+                if canvas.get_pixel(x.into(), y.into()) != Some(&background) {
                     points.insert((x.into(), y.into()));
                 }
             }
@@ -555,6 +676,19 @@ mod tests {
     }
 
     #[test]
+    fn draw_line_z_interpolates_depth_along_driving_axis() {
+        let mut canvas = Canvas::new_with_bg(5, 1, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+
+        canvas.draw_line_z(Rgb::BLACK, (0.0, 0.0, 0.0), (4.0, 0.0, 8.0));
+
+        assert_eq!(canvas.get_zbuffer(0, 0), Some(0.0));
+        assert_eq!(canvas.get_zbuffer(2, 0), Some(4.0));
+        assert_eq!(canvas.get_zbuffer(4, 0), Some(8.0));
+    }
+
+    #[test]
     fn thick_steep_lines_use_horizontal_brush() {
         let mut canvas = Canvas::new_with_bg(5, 5, Rgb::WHITE);
         canvas.upper_left_origin = true;
@@ -626,7 +760,7 @@ mod tests {
         canvas.draw_polygons(&polygons);
 
         assert_eq!(
-            black_points(&canvas),
+            non_background_points(&canvas, Rgb::WHITE),
             points([
                 (1, 1),
                 (2, 1),
@@ -659,7 +793,7 @@ mod tests {
         canvas.draw_polygons(&polygons);
 
         assert_eq!(
-            black_points(&canvas),
+            non_background_points(&canvas, Rgb::WHITE),
             points([
                 (3, 1),
                 (3, 2),
@@ -692,6 +826,46 @@ mod tests {
         canvas.draw_polygons(&polygons);
 
         assert!(black_points(&canvas).is_empty());
+    }
+
+    #[test]
+    fn draw_polygons_uses_zbuffer_for_overlapping_triangles() {
+        let mut near = PolygonMatrix::new();
+        near.add_polygon((1.0, 1.0, 10.0), (5.0, 1.0, 10.0), (3.0, 5.0, 10.0));
+        let mut far = PolygonMatrix::new();
+        far.add_polygon((1.0, 1.0, 1.0), (5.0, 1.0, 1.0), (3.0, 5.0, 1.0));
+
+        let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
+        canvas.upper_left_origin = true;
+        canvas.wrapped = false;
+
+        canvas.line = Rgb::BLUE;
+        canvas.draw_polygons(&near);
+        canvas.line = Rgb::RED;
+        canvas.draw_polygons(&far);
+
+        assert_eq!(canvas.get_pixel(3, 3), Some(&Rgb::BLUE));
+        assert_eq!(canvas.get_zbuffer(3, 3), Some(10.0));
+    }
+
+    #[test]
+    fn triangle_color_modes_are_stable_and_varied() {
+        let base = Rgb::GREEN;
+        let colors: Vec<_> = (0..12)
+            .map(|index| triangle_color(PolygonColorMode::DeterministicRandom, base, index))
+            .collect();
+        let unique: BTreeSet<_> = colors.iter().map(Rgb::values).collect();
+
+        assert_eq!(triangle_color(PolygonColorMode::LineColor, base, 7), base);
+        assert_eq!(
+            triangle_color(PolygonColorMode::DeterministicRandom, base, 7),
+            colors[7]
+        );
+        assert_eq!(
+            triangle_color(PolygonColorMode::TintedFromLine, base, 0),
+            base
+        );
+        assert!(unique.len() > 8);
     }
 
     #[test]

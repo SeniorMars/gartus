@@ -1045,11 +1045,11 @@ mod tests {
 
     #[test]
     fn draw_polygons_culls_reversed_winding() {
-        fn lit_pixels(canvas: &Canvas) -> usize {
+        fn drawn_pixels(canvas: &Canvas) -> usize {
             canvas
                 .pixels()
                 .iter()
-                .filter(|&&pixel| pixel == Rgb::WHITE)
+                .filter(|&&pixel| pixel != Rgb::BLACK)
                 .count()
         }
 
@@ -1061,18 +1061,18 @@ mod tests {
         let mut visible_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
         visible_canvas.set_line_pixel(Rgb::WHITE);
         visible_canvas.draw_polygons(&visible);
-        assert!(lit_pixels(&visible_canvas) > 0);
+        assert!(drawn_pixels(&visible_canvas) > 0);
 
         let mut hidden_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
         hidden_canvas.set_line_pixel(Rgb::WHITE);
         hidden_canvas.draw_polygons(&hidden);
-        assert_eq!(lit_pixels(&hidden_canvas), 0);
+        assert_eq!(drawn_pixels(&hidden_canvas), 0);
 
         let corrected = hidden.reversed_winding();
         let mut corrected_canvas = Canvas::new_with_bg(10, 10, Rgb::BLACK);
         corrected_canvas.set_line_pixel(Rgb::WHITE);
         corrected_canvas.draw_polygons(&corrected);
-        assert!(lit_pixels(&corrected_canvas) > 0);
+        assert!(drawn_pixels(&corrected_canvas) > 0);
     }
 
     #[test]

@@ -122,11 +122,11 @@ impl fmt::Display for MeshError {
 
 impl Error for MeshError {}
 
-/// Converts an OBJ or ASCII STL mesh file into a [`PolygonMatrix`].
+/// Converts an OBJ or STL mesh file into a [`PolygonMatrix`].
 ///
-/// Supported mesh formats are Wavefront OBJ polygon meshes and ASCII STL. Binary STL is not
-/// supported. OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and
-/// smoothing directives are ignored because Gartus renders imported meshes as wireframe triangles.
+/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ vertex
+/// texture coordinates, vertex normals, materials, groups, objects, and smoothing directives are
+/// ignored because Gartus renders imported meshes as wireframe triangles.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -155,11 +155,11 @@ fn bounds_span(bounds: Bounds3) -> f64 {
     x.max(y).max(z)
 }
 
-/// Appends an OBJ or ASCII STL mesh file to an existing [`PolygonMatrix`].
+/// Appends an OBJ or STL mesh file to an existing [`PolygonMatrix`].
 ///
-/// Supported mesh formats are Wavefront OBJ polygon meshes and ASCII STL. Binary STL is not
-/// supported. OBJ vertex texture coordinates, vertex normals, materials, groups, objects, and
-/// smoothing directives are ignored because Gartus renders imported meshes as wireframe triangles.
+/// Supported mesh formats are Wavefront OBJ polygon meshes, ASCII STL, and binary STL. OBJ vertex
+/// texture coordinates, vertex normals, materials, groups, objects, and smoothing directives are
+/// ignored because Gartus renders imported meshes as wireframe triangles.
 ///
 /// # Arguments
 /// * `file_name` - The mesh file to load. Supported extensions are `.obj` and `.stl`.
@@ -181,27 +181,27 @@ pub fn add_mesh(file_name: &str, polygons: &mut PolygonMatrix) -> MeshResult<Mes
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| MeshError::at_path(path, "invalid file extension"))?;
 
-    let parser = match ext.as_str() {
-        "obj" => parse_obj::<BufReader<File>>,
-        "stl" => parse_stl::<BufReader<File>>,
-        _ => {
-            return Err(MeshError::at_path(
-                path,
-                format!("unsupported mesh extension {ext}"),
-            ));
-        }
-    };
-
-    if ext == "stl" && is_binary_stl(path)? {
-        return Err(MeshError::at_path(path, "unsupported binary STL"));
-    }
-
-    let file = File::open(path)
-        .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
-    let reader = BufReader::new(file);
     let start_col = polygons.cols();
 
-    if let Err(err) = parser(reader, path, polygons) {
+    let result = match ext.as_str() {
+        "obj" => {
+            let file = File::open(path)
+                .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+            parse_obj(BufReader::new(file), path, polygons)
+        }
+        "stl" if is_binary_stl(path)? => parse_binary_stl(path, polygons),
+        "stl" => {
+            let file = File::open(path)
+                .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+            parse_stl(BufReader::new(file), path, polygons)
+        }
+        _ => Err(MeshError::at_path(
+            path,
+            format!("unsupported mesh extension {ext}"),
+        )),
+    };
+
+    if let Err(err) = result {
         polygons.truncate_cols(start_col);
         return Err(err);
     }
@@ -345,6 +345,100 @@ fn is_binary_stl(path: &Path) -> MeshResult<bool> {
     }
 
     Ok(false)
+}
+
+fn parse_binary_stl(path: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()> {
+    let mut file = File::open(path)
+        .map_err(|err| MeshError::at_path(path, format!("could not open file: {err}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|err| MeshError::at_path(path, format!("could not stat file: {err}")))?;
+
+    let mut header = [0_u8; 80];
+    file.read_exact(&mut header).map_err(|err| {
+        MeshError::at_path(path, format!("could not read binary STL header: {err}"))
+    })?;
+
+    let triangle_count = read_binary_stl_u32(&mut file, path)?;
+    let expected_len = 84_u64 + u64::from(triangle_count) * 50;
+    if metadata.len() != expected_len {
+        return Err(MeshError::at_path(
+            path,
+            format!(
+                "binary STL length mismatch: expected {expected_len} bytes for {triangle_count} triangles, found {}",
+                metadata.len()
+            ),
+        ));
+    }
+
+    let mut triangle_batch = Vec::with_capacity(MESH_TRIANGLE_BATCH);
+    for triangle_index in 0..triangle_count {
+        let _normal = read_binary_stl_point(&mut file, path, triangle_index, "normal")?;
+        let p0 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
+        let p1 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
+        let p2 = read_binary_stl_point(&mut file, path, triangle_index, "vertex")?;
+        let mut attribute = [0_u8; 2];
+        file.read_exact(&mut attribute).map_err(|err| {
+            MeshError::at_path(
+                path,
+                format!("could not read binary STL attribute byte count: {err}"),
+            )
+        })?;
+
+        triangle_batch.push([p0, p1, p2]);
+        flush_triangle_batch(polygons, &mut triangle_batch);
+    }
+
+    polygons.push_polygons(triangle_batch.as_slice());
+    Ok(())
+}
+
+fn read_binary_stl_u32(reader: &mut impl Read, source: &Path) -> MeshResult<u32> {
+    let mut bytes = [0_u8; 4];
+    reader.read_exact(&mut bytes).map_err(|err| {
+        MeshError::at_path(
+            source,
+            format!("could not read binary STL triangle count: {err}"),
+        )
+    })?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+fn read_binary_stl_point(
+    reader: &mut impl Read,
+    source: &Path,
+    triangle_index: u32,
+    label: &str,
+) -> MeshResult<Point3> {
+    let x = read_binary_stl_f32(reader, source, triangle_index, label, "x")?;
+    let y = read_binary_stl_f32(reader, source, triangle_index, label, "y")?;
+    let z = read_binary_stl_f32(reader, source, triangle_index, label, "z")?;
+    Ok((f64::from(x), f64::from(y), f64::from(z)))
+}
+
+fn read_binary_stl_f32(
+    reader: &mut impl Read,
+    source: &Path,
+    triangle_index: u32,
+    label: &str,
+    axis: &str,
+) -> MeshResult<f32> {
+    let mut bytes = [0_u8; 4];
+    reader.read_exact(&mut bytes).map_err(|err| {
+        MeshError::at_path(
+            source,
+            format!("could not read binary STL triangle {triangle_index} {label} {axis}: {err}"),
+        )
+    })?;
+    let value = f32::from_le_bytes(bytes);
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(MeshError::at_path(
+            source,
+            format!("binary STL triangle {triangle_index} {label} {axis} is not finite"),
+        ))
+    }
 }
 
 fn parse_stl<R: BufRead>(reader: R, source: &Path, polygons: &mut PolygonMatrix) -> MeshResult<()> {
@@ -1089,17 +1183,57 @@ endsolid bad
         let _ = fs::remove_file(path);
     }
 
-    #[test]
-    fn rejects_binary_stl_with_clear_error() {
-        let path = temp_file("binary", "stl");
+    fn binary_stl_fixture(triangles: &[[(f32, f32, f32); 3]]) -> Vec<u8> {
         let mut bytes = vec![b' '; 80];
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&[0_u8; 50]);
+        bytes.extend_from_slice(
+            &u32::try_from(triangles.len())
+                .expect("fixture triangle count fits u32")
+                .to_le_bytes(),
+        );
+        for triangle in triangles {
+            for value in [0.0_f32, 0.0, 1.0] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            for point in triangle {
+                for value in [point.0, point.1, point.2] {
+                    bytes.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn loads_binary_stl_vertices_into_triangles() {
+        let path = temp_file("binary", "stl");
+        let bytes = binary_stl_fixture(&[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]]);
         fs::write(&path, bytes).expect("write binary stl");
+
+        let polygons = meshify(path.to_str().expect("utf8 path")).expect("load binary stl");
+
+        assert_eq!(polygons.cols(), 3);
+        assert_eq!(
+            polygons.as_matrix().data(),
+            &[
+                0.0, 0.0, 0.0, 1.0, //
+                1.0, 0.0, 0.0, 1.0, //
+                0.0, 1.0, 0.0, 1.0,
+            ]
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_binary_stl_length_mismatch() {
+        let path = temp_file("binary-short", "stl");
+        let mut bytes = binary_stl_fixture(&[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]]);
+        bytes.pop();
+        fs::write(&path, bytes).expect("write short binary stl");
 
         let error = meshify(path.to_str().expect("utf8 path")).expect_err("mesh should fail");
 
-        assert!(error.to_string().contains("unsupported binary STL"));
+        assert!(error.to_string().contains("binary STL length mismatch"));
         let _ = fs::remove_file(path);
     }
 

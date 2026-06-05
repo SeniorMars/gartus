@@ -2,7 +2,7 @@ use gartus::gmath::edge_matrix::EdgeMatrix;
 use gartus::gmath::matrix::*;
 use gartus::gmath::polygon_matrix::PolygonMatrix;
 use gartus::graphics::colors::*;
-use gartus::graphics::display::Canvas;
+use gartus::graphics::display::{Canvas, PolygonColorMode};
 use gartus::parser::Parser;
 
 fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
@@ -76,6 +76,7 @@ fn script_solid() {
 
     let mut dw = Parser::new("./tests/script_solid", W, H, &green);
     dw.set_display_enabled(false);
+    dw.set_polygon_color_mode(PolygonColorMode::DeterministicRandom);
     dw.parse_file().expect("Script is valid");
     assert!(
         std::path::Path::new("solid.png").exists(),
@@ -84,6 +85,7 @@ fn script_solid() {
     let _ = std::fs::remove_file("solid.png");
 
     let mut manual = Canvas::new(W, H, green);
+    manual.set_polygon_color_mode(PolygonColorMode::DeterministicRandom);
     draw_manual_cstack_robot(&mut manual);
 
     assert!(

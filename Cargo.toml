@@ -41,6 +41,18 @@ required-features = ["turtle"]
 name = "mesh_teapot"
 required-features = ["external"]
 
+[[example]]
+name = "mesh_joltik"
+required-features = ["external"]
+
+[[example]]
+name = "mesh_spot_dragon"
+required-features = ["external"]
+
+[[example]]
+name = "cstack_model_theater"
+required-features = ["external"]
+
 # [[bench]]
 # name = "derp"
 # harness = false

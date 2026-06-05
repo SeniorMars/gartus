@@ -1,7 +1,10 @@
 use crate::gmath::edge_matrix::EdgeMatrix;
 use crate::gmath::matrix::Matrix;
 use crate::gmath::polygon_matrix::PolygonMatrix;
-use crate::graphics::{colors::Rgb, display::Canvas};
+use crate::graphics::{
+    colors::Rgb,
+    display::{Canvas, PolygonColorMode},
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::{
@@ -226,6 +229,11 @@ impl Parser {
     /// Enables or disables external display for parser `display` commands.
     pub fn set_display_enabled(&mut self, enabled: bool) {
         self.display_enabled = enabled;
+    }
+
+    /// Sets how filled polygon triangles choose colors.
+    pub fn set_polygon_color_mode(&mut self, mode: PolygonColorMode) {
+        self.canvas.set_polygon_color_mode(mode);
     }
 
     /// Parses and runs through the commands in `self.file_name`
@@ -1054,8 +1062,8 @@ mod tests {
         parser
             .parse_string("move\n50 50 0\nsphere\n0 0 0 20")
             .expect("valid");
-        let has_fg = parser.canvas().pixels().contains(&fg);
-        assert!(has_fg, "sphere should draw to canvas immediately");
+        let has_drawn_pixel = parser.canvas().pixels().iter().any(|pixel| *pixel != bg);
+        assert!(has_drawn_pixel, "sphere should draw to canvas immediately");
     }
 
     #[test]
@@ -1132,8 +1140,8 @@ mod tests {
             .parse_string(&format!("mesh\n{}", path.to_str().unwrap()))
             .expect("mesh valid");
 
-        let has_fg = parser.canvas().pixels().contains(&fg);
-        assert!(has_fg, "mesh should draw to canvas immediately");
+        let has_drawn_pixel = parser.canvas().pixels().iter().any(|pixel| *pixel != bg);
+        assert!(has_drawn_pixel, "mesh should draw to canvas immediately");
         let _ = fs::remove_file(path);
     }
 
@@ -1153,8 +1161,8 @@ mod tests {
             Parser::new_with_bg(script_path.to_str().expect("utf8 path"), 100, 100, &fg, &bg);
         parser.parse_file().expect("mesh valid");
 
-        let has_fg = parser.canvas().pixels().contains(&fg);
-        assert!(has_fg, "relative-path mesh should draw to canvas");
+        let has_drawn_pixel = parser.canvas().pixels().iter().any(|pixel| *pixel != bg);
+        assert!(has_drawn_pixel, "relative-path mesh should draw to canvas");
         let _ = fs::remove_file(script_path);
         let _ = fs::remove_file(mesh_path);
         let _ = fs::remove_dir(dir);
@@ -1183,9 +1191,9 @@ mod tests {
             Parser::new_with_bg(main_path.to_str().expect("utf8 path"), 100, 100, &fg, &bg);
         parser.parse_file().expect("nested include mesh valid");
 
-        let has_fg = parser.canvas().pixels().contains(&fg);
+        let has_drawn_pixel = parser.canvas().pixels().iter().any(|pixel| *pixel != bg);
         assert!(
-            has_fg,
+            has_drawn_pixel,
             "nested-include relative-path mesh should draw to canvas"
         );
         let _ = fs::remove_dir_all(dir);
