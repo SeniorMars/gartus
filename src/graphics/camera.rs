@@ -8,12 +8,26 @@ use crate::gmath::{
 use crate::graphics::raytracing::{
     Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians,
 };
-use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, scenes::normal_scene_color};
+use crate::graphics::raytracing::{
+    HittablePdf, MixturePdf, Pdf, SHADOW_ACNE_EPSILON, scenes::normal_scene_color,
+};
 use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
 };
 use std::io::{self, Write};
+
+/// Pixel sampling pattern used for stochastic ray-camera renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PixelSampleMode {
+    /// Place each sample randomly inside the pixel square.
+    #[default]
+    Random,
+    /// Divide the pixel into a square grid and jitter one sample inside each cell.
+    ///
+    /// The renderer uses `floor(sqrt(samples_per_pixel))^2` samples per pixel in this mode.
+    Stratified,
+}
 
 /// A simple perspective camera for projecting 3D points onto a 2D canvas.
 #[derive(Debug, Clone, Copy)]
@@ -58,6 +72,7 @@ pub struct RayCamera {
     image_width: u32,
     image_height: u32,
     samples_per_pixel: u32,
+    pixel_sample_mode: PixelSampleMode,
     max_depth: u32,
     rng_seed: u64,
     vertical_fov: f64,
@@ -82,6 +97,7 @@ struct RayCameraParams {
     image_width: u32,
     aspect_ratio: f64,
     samples_per_pixel: u32,
+    pixel_sample_mode: PixelSampleMode,
     max_depth: u32,
     rng_seed: u64,
     vertical_fov: f64,
@@ -301,6 +317,7 @@ impl RayCamera {
             image_width,
             aspect_ratio,
             samples_per_pixel: 1,
+            pixel_sample_mode: PixelSampleMode::Random,
             max_depth: 10,
             rng_seed: 1,
             vertical_fov: 90.0,
@@ -352,6 +369,7 @@ impl RayCamera {
             image_width: params.image_width,
             image_height,
             samples_per_pixel: params.samples_per_pixel.max(1),
+            pixel_sample_mode: params.pixel_sample_mode,
             max_depth: params.max_depth,
             rng_seed: params.rng_seed,
             vertical_fov: params.vertical_fov,
@@ -379,6 +397,7 @@ impl RayCamera {
             image_width: self.image_width,
             aspect_ratio: self.aspect_ratio,
             samples_per_pixel: self.samples_per_pixel,
+            pixel_sample_mode: self.pixel_sample_mode,
             max_depth: self.max_depth,
             rng_seed: self.rng_seed,
             vertical_fov: self.vertical_fov,
@@ -469,6 +488,22 @@ impl RayCamera {
     pub fn with_samples_per_pixel(mut self, samples_per_pixel: u32) -> Self {
         self.samples_per_pixel = samples_per_pixel.max(1);
         self.initialize()
+    }
+
+    /// Sets the pixel sampling pattern for stochastic world rendering.
+    #[must_use]
+    pub fn with_pixel_sample_mode(mut self, mode: PixelSampleMode) -> Self {
+        self.pixel_sample_mode = mode;
+        self.initialize()
+    }
+
+    /// Enables stratified jittered samples inside each rendered pixel.
+    ///
+    /// This follows the sampling pattern from *Ray Tracing: The Rest of Your Life* and uses
+    /// `floor(sqrt(samples_per_pixel))^2` samples per pixel.
+    #[must_use]
+    pub fn with_stratified_sampling(self) -> Self {
+        self.with_pixel_sample_mode(PixelSampleMode::Stratified)
     }
 
     /// Sets the maximum ray-bounce recursion depth for diffuse world rendering.
@@ -599,6 +634,24 @@ impl RayCamera {
         self.samples_per_pixel
     }
 
+    /// Returns the pixel sampling pattern used by stochastic world renders.
+    #[must_use]
+    pub const fn pixel_sample_mode(self) -> PixelSampleMode {
+        self.pixel_sample_mode
+    }
+
+    /// Returns the actual number of samples used per pixel for the current sampling mode.
+    #[must_use]
+    pub fn effective_samples_per_pixel(self) -> u32 {
+        match self.pixel_sample_mode {
+            PixelSampleMode::Random => self.samples_per_pixel,
+            PixelSampleMode::Stratified => {
+                let sqrt_spp = Self::stratified_grid_width(self.samples_per_pixel);
+                sqrt_spp * sqrt_spp
+            }
+        }
+    }
+
     /// Returns the maximum ray-bounce recursion depth used by [`Self::render_world`].
     #[must_use]
     pub fn max_depth(self) -> u32 {
@@ -690,8 +743,47 @@ impl RayCamera {
         Ray::with_time(ray_origin, pixel_sample - ray_origin, ray_time)
     }
 
+    fn ray_for_pixel_stratified_sample(
+        self,
+        x: u32,
+        y: u32,
+        sample_x: u32,
+        sample_y: u32,
+        grid_width: u32,
+        rng: &mut SampleRng,
+    ) -> Ray {
+        let offset = Self::sample_square_stratified(sample_x, sample_y, grid_width, rng);
+        let pixel_sample = self.pixel00_loc
+            + (f64::from(x) + offset.x()) * self.pixel_delta_u
+            + (f64::from(y) + offset.y()) * self.pixel_delta_v;
+        let ray_origin = if self.defocus_angle <= 0.0 {
+            self.camera_center
+        } else {
+            self.defocus_disk_sample(rng)
+        };
+        let ray_time = rng.random_range(self.shutter_start, self.shutter_end);
+        Ray::with_time(ray_origin, pixel_sample - ray_origin, ray_time)
+    }
+
     fn sample_square(rng: &mut SampleRng) -> Vector {
         Vector::new(rng.random_double() - 0.5, rng.random_double() - 0.5, 0.0)
+    }
+
+    fn sample_square_stratified(
+        sample_x: u32,
+        sample_y: u32,
+        grid_width: u32,
+        rng: &mut SampleRng,
+    ) -> Vector {
+        let reciprocal = 1.0 / f64::from(grid_width);
+        let x = ((f64::from(sample_x) + rng.random_double()) * reciprocal) - 0.5;
+        let y = ((f64::from(sample_y) + rng.random_double()) * reciprocal) - 0.5;
+        Vector::new(x, y, 0.0)
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn stratified_grid_width(samples_per_pixel: u32) -> u32 {
+        (f64::from(samples_per_pixel).sqrt() as u32).max(1)
     }
 
     fn defocus_disk_sample(self, rng: &mut SampleRng) -> Point {
@@ -712,6 +804,7 @@ impl RayCamera {
         ray: &Ray,
         depth: u32,
         world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
         background: LinearColor,
         rng: &mut SampleRng,
     ) -> LinearColor {
@@ -728,38 +821,134 @@ impl RayCamera {
                 return color + component_mul(attenuation, background);
             };
 
-            let emitted = record.material.emitted(record.u, record.v, record.point);
+            let emitted =
+                record
+                    .material
+                    .emitted(&current_ray, &record, record.u, record.v, record.point);
             color += component_mul(attenuation, emitted);
 
             let Some(scatter) = record.material.scatter(&current_ray, &record, rng) else {
                 return color;
             };
 
-            attenuation = component_mul(attenuation, scatter.attenuation);
-            current_ray = scatter.ray;
+            if scatter.skip_pdf {
+                attenuation = component_mul(attenuation, scatter.attenuation);
+                current_ray = scatter.ray;
+                continue;
+            }
+
+            let Some(material_pdf) = scatter.pdf else {
+                return color;
+            };
+            let light_pdf = lights.map(|lights| HittablePdf::new(lights, record.point));
+
+            let (scattered_direction, pdf_value) = if let Some(light_pdf) = light_pdf {
+                let mixture_pdf = MixturePdf::new(&light_pdf, &material_pdf);
+                let direction = mixture_pdf.generate(rng);
+                (direction, mixture_pdf.value(direction))
+            } else {
+                let direction = material_pdf.generate(rng);
+                (direction, material_pdf.value(direction))
+            };
+
+            if !pdf_value.is_finite() || pdf_value <= f64::EPSILON {
+                return color;
+            }
+
+            let scattered_ray =
+                Ray::with_time(record.point, scattered_direction, current_ray.time());
+            let scattering_pdf =
+                record
+                    .material
+                    .scattering_pdf(&current_ray, &record, &scattered_ray);
+            if !scattering_pdf.is_finite() || scattering_pdf <= 0.0 {
+                return color;
+            }
+
+            attenuation = component_mul(
+                attenuation,
+                scatter.attenuation * (scattering_pdf / pdf_value),
+            );
+            current_ray = scattered_ray;
         }
 
         color
     }
 
-    fn render_world_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
+    fn render_world_pixel(
+        self,
+        x: u32,
+        y: u32,
+        world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
+    ) -> Rgb {
         let mut rng = SampleRng::new(Self::pixel_seed(self.rng_seed, x, y));
         let mut pixel_color = LinearColor::default();
-        for _ in 0..self.samples_per_pixel {
-            let ray = self.ray_for_pixel_sample(x, y, &mut rng);
-            pixel_color += Self::ray_color(&ray, self.max_depth, world, self.background, &mut rng);
+        let sample_count = self.effective_samples_per_pixel();
+
+        match self.pixel_sample_mode {
+            PixelSampleMode::Random => {
+                for _ in 0..sample_count {
+                    let ray = self.ray_for_pixel_sample(x, y, &mut rng);
+                    pixel_color += Self::ray_color(
+                        &ray,
+                        self.max_depth,
+                        world,
+                        lights,
+                        self.background,
+                        &mut rng,
+                    );
+                }
+            }
+            PixelSampleMode::Stratified => {
+                let grid_width = Self::stratified_grid_width(self.samples_per_pixel);
+                for sample_y in 0..grid_width {
+                    for sample_x in 0..grid_width {
+                        let ray = self.ray_for_pixel_stratified_sample(
+                            x, y, sample_x, sample_y, grid_width, &mut rng,
+                        );
+                        pixel_color += Self::ray_color(
+                            &ray,
+                            self.max_depth,
+                            world,
+                            lights,
+                            self.background,
+                            &mut rng,
+                        );
+                    }
+                }
+            }
         }
-        Rgb::from_linear_color(pixel_color / f64::from(self.samples_per_pixel))
+
+        Rgb::from_linear_color(pixel_color / f64::from(sample_count))
     }
 
     fn render_normal_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
         let mut rng = SampleRng::new(Self::pixel_seed(self.rng_seed, x, y));
         let mut pixel_color = LinearColor::default();
-        for _ in 0..self.samples_per_pixel {
-            let ray = self.ray_for_pixel_sample(x, y, &mut rng);
-            pixel_color += normal_scene_color(&ray, world);
+        let sample_count = self.effective_samples_per_pixel();
+
+        match self.pixel_sample_mode {
+            PixelSampleMode::Random => {
+                for _ in 0..sample_count {
+                    let ray = self.ray_for_pixel_sample(x, y, &mut rng);
+                    pixel_color += normal_scene_color(&ray, world);
+                }
+            }
+            PixelSampleMode::Stratified => {
+                let grid_width = Self::stratified_grid_width(self.samples_per_pixel);
+                for sample_y in 0..grid_width {
+                    for sample_x in 0..grid_width {
+                        let ray = self.ray_for_pixel_stratified_sample(
+                            x, y, sample_x, sample_y, grid_width, &mut rng,
+                        );
+                        pixel_color += normal_scene_color(&ray, world);
+                    }
+                }
+            }
         }
-        Rgb::from_linear_color(pixel_color / f64::from(self.samples_per_pixel))
+
+        Rgb::from_linear_color(pixel_color / f64::from(sample_count))
     }
 
     fn image_canvas(width: u32, height: u32, pixels: Vec<Rgb>) -> Canvas {
@@ -782,11 +971,24 @@ impl RayCamera {
 
     /// Renders a hittable world using this camera's antialiasing sample count.
     pub fn render_world(self, world: &dyn Hittable) -> Canvas {
+        self.render_world_with_optional_lights(world, None)
+    }
+
+    /// Renders a hittable world while importance-sampling directions toward `lights`.
+    pub fn render_world_with_lights(self, world: &dyn Hittable, lights: &dyn Hittable) -> Canvas {
+        self.render_world_with_optional_lights(world, Some(lights))
+    }
+
+    fn render_world_with_optional_lights(
+        self,
+        world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
+    ) -> Canvas {
         let camera = self.initialize();
         Canvas::from_fn_independent_with_options(
             camera.image_width,
             camera.image_height,
-            |x, y| camera.render_world_pixel(x, y, world),
+            |x, y| camera.render_world_pixel(x, y, world, lights),
             true,
             false,
         )
@@ -854,7 +1056,7 @@ impl RayCamera {
             write!(log, "\rScanlines remaining: {} ", camera.image_height - y)?;
             log.flush()?;
             for x in 0..camera.image_width {
-                pixels.push(camera.render_world_pixel(x, y, world));
+                pixels.push(camera.render_world_pixel(x, y, world, None));
             }
         }
         writeln!(log, "\rDone.                 ")?;
@@ -1068,6 +1270,33 @@ mod tests {
     }
 
     #[test]
+    fn ray_camera_tracks_pixel_sample_mode() {
+        let camera = RayCamera::new(40, 1.0)
+            .with_samples_per_pixel(50)
+            .with_stratified_sampling();
+
+        assert_eq!(camera.samples_per_pixel(), 50);
+        assert_eq!(camera.pixel_sample_mode(), PixelSampleMode::Stratified);
+        assert_eq!(camera.effective_samples_per_pixel(), 49);
+    }
+
+    #[test]
+    fn stratified_sample_offsets_stay_inside_pixel_square() {
+        let mut rng = SampleRng::new(23);
+        let grid_width = 4;
+
+        for sample_y in 0..grid_width {
+            for sample_x in 0..grid_width {
+                let offset =
+                    RayCamera::sample_square_stratified(sample_x, sample_y, grid_width, &mut rng);
+                assert!((-0.5..0.5).contains(&offset.x()));
+                assert!((-0.5..0.5).contains(&offset.y()));
+                assert_close(offset.z(), 0.0);
+            }
+        }
+    }
+
+    #[test]
     fn ray_camera_tracks_background_color() {
         let background = LinearColor::new(0.1, 0.2, 0.3);
         let camera = RayCamera::new(20, 1.0).with_background(background);
@@ -1142,6 +1371,43 @@ mod tests {
 
         assert_eq!(first.pixels(), second.pixels());
     }
+
+    #[test]
+    fn ray_camera_world_render_with_lights_is_seeded_and_deterministic() {
+        use crate::graphics::raytracing::{DiffuseLight, HittableList, Lambertian, Quad, Sphere};
+
+        let mut world = HittableList::new();
+        world.add(Sphere::with_material(
+            Point::new(0.0, 0.0, -1.0),
+            0.5,
+            Lambertian::new(LinearColor::new(0.7, 0.7, 0.7)),
+        ));
+        world.add(Quad::with_material(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            DiffuseLight::new(LinearColor::new(4.0, 4.0, 4.0)),
+        ));
+
+        let mut lights = HittableList::new();
+        lights.add(Quad::new(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ));
+
+        let camera = RayCamera::new(6, 1.0)
+            .with_samples_per_pixel(4)
+            .with_max_depth(4)
+            .with_background(LinearColor::default())
+            .with_rng_seed(321);
+
+        let first = camera.render_world_with_lights(&world, &lights);
+        let second = camera.render_world_with_lights(&world, &lights);
+
+        assert_eq!(first.pixels(), second.pixels());
+    }
+
     #[test]
     fn ray_camera_world_render_uses_image_coordinate_canvas() {
         let world = crate::graphics::raytracing::scenes::normal_sphere_world();

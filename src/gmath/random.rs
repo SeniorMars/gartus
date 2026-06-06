@@ -2,6 +2,8 @@
 
 use super::vector::Vector;
 
+const TAU: f64 = std::f64::consts::TAU;
+
 /// Small deterministic random-number generator for graphics samples.
 ///
 /// This uses a fixed `SplitMix64` stream so seeded renders are stable across
@@ -24,6 +26,13 @@ impl SampleRng {
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         value ^ (value >> 31)
+    }
+
+    /// Returns a random index in `0..upper`, or `None` when `upper == 0`.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn random_index(&mut self, upper: usize) -> Option<usize> {
+        (upper > 0).then(|| (self.next_u64() % upper as u64) as usize)
     }
 
     /// Returns a random real in `[0, 1)`.
@@ -70,6 +79,29 @@ impl SampleRng {
                 return point / length_squared.sqrt();
             }
         }
+    }
+
+    /// Returns a uniformly random unit vector using spherical-coordinate inversion.
+    #[must_use]
+    pub fn random_unit_vector_spherical(&mut self) -> Vector {
+        let r1 = self.random_double();
+        let r2 = self.random_double();
+        let z = 1.0 - 2.0 * r2;
+        let radius = (1.0 - z * z).sqrt();
+        let phi = TAU * r1;
+
+        Vector::new(phi.cos() * radius, phi.sin() * radius, z)
+    }
+
+    /// Returns a z-axis hemisphere direction with density `cos(theta) / pi`.
+    #[must_use]
+    pub fn random_cosine_direction(&mut self) -> Vector {
+        let r1 = self.random_double();
+        let r2 = self.random_double();
+        let phi = TAU * r1;
+        let radius = r2.sqrt();
+
+        Vector::new(phi.cos() * radius, phi.sin() * radius, (1.0 - r2).sqrt())
     }
 
     /// Returns a random unit vector on the same hemisphere as `normal`.
@@ -126,12 +158,44 @@ mod tests {
     }
 
     #[test]
+    fn random_index_returns_values_below_upper_bound() {
+        let mut rng = SampleRng::new(5);
+
+        assert_eq!(rng.random_index(0), None);
+        for _ in 0..100 {
+            assert!(rng.random_index(7).is_some_and(|index| index < 7));
+        }
+    }
+
+    #[test]
     fn random_unit_vector_is_unit_length() {
         let mut rng = SampleRng::new(11);
 
         for _ in 0..20 {
             let vector = rng.random_unit_vector();
             assert!((vector.length() - 1.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn random_unit_vector_spherical_is_unit_length() {
+        let mut rng = SampleRng::new(29);
+
+        for _ in 0..20 {
+            let vector = rng.random_unit_vector_spherical();
+            assert!((vector.length() - 1.0).abs() < 1e-12);
+            assert!((-1.0..=1.0).contains(&vector.z()));
+        }
+    }
+
+    #[test]
+    fn random_cosine_direction_stays_above_z_horizon() {
+        let mut rng = SampleRng::new(31);
+
+        for _ in 0..20 {
+            let vector = rng.random_cosine_direction();
+            assert!((vector.length() - 1.0).abs() < 1e-12);
+            assert!((0.0..=1.0).contains(&vector.z()));
         }
     }
 

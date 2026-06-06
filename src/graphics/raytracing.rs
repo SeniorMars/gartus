@@ -6,6 +6,7 @@ pub mod instance;
 pub mod material;
 pub mod mesh;
 pub mod object;
+pub mod pdf;
 pub mod renderer;
 pub mod scene;
 pub mod scenes;
@@ -27,6 +28,7 @@ pub use object::{
     HitRecord, Hittable, Intersect, Interval, MovingSphere, Quad, RayGeometry, SceneObject, Sphere,
     SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
 };
+pub use pdf::{CosinePdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf};
 pub use renderer::PathTracer;
 pub use scene::{BvhNode, HittableList, MaterialId, RayPrimitive, RayScene, SphereList};
 pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, RayTexture, SolidColor, TextureRef};
@@ -311,6 +313,8 @@ mod tests {
             .expect("lambertian should scatter");
 
         assert_eq!(scatter.attenuation, LinearColor::new(0.8, 0.7, 0.6));
+        assert!(scatter.pdf.is_some());
+        assert!(!scatter.skip_pdf);
     }
 
     #[test]
@@ -331,10 +335,32 @@ mod tests {
         let mut rng = SampleRng::new(41);
 
         assert_eq!(
-            material.emitted(hit.u, hit.v, hit.point),
+            material.emitted(&ray, &hit, hit.u, hit.v, hit.point),
             LinearColor::new(4.0, 3.0, 2.0)
         );
         assert!(material.scatter(&ray, &hit, &mut rng).is_none());
+    }
+
+    #[test]
+    fn diffuse_light_does_not_emit_from_back_face() {
+        let material = DiffuseLight::new(LinearColor::new(4.0, 3.0, 2.0));
+        let ray = Ray::new(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0));
+        let hit = HitRecord {
+            point: Point::new(0.0, 0.0, -1.0),
+            normal: Vector::new(0.0, 0.0, -1.0),
+            geometric_normal: Vector::new(0.0, 0.0, -1.0),
+            shading_normal: Vector::new(0.0, 0.0, -1.0),
+            t: 1.0,
+            u: 0.25,
+            v: 0.75,
+            front_face: false,
+            material: &material,
+        };
+
+        assert_eq!(
+            material.emitted(&ray, &hit, hit.u, hit.v, hit.point),
+            LinearColor::default()
+        );
     }
 
     #[test]
@@ -448,6 +474,26 @@ mod tests {
         assert_eq!(scatter.ray.origin(), &hit.point);
         assert_close(scatter.ray.time(), ray.time());
         assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+        assert!(scatter.pdf.is_some());
+        assert!(!scatter.skip_pdf);
+    }
+
+    #[test]
+    fn lambertian_scattering_pdf_is_cosine_weighted() {
+        let material = Lambertian::new(LinearColor::new(0.2, 0.4, 0.6));
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, -1.0, 0.0));
+        let hit = HitRecord::new(
+            &ray,
+            Point::new(0.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            1.0,
+            &material,
+        );
+        let upward = Ray::new(hit.point, Vector::new(0.0, 1.0, 0.0));
+        let tangent = Ray::new(hit.point, Vector::new(1.0, 0.0, 0.0));
+
+        assert_close(material.scattering_pdf(&ray, &hit, &upward), 1.0 / PI);
+        assert_close(material.scattering_pdf(&ray, &hit, &tangent), 0.0);
     }
 
     #[test]
@@ -499,6 +545,37 @@ mod tests {
         assert_eq!(record.normal, Vector::new(0.0, 0.0, 1.0));
         assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
         assert!(quad.bounding_box().is_some());
+    }
+
+    #[test]
+    fn quad_pdf_converts_area_density_to_solid_angle_density() {
+        let quad = Quad::new(
+            Point::new(-1.0, -1.0, -1.0),
+            Vector::new(2.0, 0.0, 0.0),
+            Vector::new(0.0, 2.0, 0.0),
+        );
+        let origin = Point::new(0.0, 0.0, 0.0);
+
+        assert_close(quad.pdf_value(origin, Vector::new(0.0, 0.0, -1.0)), 0.25);
+        assert_close(quad.pdf_value(origin, Vector::new(0.0, 1.0, 0.0)), 0.0);
+
+        let mut rng = SampleRng::new(31);
+        assert!(quad.random_direction(origin, &mut rng).z() < 0.0);
+    }
+
+    #[test]
+    fn sphere_pdf_matches_visible_solid_angle() {
+        let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let solid_angle = 2.0 * PI * (1.0_f64 - 0.75_f64.sqrt());
+
+        assert_close(
+            sphere.pdf_value(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+            1.0 / solid_angle,
+        );
+        assert_close(
+            sphere.pdf_value(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0)),
+            0.0,
+        );
     }
 
     #[test]

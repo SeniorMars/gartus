@@ -100,6 +100,61 @@ impl CameraFrame {
     }
 }
 
+/// Orthonormal basis for mapping local sample directions into world space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrthonormalBasis {
+    u: Vector,
+    v: Vector,
+    w: Vector,
+}
+
+impl OrthonormalBasis {
+    /// Builds a basis with `w` aligned to `axis`.
+    ///
+    /// Returns `None` when `axis` is zero.
+    #[must_use]
+    pub fn from_w(axis: Vector) -> Option<Self> {
+        let w = axis.normalized();
+        if w.length_squared() <= f64::EPSILON {
+            return None;
+        }
+
+        let a = if w.x().abs() > 0.9 {
+            Vector::new(0.0, 1.0, 0.0)
+        } else {
+            Vector::new(1.0, 0.0, 0.0)
+        };
+        let v = w.cross(a).normalized();
+        let u = w.cross(v);
+
+        Some(Self { u, v, w })
+    }
+
+    /// Returns the first tangent axis.
+    #[must_use]
+    pub const fn u(self) -> Vector {
+        self.u
+    }
+
+    /// Returns the second tangent axis.
+    #[must_use]
+    pub const fn v(self) -> Vector {
+        self.v
+    }
+
+    /// Returns the normal axis.
+    #[must_use]
+    pub const fn w(self) -> Vector {
+        self.w
+    }
+
+    /// Converts a local vector into this basis.
+    #[must_use]
+    pub fn local(self, local: Vector) -> Vector {
+        local.x() * self.u + local.y() * self.v + local.z() * self.w
+    }
+}
+
 /// Analytic triangle geometry shared by raster and ray-tracing paths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TriangleGeometry {
@@ -551,6 +606,18 @@ mod tests {
         assert_eq!(frame.up, Vector::new(0.0, 1.0, 0.0));
         assert_eq!(frame.forward, Vector::new(0.0, 0.0, -1.0));
         assert_eq!(frame.backward(), Vector::new(-0.0, -0.0, 1.0));
+    }
+
+    #[test]
+    fn orthonormal_basis_maps_local_z_to_axis() {
+        let basis = OrthonormalBasis::from_w(Vector::new(0.0, 2.0, 0.0)).expect("valid normal");
+
+        assert_eq!(basis.w(), Vector::new(0.0, 1.0, 0.0));
+        assert_close(basis.u().length(), 1.0);
+        assert_close(basis.v().length(), 1.0);
+        assert_close(basis.u().dot(basis.v()), 0.0);
+        assert_eq!(basis.local(Vector::new(0.0, 0.0, 1.0)), basis.w());
+        assert!(OrthonormalBasis::from_w(Vector::default()).is_none());
     }
 
     #[test]

@@ -91,6 +91,10 @@ name = "next_weekend"
 path = "examples/raytracing/next_weekend.rs"
 required-features = ["external"]
 
+[[example]]
+name = "life"
+path = "examples/raytracing/life.rs"
+
 # [[bench]]
 # name = "derp"
 # harness = false

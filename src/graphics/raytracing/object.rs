@@ -261,6 +261,31 @@ impl RayGeometry {
     pub fn quad(corner: Point, u: Vector, v: Vector) -> Self {
         Self::Quad(QuadGeometry::new(corner, u, v))
     }
+
+    pub(crate) fn pdf_value(self, origin: Point, direction: Vector) -> f64 {
+        match self {
+            Self::Sphere(geometry) => sphere_pdf_value(geometry, origin, direction),
+            Self::MovingSphere(geometry) => {
+                let sphere = SphereGeometry::new(geometry.center_start(), geometry.radius());
+                sphere_pdf_value(sphere, origin, direction)
+            }
+            Self::Triangle(geometry) => triangle_pdf_value(geometry, origin, direction),
+            Self::Quad(geometry) => quad_pdf_value(geometry, origin, direction),
+        }
+    }
+
+    pub(crate) fn random_direction(self, origin: Point, rng: &mut SampleRng) -> Vector {
+        match self {
+            Self::Sphere(geometry) => random_direction_to_sphere(geometry, origin, rng),
+            Self::MovingSphere(geometry) => random_direction_to_sphere(
+                SphereGeometry::new(geometry.center_start(), geometry.radius()),
+                origin,
+                rng,
+            ),
+            Self::Triangle(geometry) => random_direction_to_triangle(geometry, origin, rng),
+            Self::Quad(geometry) => random_direction_to_quad(geometry, origin, rng),
+        }
+    }
 }
 
 impl From<SphereGeometry> for RayGeometry {
@@ -509,6 +534,16 @@ pub trait Hittable: Send + Sync {
     fn bounding_box(&self) -> Option<Aabb> {
         None
     }
+
+    /// Returns the probability density for sampling `direction` from `origin`.
+    fn pdf_value(&self, _origin: Point, _direction: Vector) -> f64 {
+        0.0
+    }
+
+    /// Returns a random direction from `origin` toward this object.
+    fn random_direction(&self, _origin: Point, _rng: &mut SampleRng) -> Vector {
+        Vector::new(1.0, 0.0, 0.0)
+    }
 }
 
 /// A sphere hittable.
@@ -596,6 +631,14 @@ impl Hittable for Sphere {
 
     fn bounding_box(&self) -> Option<Aabb> {
         self.object.bounding_box()
+    }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        sphere_pdf_value(self.geometry(), origin, direction)
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        random_direction_to_sphere(self.geometry(), origin, rng)
     }
 }
 
@@ -689,6 +732,24 @@ impl Hittable for MovingSphere {
     fn bounding_box(&self) -> Option<Aabb> {
         self.object.bounding_box()
     }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        let geometry = self.geometry();
+        sphere_pdf_value(
+            SphereGeometry::new(geometry.center_start(), geometry.radius()),
+            origin,
+            direction,
+        )
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        let geometry = self.geometry();
+        random_direction_to_sphere(
+            SphereGeometry::new(geometry.center_start(), geometry.radius()),
+            origin,
+            rng,
+        )
+    }
 }
 
 /// A parallelogram hittable.
@@ -774,6 +835,14 @@ impl Hittable for Quad {
 
     fn bounding_box(&self) -> Option<Aabb> {
         self.object.bounding_box()
+    }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        quad_pdf_value(self.geometry(), origin, direction)
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        random_direction_to_quad(self.geometry(), origin, rng)
     }
 }
 
@@ -892,3 +961,120 @@ pub(crate) fn sphere_uv(point_on_unit_sphere: Vector) -> (f64, f64) {
     let phi = (-point_on_unit_sphere.z()).atan2(point_on_unit_sphere.x()) + PI;
     (phi / (2.0 * PI), theta / PI)
 }
+
+fn sphere_pdf_value(geometry: SphereGeometry, origin: Point, direction: Vector) -> f64 {
+    if geometry
+        .intersect(
+            &Ray::new(origin, direction),
+            Interval::new(SHADOW_ACNE_PDF_EPSILON, INFINITY),
+        )
+        .is_none()
+    {
+        return 0.0;
+    }
+
+    let center_direction = geometry.center() - origin;
+    let distance_squared = center_direction.length_squared();
+    let radius_squared = geometry.radius() * geometry.radius();
+    if distance_squared <= radius_squared {
+        return 1.0 / (4.0 * PI);
+    }
+
+    let cos_theta_max = (1.0 - radius_squared / distance_squared).sqrt();
+    let solid_angle = 2.0 * PI * (1.0 - cos_theta_max);
+    if solid_angle <= f64::EPSILON {
+        0.0
+    } else {
+        1.0 / solid_angle
+    }
+}
+
+fn quad_pdf_value(geometry: QuadGeometry, origin: Point, direction: Vector) -> f64 {
+    let Some(hit) = geometry.hit_ray(
+        &Ray::new(origin, direction),
+        SHADOW_ACNE_PDF_EPSILON,
+        INFINITY,
+    ) else {
+        return 0.0;
+    };
+
+    let area = geometry.area_squared().sqrt();
+    area_pdf_value(direction, hit.t, geometry.geometric_normal(), area)
+}
+
+fn triangle_pdf_value(geometry: TriangleGeometry, origin: Point, direction: Vector) -> f64 {
+    let Some(hit) = geometry.hit_ray(
+        &Ray::new(origin, direction),
+        SHADOW_ACNE_PDF_EPSILON,
+        INFINITY,
+    ) else {
+        return 0.0;
+    };
+
+    let area = 0.5 * geometry.area_squared().sqrt();
+    area_pdf_value(direction, hit.t, geometry.geometric_normal(), area)
+}
+
+fn area_pdf_value(direction: Vector, hit_t: f64, normal: Vector, area: f64) -> f64 {
+    if area <= f64::EPSILON {
+        return 0.0;
+    }
+
+    let distance_squared = (hit_t * direction).length_squared();
+    let cosine = direction.normalized().dot(normal).abs();
+    if cosine <= f64::EPSILON {
+        return 0.0;
+    }
+
+    distance_squared / (cosine * area)
+}
+
+fn random_direction_to_sphere(
+    geometry: SphereGeometry,
+    origin: Point,
+    rng: &mut SampleRng,
+) -> Vector {
+    let direction = geometry.center() - origin;
+    let distance_squared = direction.length_squared();
+    let radius_squared = geometry.radius() * geometry.radius();
+    if distance_squared <= radius_squared || distance_squared <= f64::EPSILON {
+        return rng.random_unit_vector();
+    }
+
+    let local = random_to_sphere(geometry.radius(), distance_squared, rng);
+    crate::gmath::geometry::OrthonormalBasis::from_w(direction)
+        .map_or(local, |basis| basis.local(local))
+}
+
+fn random_direction_to_quad(geometry: QuadGeometry, origin: Point, rng: &mut SampleRng) -> Vector {
+    let random_point =
+        geometry.corner() + rng.random_double() * geometry.u() + rng.random_double() * geometry.v();
+    random_point - origin
+}
+
+fn random_direction_to_triangle(
+    geometry: TriangleGeometry,
+    origin: Point,
+    rng: &mut SampleRng,
+) -> Vector {
+    let [p0, p1, p2] = geometry.vertices();
+    let mut a = rng.random_double();
+    let mut b = rng.random_double();
+    if a + b > 1.0 {
+        a = 1.0 - a;
+        b = 1.0 - b;
+    }
+    let random_point = p0 + a * (p1 - p0) + b * (p2 - p0);
+    random_point - origin
+}
+
+fn random_to_sphere(radius: f64, distance_squared: f64, rng: &mut SampleRng) -> Vector {
+    let r1 = rng.random_double();
+    let r2 = rng.random_double();
+    let z = 1.0 + r2 * ((1.0 - radius * radius / distance_squared).sqrt() - 1.0);
+    let phi = 2.0 * PI * r1;
+    let radius_at_z = (1.0 - z * z).sqrt();
+    Vector::new(phi.cos() * radius_at_z, phi.sin() * radius_at_z, z)
+}
+
+const SHADOW_ACNE_PDF_EPSILON: f64 = 0.001;

@@ -134,6 +134,25 @@ impl Hittable for HittableList {
             self.bounds
         }
     }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        if self.objects.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.objects.len());
+        self.objects
+            .iter()
+            .map(|object| weight * object.pdf_value(origin, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.objects.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| self.objects[index].random_direction(origin, rng),
+        )
+    }
 }
 
 /// Bounding-volume hierarchy over arbitrary bounded boxed hittables.
@@ -190,6 +209,25 @@ impl Hittable for BvhNode {
 
     fn bounding_box(&self) -> Option<Aabb> {
         Some(self.bounds)
+    }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        if self.objects.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.objects.len());
+        self.objects
+            .iter()
+            .map(|object| weight * object.pdf_value(origin, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.objects.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| self.objects[index].random_direction(origin, rng),
+        )
     }
 }
 
@@ -654,6 +692,29 @@ impl Hittable for RayScene {
                 .map(|other| bounds.surrounding(other))
         })
     }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        if self.primitives.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.primitives.len());
+        self.primitives
+            .iter()
+            .map(|primitive| weight * primitive.geometry.pdf_value(origin, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.primitives.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| {
+                self.primitives[index]
+                    .geometry
+                    .random_direction(origin, rng)
+            },
+        )
+    }
 }
 
 /// Compatibility sphere-only hittable list that avoids boxed geometry dispatch in hit loops.
@@ -727,4 +788,27 @@ impl Hittable for SphereList {
             sphere.bounding_box().map(|other| bounds.surrounding(other))
         })
     }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        if self.spheres.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.spheres.len());
+        self.spheres
+            .iter()
+            .map(|sphere| weight * sphere.pdf_value(origin, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.spheres.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| self.spheres[index].random_direction(origin, rng),
+        )
+    }
+}
+
+fn reciprocal_count(count: usize) -> f64 {
+    1.0 / f64::from(u32::try_from(count).expect("scene object count should fit in u32"))
 }

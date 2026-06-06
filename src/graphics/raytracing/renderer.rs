@@ -34,6 +34,11 @@ impl PathTracer {
         self.camera.render_world(world)
     }
 
+    /// Renders `world` while importance-sampling directions toward `lights`.
+    pub fn render_with_lights(self, world: &dyn Hittable, lights: &dyn Hittable) -> Canvas {
+        self.camera.render_world_with_lights(world, lights)
+    }
+
     /// Renders `world` as normal-visualization colors.
     pub fn render_normals(self, world: &dyn Hittable) -> Canvas {
         self.camera.render_world_normals(world)

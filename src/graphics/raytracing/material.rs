@@ -1,7 +1,9 @@
 //! Ray-tracing BSDF, emitter, and phase-function materials.
 
 use super::{
-    HitRecord, LinearColor, rgb_to_linear_color,
+    HitRecord, LinearColor, MaterialPdf, PI, Pdf, SpherePdf,
+    pdf::CosinePdf,
+    rgb_to_linear_color,
     texture::{CheckerTexture, NoiseTexture, RayTexture, SolidColor, TextureRef},
 };
 use crate::{
@@ -14,19 +16,30 @@ use crate::{
 };
 use std::{fmt, sync::Arc};
 
-/// A ray scattered by a material, with the color attenuation applied to it.
+/// A ray scattered by a material, with the color attenuation and sampling data applied to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScatterRecord {
     /// Scattered ray.
     pub ray: Ray,
     /// Per-channel color attenuation.
     pub attenuation: LinearColor,
+    /// PDF used by non-specular material scattering.
+    pub pdf: Option<MaterialPdf>,
+    /// True when this is a deterministic specular bounce that should bypass PDF weighting.
+    pub skip_pdf: bool,
 }
 
 /// A surface material that can scatter rays.
 pub trait Material: Send + Sync {
     /// Returns emitted light for this material at a surface point.
-    fn emitted(&self, _u: f64, _v: f64, _point: Point) -> LinearColor {
+    fn emitted(
+        &self,
+        _ray_in: &Ray,
+        _hit: &HitRecord<'_>,
+        _u: f64,
+        _v: f64,
+        _point: Point,
+    ) -> LinearColor {
         LinearColor::default()
     }
 
@@ -38,6 +51,11 @@ pub trait Material: Send + Sync {
         _rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
         None
+    }
+
+    /// Returns this material's scattering PDF for a proposed scattered ray.
+    fn scattering_pdf(&self, _ray_in: &Ray, _hit: &HitRecord<'_>, _scattered: &Ray) -> f64 {
+        0.0
     }
 }
 
@@ -162,15 +180,24 @@ impl Material for Lambertian {
         hit: &HitRecord<'_>,
         rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
-        let mut scatter_direction = hit.normal + rng.random_unit_vector();
-        if scatter_direction.length_squared() < 1e-20 {
-            scatter_direction = hit.normal;
-        }
+        let pdf = CosinePdf::new(hit.normal)?;
+        let scatter_direction = pdf.generate(rng);
 
         Some(ScatterRecord {
             ray: Ray::with_time(hit.point, scatter_direction, ray_in.time()),
             attenuation: self.texture.value(hit.u, hit.v, hit.point),
+            pdf: Some(MaterialPdf::Cosine(pdf)),
+            skip_pdf: false,
         })
+    }
+
+    fn scattering_pdf(&self, _ray_in: &Ray, hit: &HitRecord<'_>, scattered: &Ray) -> f64 {
+        let cosine_theta = hit.normal.dot(scattered.direction().normalized());
+        if cosine_theta <= 0.0 {
+            0.0
+        } else {
+            cosine_theta / PI
+        }
     }
 }
 
@@ -207,8 +234,19 @@ impl DiffuseLight {
 }
 
 impl Material for DiffuseLight {
-    fn emitted(&self, u: f64, v: f64, point: Point) -> LinearColor {
-        self.texture.value(u, v, point)
+    fn emitted(
+        &self,
+        _ray_in: &Ray,
+        hit: &HitRecord<'_>,
+        u: f64,
+        v: f64,
+        point: Point,
+    ) -> LinearColor {
+        if hit.front_face {
+            self.texture.value(u, v, point)
+        } else {
+            LinearColor::default()
+        }
     }
 }
 
@@ -254,7 +292,13 @@ impl Material for Isotropic {
         Some(ScatterRecord {
             ray: Ray::with_time(hit.point, rng.random_unit_vector(), ray_in.time()),
             attenuation: self.texture.value(hit.u, hit.v, hit.point),
+            pdf: Some(MaterialPdf::Sphere(SpherePdf)),
+            skip_pdf: false,
         })
+    }
+
+    fn scattering_pdf(&self, _ray_in: &Ray, _hit: &HitRecord<'_>, _scattered: &Ray) -> f64 {
+        1.0 / (4.0 * PI)
     }
 }
 
@@ -339,6 +383,8 @@ impl Material for Metal {
         Some(ScatterRecord {
             ray: Ray::with_time(hit.point, scattered_direction, ray_in.time()),
             attenuation: self.albedo,
+            pdf: None,
+            skip_pdf: true,
         })
     }
 }
@@ -438,6 +484,8 @@ impl Material for Dielectric {
         Some(ScatterRecord {
             ray: Ray::with_time(hit.point, direction, ray_in.time()),
             attenuation,
+            pdf: None,
+            skip_pdf: true,
         })
     }
 }
@@ -556,13 +604,20 @@ impl From<Dielectric> for RayMaterial {
 }
 
 impl Material for RayMaterial {
-    fn emitted(&self, u: f64, v: f64, point: Point) -> LinearColor {
+    fn emitted(
+        &self,
+        ray_in: &Ray,
+        hit: &HitRecord<'_>,
+        u: f64,
+        v: f64,
+        point: Point,
+    ) -> LinearColor {
         match self {
-            Self::Lambertian(material) => material.emitted(u, v, point),
-            Self::DiffuseLight(material) => material.emitted(u, v, point),
-            Self::Isotropic(material) => material.emitted(u, v, point),
-            Self::Metal(material) => material.emitted(u, v, point),
-            Self::Dielectric(material) => material.emitted(u, v, point),
+            Self::Lambertian(material) => material.emitted(ray_in, hit, u, v, point),
+            Self::DiffuseLight(material) => material.emitted(ray_in, hit, u, v, point),
+            Self::Isotropic(material) => material.emitted(ray_in, hit, u, v, point),
+            Self::Metal(material) => material.emitted(ray_in, hit, u, v, point),
+            Self::Dielectric(material) => material.emitted(ray_in, hit, u, v, point),
         }
     }
 
@@ -578,6 +633,16 @@ impl Material for RayMaterial {
             Self::Isotropic(material) => material.scatter(ray_in, hit, rng),
             Self::Metal(material) => material.scatter(ray_in, hit, rng),
             Self::Dielectric(material) => material.scatter(ray_in, hit, rng),
+        }
+    }
+
+    fn scattering_pdf(&self, ray_in: &Ray, hit: &HitRecord<'_>, scattered: &Ray) -> f64 {
+        match self {
+            Self::Lambertian(material) => material.scattering_pdf(ray_in, hit, scattered),
+            Self::DiffuseLight(material) => material.scattering_pdf(ray_in, hit, scattered),
+            Self::Isotropic(material) => material.scattering_pdf(ray_in, hit, scattered),
+            Self::Metal(material) => material.scattering_pdf(ray_in, hit, scattered),
+            Self::Dielectric(material) => material.scattering_pdf(ray_in, hit, scattered),
         }
     }
 }

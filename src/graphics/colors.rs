@@ -295,7 +295,9 @@ impl Rgb {
     /// Converts a linear color component to gamma space using gamma 2.
     #[must_use]
     pub fn linear_to_gamma_component(linear_component: f64) -> f64 {
-        if linear_component > 0.0 {
+        if linear_component.is_nan() {
+            0.0
+        } else if linear_component > 0.0 {
             linear_component.sqrt()
         } else {
             0.0
@@ -318,10 +320,13 @@ impl Rgb {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn from_raw_linear_color(color: impl Into<LinearRgb>) -> Self {
         let color = color.into();
+        let sanitize = |component: f64| {
+            if component.is_nan() { 0.0 } else { component }
+        };
         Self {
-            red: (255.999 * color[0].clamp(0.0, 1.0)) as u8,
-            green: (255.999 * color[1].clamp(0.0, 1.0)) as u8,
-            blue: (255.999 * color[2].clamp(0.0, 1.0)) as u8,
+            red: (255.999 * sanitize(color[0]).clamp(0.0, 1.0)) as u8,
+            green: (255.999 * sanitize(color[1]).clamp(0.0, 1.0)) as u8,
+            blue: (255.999 * sanitize(color[2]).clamp(0.0, 1.0)) as u8,
         }
     }
 
@@ -839,6 +844,14 @@ mod test {
             Rgb::from_raw_linear_color(Vector::new(0.25, 0.0, 1.0)),
             Rgb::new(63, 0, 255)
         );
+    }
+
+    #[test]
+    fn linear_color_conversion_replaces_nan_channels() {
+        let color = LinearRgb::new(f64::NAN, f64::INFINITY, -1.0);
+
+        assert_eq!(Rgb::from_linear_color(color), Rgb::new(0, 255, 0));
+        assert_eq!(Rgb::from_raw_linear_color(color), Rgb::new(0, 255, 0));
     }
 
     #[test]

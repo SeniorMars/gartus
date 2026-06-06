@@ -3,8 +3,8 @@ pub use crate::{
     gmath::{
         edge_matrix::EdgeMatrix,
         geometry::{
-            CameraBasis, CameraFrame, CameraPose, MovingSphereGeometry, QuadGeometry,
-            SphereGeometry, TriangleGeometry,
+            CameraBasis, CameraFrame, CameraPose, MovingSphereGeometry, OrthonormalBasis,
+            QuadGeometry, SphereGeometry, TriangleGeometry,
         },
         matrix::Matrix,
         perlin::{Perlin, scale_point},
@@ -15,7 +15,9 @@ pub use crate::{
     },
     graphics::{
         animation::{AnimationRenderOptions, FrameRecorder},
-        camera::{Camera3D, ProjectedSegment, ScreenPoint, sort_segments_back_to_front},
+        camera::{
+            Camera3D, PixelSampleMode, ProjectedSegment, ScreenPoint, sort_segments_back_to_front,
+        },
         colors::{ColorRamp, ColorSpace, Hsl, Hsv, LinearRgb, Rgb},
         display::{Canvas, Domain2D, PolygonColorMode, ShadingMode},
         draw::TexturedVertex,
@@ -36,11 +38,11 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        CheckerTexture, ConstantMedium, Dielectric, DiffuseLight, HitRecord, Hittable,
-        ImageTexture, Isotropic, Lambertian, LinearColor, Material, MatrixInstance, Metal,
-        MovingSphere, NoiseTexture, PathTracer, Quad, RayGeometry, RayMaterial, RayScene,
-        RayTexture, RotateY, ScatterRecord, SceneObject, SolidColor, Sphere, TextureRef, Translate,
-        TriangleMesh, box_object,
+        CheckerTexture, ConstantMedium, CosinePdf, Dielectric, DiffuseLight, HitRecord, Hittable,
+        HittablePdf, ImageTexture, Isotropic, Lambertian, LinearColor, Material, MaterialPdf,
+        MatrixInstance, Metal, MixturePdf, MovingSphere, NoiseTexture, PathTracer, Pdf, Quad,
+        RayGeometry, RayMaterial, RayScene, RayTexture, RotateY, ScatterRecord, SceneObject,
+        SolidColor, Sphere, SpherePdf, TextureRef, Translate, TriangleMesh, box_object,
     },
 };
 

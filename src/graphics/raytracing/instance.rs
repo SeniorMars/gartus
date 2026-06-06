@@ -76,6 +76,14 @@ impl Hittable for Translate {
     fn bounding_box(&self) -> Option<Aabb> {
         self.bounds
     }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        self.object.pdf_value(origin - self.offset, direction)
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        self.object.random_direction(origin - self.offset, rng)
+    }
 }
 
 /// A Y-axis rotated instance of a hittable object.
@@ -154,6 +162,24 @@ impl Hittable for RotateY {
 
     fn bounding_box(&self) -> Option<Aabb> {
         self.bounds
+    }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        self.object.pdf_value(
+            rotate_y_point_inverse(origin, self.sin_theta, self.cos_theta),
+            rotate_y_vector_inverse(direction, self.sin_theta, self.cos_theta),
+        )
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        rotate_y_vector(
+            self.object.random_direction(
+                rotate_y_point_inverse(origin, self.sin_theta, self.cos_theta),
+                rng,
+            ),
+            self.sin_theta,
+            self.cos_theta,
+        )
     }
 }
 
@@ -249,6 +275,21 @@ impl Hittable for MatrixInstance {
 
     fn bounding_box(&self) -> Option<Aabb> {
         self.bounds
+    }
+
+    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+        self.object.pdf_value(
+            transform_point(origin, &self.inverse),
+            transform_vector(direction, &self.inverse),
+        )
+    }
+
+    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+        transform_vector(
+            self.object
+                .random_direction(transform_point(origin, &self.inverse), rng),
+            &self.transform,
+        )
     }
 }
 
