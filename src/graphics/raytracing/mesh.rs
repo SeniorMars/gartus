@@ -1,19 +1,18 @@
 //! Triangle mesh primitives and mesh-local acceleration.
 
 use super::{
-    Aabb, HitRecord, Hittable, Interval, Lambertian, Material, MaterialRef, MatrixInstance,
-    SampleRng, SurfaceHit,
+    Aabb, HitRecord, Hittable, Interval, Material, MaterialRef, MatrixInstance, SampleRng,
+    SurfaceHit,
     bvh::{BvhPrimitiveInfo, FlatBvh, RayTraversal},
-    material::default_material,
-    texture::ImageTexture,
 };
-use crate::{
-    gmath::{
-        geometry::TriangleGeometry, matrix::Matrix, polygon_matrix::PolygonMatrix, ray::Ray,
-        vector::Point, vector::Vector,
-    },
-    graphics::material::SurfaceMaterial,
+#[cfg(feature = "external")]
+use super::{Lambertian, material::default_material, texture::ImageTexture};
+use crate::gmath::{
+    geometry::TriangleGeometry, matrix::Matrix, polygon_matrix::PolygonMatrix, ray::Ray,
+    vector::Point, vector::Vector,
 };
+#[cfg(feature = "external")]
+use crate::graphics::material::SurfaceMaterial;
 use std::{fmt, sync::Arc};
 
 /// One triangle in a ray-traced mesh, with optional imported shading metadata.

@@ -2,7 +2,7 @@ use crate::gmath::vector::Vector;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, Sub};
 
-/// A trait that is meant to bound [Display]
+/// Marker trait for color spaces that can be converted to display RGB.
 pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {}
 
 /// Linear RGB color components, before display gamma encoding.
@@ -284,7 +284,7 @@ impl Rgb {
         blue: 128,
     };
 
-    /// Returns a pixel that will be used in [Canvas]
+    /// Returns a pixel that can be used in a [`crate::graphics::display::Canvas`].
     ///
     /// # Arguments
     ///
@@ -872,7 +872,7 @@ mod test {
 
     #[test]
     fn linear_rgb_reports_max_component() {
-        assert_eq!(LinearRgb::new(0.1, 0.8, 0.4).max_component(), 0.8);
+        assert!((LinearRgb::new(0.1, 0.8, 0.4).max_component() - 0.8).abs() < f64::EPSILON);
     }
 
     #[test]

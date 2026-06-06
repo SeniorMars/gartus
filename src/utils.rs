@@ -79,18 +79,28 @@ fn encode_existing_frames(frame_prefix: &str, output: &str, delay_cs: u16) -> io
 /// Basic usage:
 /// ```no_run
 /// use crate::gartus::utils;
-/// utils::view_animation("owl.gif");
+/// utils::view_animation("owl.gif")?;
+/// # Ok::<(), std::io::Error>(())
 /// ```
-/// # Panics
-/// Panics if the `open` command cannot be spawned or waited on.
-pub fn view_animation(file_name: &str) {
+/// # Errors
+/// Returns an error if the host file opener cannot be spawned or exits unsuccessfully.
+pub fn view_animation(file_name: &str) -> io::Result<()> {
     // animate doesn't play nicely
     println!("Playing animation: {}", &file_name);
     // Command::new("animate")
-    Command::new("open")
+    let status = Command::new("open")
         .arg(file_name)
-        .spawn()
-        .expect("Could not view animation")
-        .wait()
-        .expect("Could not wait for animation process");
+        .status()
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("failed to run host file opener `open` for `{file_name}`: {err}"),
+            )
+        })?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "host file opener `open` failed with status {status} for `{file_name}`"
+        )));
+    }
+    Ok(())
 }

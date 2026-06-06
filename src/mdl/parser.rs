@@ -736,18 +736,19 @@ fn parse_shading(command: &Token, args: &[Token]) -> Result<Command, Diagnostic>
         command,
         args,
         &[1],
-        "shading wireframe|flat|gouraud|phong|raytrace",
+        "shading wireframe|flat|gouraud|phong|toon|raytrace",
     )?;
     let mode = match expect_ident_ref(command, args, 0, "shading mode")? {
         "wireframe" => ShadingMode::Wireframe,
         "flat" => ShadingMode::Flat,
         "gouraud" => ShadingMode::Gouraud,
         "phong" => ShadingMode::Phong,
+        "toon" => ShadingMode::Toon,
         "raytrace" => ShadingMode::Raytrace,
         other => {
             return Err(
                 diag_at_token(&args[0], format!("invalid shading mode `{other}`")).with_help(
-                    "expected one of `wireframe`, `flat`, `gouraud`, `phong`, or `raytrace`",
+                    "expected one of `wireframe`, `flat`, `gouraud`, `phong`, `toon`, or `raytrace`",
                 ),
             );
         }
@@ -1313,6 +1314,21 @@ mod tests {
         assert_eq!(
             &program.commands.last().unwrap().node,
             &Command::Output(OutputCommand::GenerateRayfiles)
+        );
+    }
+
+    #[test]
+    fn parses_toon_and_raytrace_shading_modes() {
+        let toon = parse_script("shading toon").unwrap();
+        let raytrace = parse_script("shading raytrace").unwrap();
+
+        assert_eq!(
+            toon.commands[0].node,
+            Command::Render(RenderCommand::Shading(ShadingMode::Toon))
+        );
+        assert_eq!(
+            raytrace.commands[0].node,
+            Command::Render(RenderCommand::Shading(ShadingMode::Raytrace))
         );
     }
 

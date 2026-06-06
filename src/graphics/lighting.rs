@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(phong.ambient, ReflectionConstants::new(0.1, 0.2, 0.3));
         assert_eq!(phong.diffuse, ReflectionConstants::new(0.4, 0.5, 0.6));
         assert_eq!(phong.specular, ReflectionConstants::new(0.7, 0.8, 0.9));
-        assert_eq!(phong.shininess, 32.0);
+        assert!((phong.shininess - 32.0).abs() < f64::EPSILON);
     }
 
     #[test]

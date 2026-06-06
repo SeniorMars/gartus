@@ -80,6 +80,57 @@ enum FlatBvhNodeKind {
     Internal { left: usize, right: usize },
 }
 
+#[derive(Clone, Copy, Debug)]
+struct StackEntry {
+    node: usize,
+    entry_t: f64,
+}
+
+#[derive(Debug)]
+struct TraversalStack {
+    stack: [StackEntry; 64],
+    stack_len: usize,
+    overflow: Vec<StackEntry>,
+}
+
+impl TraversalStack {
+    fn new(root_entry: f64) -> Self {
+        let mut stack = Self {
+            stack: [StackEntry {
+                node: 0,
+                entry_t: 0.0,
+            }; 64],
+            stack_len: 0,
+            overflow: Vec::new(),
+        };
+        stack.push(StackEntry {
+            node: 0,
+            entry_t: root_entry,
+        });
+        stack
+    }
+
+    fn push(&mut self, entry: StackEntry) {
+        if self.overflow.is_empty() && self.stack_len < self.stack.len() {
+            self.stack[self.stack_len] = entry;
+            self.stack_len += 1;
+        } else {
+            self.overflow.push(entry);
+        }
+    }
+
+    fn pop(&mut self) -> Option<StackEntry> {
+        if let Some(entry) = self.overflow.pop() {
+            Some(entry)
+        } else if self.stack_len > 0 {
+            self.stack_len -= 1;
+            Some(self.stack[self.stack_len])
+        } else {
+            None
+        }
+    }
+}
+
 pub(super) trait BvhHit {
     fn hit_t(&self) -> f64;
 }
@@ -155,68 +206,73 @@ impl FlatBvh {
         H: BvhHit,
         F: FnMut(&[usize], Interval) -> Option<H>,
     {
-        self.hit_node_with(0, ray_t, traversal, &mut hit_leaf)
-    }
+        let root_entry = traversal.hit_bounds(self.nodes[0].bounds, ray_t.min, ray_t.max)?;
+        let mut stack = TraversalStack::new(root_entry);
 
-    fn hit_node_with<H, F>(
-        &self,
-        node_index: usize,
-        ray_t: Interval,
-        traversal: RayTraversal,
-        hit_leaf: &mut F,
-    ) -> Option<H>
-    where
-        H: BvhHit,
-        F: FnMut(&[usize], Interval) -> Option<H>,
-    {
-        let node = self.nodes[node_index];
-        traversal.hit_bounds(node.bounds, ray_t.min, ray_t.max)?;
-        self.hit_node_unchecked_with(node, ray_t, traversal, hit_leaf)
-    }
+        let mut closest = ray_t.max;
+        let mut closest_hit = None;
 
-    fn hit_node_unchecked_with<H, F>(
-        &self,
-        node: FlatBvhNode,
-        ray_t: Interval,
-        traversal: RayTraversal,
-        hit_leaf: &mut F,
-    ) -> Option<H>
-    where
-        H: BvhHit,
-        F: FnMut(&[usize], Interval) -> Option<H>,
-    {
-        match node.kind {
-            FlatBvhNodeKind::Leaf { first, count } => {
-                hit_leaf(&self.indices[first..first + count], ray_t)
+        while let Some(entry) = stack.pop() {
+            if entry.entry_t >= closest {
+                continue;
             }
-            FlatBvhNodeKind::Internal { left, right } => {
-                let left_entry =
-                    traversal.hit_bounds(self.nodes[left].bounds, ray_t.min, ray_t.max);
-                let right_entry =
-                    traversal.hit_bounds(self.nodes[right].bounds, ray_t.min, ray_t.max);
-                let (first, second, second_entry) = match (left_entry, right_entry) {
-                    (Some(left_entry), Some(right_entry)) if right_entry < left_entry => {
-                        (right, left, Some(left_entry))
-                    }
-                    (Some(_), Some(right_entry)) => (left, right, Some(right_entry)),
-                    (Some(_), None) => (left, right, None),
-                    (None, Some(_)) => (right, left, None),
-                    (None, None) => return None,
-                };
-                let first_hit =
-                    self.hit_node_unchecked_with(self.nodes[first], ray_t, traversal, hit_leaf);
-                let closest = first_hit.as_ref().map_or(ray_t.max, BvhHit::hit_t);
-                let second_hit = second_entry.filter(|entry| *entry < closest).and_then(|_| {
-                    self.hit_node_unchecked_with(
-                        self.nodes[second],
+
+            match self.nodes[entry.node].kind {
+                FlatBvhNodeKind::Leaf { first, count } => {
+                    if let Some(hit) = hit_leaf(
+                        &self.indices[first..first + count],
                         Interval::new(ray_t.min, closest),
-                        traversal,
-                        hit_leaf,
-                    )
-                });
-                second_hit.or(first_hit)
+                    ) {
+                        closest = hit.hit_t();
+                        closest_hit = Some(hit);
+                    }
+                }
+                FlatBvhNodeKind::Internal { left, right } => {
+                    let left_entry =
+                        traversal.hit_bounds(self.nodes[left].bounds, ray_t.min, closest);
+                    let right_entry =
+                        traversal.hit_bounds(self.nodes[right].bounds, ray_t.min, closest);
+
+                    match (left_entry, right_entry) {
+                        (Some(left_entry), Some(right_entry)) if right_entry < left_entry => {
+                            stack.push(StackEntry {
+                                node: left,
+                                entry_t: left_entry,
+                            });
+                            stack.push(StackEntry {
+                                node: right,
+                                entry_t: right_entry,
+                            });
+                        }
+                        (Some(left_entry), Some(right_entry)) => {
+                            stack.push(StackEntry {
+                                node: right,
+                                entry_t: right_entry,
+                            });
+                            stack.push(StackEntry {
+                                node: left,
+                                entry_t: left_entry,
+                            });
+                        }
+                        (Some(left_entry), None) => {
+                            stack.push(StackEntry {
+                                node: left,
+                                entry_t: left_entry,
+                            });
+                        }
+                        (None, Some(right_entry)) => {
+                            stack.push(StackEntry {
+                                node: right,
+                                entry_t: right_entry,
+                            });
+                        }
+                        (None, None) => {}
+                    }
+                }
             }
         }
+
+        closest_hit
     }
 }
 
@@ -382,5 +438,85 @@ fn point_axis(point: Point, axis: usize) -> f64 {
         1 => point.y(),
         2 => point.z(),
         _ => panic!("point axis index out of bounds"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gmath::{ray::Ray, vector::Vector};
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct TestHit {
+        t: f64,
+    }
+
+    impl BvhHit for TestHit {
+        fn hit_t(&self) -> f64 {
+            self.t
+        }
+    }
+
+    fn z_bounds(min_z: f64, max_z: f64) -> Aabb {
+        Aabb::new((-1.0, -1.0, min_z), (1.0, 1.0, max_z))
+    }
+
+    #[test]
+    fn traversal_stack_preserves_entries_past_inline_capacity() {
+        let mut stack = TraversalStack::new(0.0);
+        for node in 1..=70 {
+            stack.push(StackEntry {
+                node,
+                entry_t: f64::from(u32::try_from(node).expect("test node index fits u32")),
+            });
+        }
+
+        let mut popped = Vec::new();
+        while let Some(entry) = stack.pop() {
+            popped.push(entry.node);
+        }
+
+        assert_eq!(popped.len(), 71);
+        assert_eq!(popped[0], 70);
+        assert_eq!(popped[69], 1);
+        assert_eq!(popped[70], 0);
+    }
+
+    #[test]
+    fn flat_bvh_prunes_far_child_after_near_hit() {
+        let left = z_bounds(1.0, 2.0);
+        let right = z_bounds(10.0, 11.0);
+        let bvh = FlatBvh {
+            nodes: vec![
+                FlatBvhNode {
+                    bounds: left.union(right),
+                    kind: FlatBvhNodeKind::Internal { left: 1, right: 2 },
+                },
+                FlatBvhNode {
+                    bounds: left,
+                    kind: FlatBvhNodeKind::Leaf { first: 0, count: 1 },
+                },
+                FlatBvhNode {
+                    bounds: right,
+                    kind: FlatBvhNodeKind::Leaf { first: 1, count: 1 },
+                },
+            ],
+            indices: vec![0, 1],
+        };
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0));
+        let traversal = RayTraversal::new(&ray);
+        let mut visited = Vec::new();
+
+        let hit = bvh.hit_with(Interval::new(0.0, 20.0), traversal, |indices, _| {
+            visited.extend_from_slice(indices);
+            match indices[0] {
+                0 => Some(TestHit { t: 1.5 }),
+                1 => Some(TestHit { t: 10.5 }),
+                _ => None,
+            }
+        });
+
+        assert_eq!(hit, Some(TestHit { t: 1.5 }));
+        assert_eq!(visited, vec![0]);
     }
 }

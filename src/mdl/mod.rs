@@ -1,7 +1,10 @@
 //! Motion Description Language (MDL) compiler front end.
 //!
-//! This module parses MDL source into typed commands. Rendering and runtime
-//! state live in later compiler stages, not in the parser.
+//! This module parses MDL source into typed commands and executes those commands through the
+//! runtime pipeline. Raster modes (`wireframe`, `flat`, `gouraud`, `phong`, and `toon`) draw into a
+//! [`Canvas`](crate::graphics::display::Canvas). `shading raytrace` keeps the same MDL geometry,
+//! material constants, camera, background, and point lights, then routes `save` / `display` through
+//! the path tracer.
 
 pub mod animation;
 pub mod ast;

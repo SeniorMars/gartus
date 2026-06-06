@@ -180,6 +180,7 @@ impl Canvas {
         });
     }
 
+    #[cfg_attr(not(feature = "external"), allow(dead_code))]
     pub(crate) fn draw_textured_triangle_shaded(
         &mut self,
         texture: &Texture,
@@ -252,6 +253,7 @@ impl Canvas {
         });
     }
 
+    #[cfg_attr(not(feature = "external"), allow(dead_code))]
     fn draw_textured_triangle_with_fragment_color(
         &mut self,
         texture: &Texture,
@@ -441,6 +443,7 @@ impl Canvas {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(feature = "external"), allow(dead_code))]
 struct TexturedFragment {
     sample: Rgb,
     weights: [f64; 3],
@@ -639,6 +642,7 @@ fn texture_lod(
     texture.lod_from_derivatives(right_s - s, right_t - t, down_s - s, down_t - t)
 }
 
+#[cfg_attr(not(feature = "external"), allow(dead_code))]
 fn flat_textured_modulation(lighting: &PreparedLighting, vertices: [TexturedVertex; 3]) -> Rgb {
     let p0 = vertices[0].position_tuple();
     let p1 = vertices[1].position_tuple();
@@ -649,11 +653,13 @@ fn flat_textured_modulation(lighting: &PreparedLighting, vertices: [TexturedVert
     lighting.illuminate_at(normal, point)
 }
 
+#[cfg_attr(not(feature = "external"), allow(dead_code))]
 fn interpolate_normal(normals: [Vector; 3], weights: [f64; 3]) -> Vector {
     normals[0] * weights[0] + normals[1] * weights[1] + normals[2] * weights[2]
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[cfg_attr(not(feature = "external"), allow(dead_code))]
 fn interpolate_rgb(colors: [Rgb; 3], weights: [f64; 3]) -> Rgb {
     let channel = |channel: fn(Rgb) -> u8| {
         let value = weights[0].mul_add(
@@ -672,6 +678,7 @@ fn interpolate_rgb(colors: [Rgb; 3], weights: [f64; 3]) -> Rgb {
     )
 }
 
+#[cfg_attr(not(feature = "external"), allow(dead_code))]
 fn tuple_to_vector(point: (f64, f64, f64)) -> Vector {
     Vector::new(point.0, point.1, point.2)
 }

@@ -115,6 +115,42 @@ struct ScanPoint {
 }
 
 #[derive(Clone, Copy)]
+struct ScanEdge {
+    current: ScanPoint,
+    dx: f64,
+    dz: f64,
+}
+
+impl ScanEdge {
+    fn new(start: ScanPoint, end: ScanPoint) -> Self {
+        let dy = end.y - start.y;
+        let (dx, dz) = if dy == 0 {
+            (0.0, 0.0)
+        } else {
+            (
+                (end.x - start.x) / f64::from(dy),
+                (end.z - start.z) / f64::from(dy),
+            )
+        };
+        Self {
+            current: start,
+            dx,
+            dz,
+        }
+    }
+
+    fn point(self) -> ScanPoint {
+        self.current
+    }
+
+    fn step(&mut self) {
+        self.current.x += self.dx;
+        self.current.y += 1;
+        self.current.z += self.dz;
+    }
+}
+
+#[derive(Clone, Copy)]
 struct ColorScanPoint {
     x: f64,
     y: i32,
@@ -123,11 +159,97 @@ struct ColorScanPoint {
 }
 
 #[derive(Clone, Copy)]
+struct ColorScanEdge {
+    current: ColorScanPoint,
+    dx: f64,
+    dz: f64,
+    dcolor: [f64; 3],
+}
+
+impl ColorScanEdge {
+    fn new(start: ColorScanPoint, end: ColorScanPoint) -> Self {
+        let dy = end.y - start.y;
+        let (dx, dz, dcolor) = if dy == 0 {
+            (0.0, 0.0, [0.0; 3])
+        } else {
+            let dy = f64::from(dy);
+            (
+                (end.x - start.x) / dy,
+                (end.z - start.z) / dy,
+                [
+                    (end.color[0] - start.color[0]) / dy,
+                    (end.color[1] - start.color[1]) / dy,
+                    (end.color[2] - start.color[2]) / dy,
+                ],
+            )
+        };
+        Self {
+            current: start,
+            dx,
+            dz,
+            dcolor,
+        }
+    }
+
+    fn point(self) -> ColorScanPoint {
+        self.current
+    }
+
+    fn step(&mut self) {
+        self.current.x += self.dx;
+        self.current.y += 1;
+        self.current.z += self.dz;
+        add3(&mut self.current.color, self.dcolor);
+    }
+}
+
+#[derive(Clone, Copy)]
 struct NormalScanPoint {
     x: f64,
     y: i32,
     z: f64,
     normal: Vector,
+}
+
+#[derive(Clone, Copy)]
+struct NormalScanEdge {
+    current: NormalScanPoint,
+    dx: f64,
+    dz: f64,
+    dnormal: Vector,
+}
+
+impl NormalScanEdge {
+    fn new(start: NormalScanPoint, end: NormalScanPoint) -> Self {
+        let dy = end.y - start.y;
+        let (dx, dz, dnormal) = if dy == 0 {
+            (0.0, 0.0, Vector::default())
+        } else {
+            let dy = f64::from(dy);
+            (
+                (end.x - start.x) / dy,
+                (end.z - start.z) / dy,
+                (end.normal - start.normal) / dy,
+            )
+        };
+        Self {
+            current: start,
+            dx,
+            dz,
+            dnormal,
+        }
+    }
+
+    fn point(self) -> NormalScanPoint {
+        self.current
+    }
+
+    fn step(&mut self) {
+        self.current.x += self.dx;
+        self.current.y += 1;
+        self.current.z += self.dz;
+        self.current.normal += self.dnormal;
+    }
 }
 
 trait ScanSortable {
@@ -235,7 +357,7 @@ impl Canvas {
 
     /// Fills in the area of a 2D figure using a faster scanline-based algorithm.
     ///
-    /// This is generally more efficient than the stack-based [`fill`] method.
+    /// This is generally more efficient than the stack-based [`Self::fill`] method.
     pub fn scanline_fill(&mut self, x: i64, y: i64, fill_color: Rgb, boundary_color: Rgb) {
         if let Some(pixel) = self.get_pixel(x, y) {
             if *pixel == boundary_color || *pixel == fill_color {
@@ -608,15 +730,34 @@ impl Canvas {
             self.draw_scanline(color, points[0], points[2], bottom.y);
             return;
         }
+        if bottom.y == middle.y {
+            self.draw_scanline(color, bottom, middle, bottom.y);
+            let mut edge0 = ScanEdge::new(bottom, top);
+            let mut edge1 = ScanEdge::new(middle, top);
+            edge0.step();
+            edge1.step();
+            for y in (bottom.y + 1)..=top.y {
+                self.draw_scanline(color, edge0.point(), edge1.point(), y);
+                edge0.step();
+                edge1.step();
+            }
+            return;
+        }
 
-        for y in bottom.y..=top.y {
-            let p0 = point_on_edge(bottom, top, y);
-            let p1 = if y <= middle.y {
-                point_on_edge(bottom, middle, y)
-            } else {
-                point_on_edge(middle, top, y)
-            };
-            self.draw_scanline(color, p0, p1, y);
+        let mut long = ScanEdge::new(bottom, top);
+        let mut short = ScanEdge::new(bottom, middle);
+        for y in bottom.y..=middle.y {
+            self.draw_scanline(color, long.point(), short.point(), y);
+            long.step();
+            short.step();
+        }
+
+        let mut short = ScanEdge::new(middle, top);
+        short.step();
+        for y in (middle.y + 1)..=top.y {
+            self.draw_scanline(color, long.point(), short.point(), y);
+            long.step();
+            short.step();
         }
     }
 
@@ -707,15 +848,34 @@ impl Canvas {
             self.draw_gouraud_scanline(points[0], points[2], bottom.y);
             return;
         }
+        if bottom.y == middle.y {
+            self.draw_gouraud_scanline(bottom, middle, bottom.y);
+            let mut edge0 = ColorScanEdge::new(bottom, top);
+            let mut edge1 = ColorScanEdge::new(middle, top);
+            edge0.step();
+            edge1.step();
+            for y in (bottom.y + 1)..=top.y {
+                self.draw_gouraud_scanline(edge0.point(), edge1.point(), y);
+                edge0.step();
+                edge1.step();
+            }
+            return;
+        }
 
-        for y in bottom.y..=top.y {
-            let p0 = color_point_on_edge(bottom, top, y);
-            let p1 = if y <= middle.y {
-                color_point_on_edge(bottom, middle, y)
-            } else {
-                color_point_on_edge(middle, top, y)
-            };
-            self.draw_gouraud_scanline(p0, p1, y);
+        let mut long = ColorScanEdge::new(bottom, top);
+        let mut short = ColorScanEdge::new(bottom, middle);
+        for y in bottom.y..=middle.y {
+            self.draw_gouraud_scanline(long.point(), short.point(), y);
+            long.step();
+            short.step();
+        }
+
+        let mut short = ColorScanEdge::new(middle, top);
+        short.step();
+        for y in (middle.y + 1)..=top.y {
+            self.draw_gouraud_scanline(long.point(), short.point(), y);
+            long.step();
+            short.step();
         }
     }
 
@@ -826,15 +986,34 @@ impl Canvas {
             self.draw_phong_scanline(lighting, points[0], points[2], bottom.y);
             return;
         }
+        if bottom.y == middle.y {
+            self.draw_phong_scanline(lighting, bottom, middle, bottom.y);
+            let mut edge0 = NormalScanEdge::new(bottom, top);
+            let mut edge1 = NormalScanEdge::new(middle, top);
+            edge0.step();
+            edge1.step();
+            for y in (bottom.y + 1)..=top.y {
+                self.draw_phong_scanline(lighting, edge0.point(), edge1.point(), y);
+                edge0.step();
+                edge1.step();
+            }
+            return;
+        }
 
-        for y in bottom.y..=top.y {
-            let p0 = normal_point_on_edge(bottom, top, y);
-            let p1 = if y <= middle.y {
-                normal_point_on_edge(bottom, middle, y)
-            } else {
-                normal_point_on_edge(middle, top, y)
-            };
-            self.draw_phong_scanline(lighting, p0, p1, y);
+        let mut long = NormalScanEdge::new(bottom, top);
+        let mut short = NormalScanEdge::new(bottom, middle);
+        for y in bottom.y..=middle.y {
+            self.draw_phong_scanline(lighting, long.point(), short.point(), y);
+            long.step();
+            short.step();
+        }
+
+        let mut short = NormalScanEdge::new(middle, top);
+        short.step();
+        for y in (middle.y + 1)..=top.y {
+            self.draw_phong_scanline(lighting, long.point(), short.point(), y);
+            long.step();
+            short.step();
         }
     }
 
@@ -882,15 +1061,34 @@ impl Canvas {
             self.draw_toon_scanline(lighting, points[0], points[2], bottom.y);
             return;
         }
+        if bottom.y == middle.y {
+            self.draw_toon_scanline(lighting, bottom, middle, bottom.y);
+            let mut edge0 = NormalScanEdge::new(bottom, top);
+            let mut edge1 = NormalScanEdge::new(middle, top);
+            edge0.step();
+            edge1.step();
+            for y in (bottom.y + 1)..=top.y {
+                self.draw_toon_scanline(lighting, edge0.point(), edge1.point(), y);
+                edge0.step();
+                edge1.step();
+            }
+            return;
+        }
 
-        for y in bottom.y..=top.y {
-            let p0 = normal_point_on_edge(bottom, top, y);
-            let p1 = if y <= middle.y {
-                normal_point_on_edge(bottom, middle, y)
-            } else {
-                normal_point_on_edge(middle, top, y)
-            };
-            self.draw_toon_scanline(lighting, p0, p1, y);
+        let mut long = NormalScanEdge::new(bottom, top);
+        let mut short = NormalScanEdge::new(bottom, middle);
+        for y in bottom.y..=middle.y {
+            self.draw_toon_scanline(lighting, long.point(), short.point(), y);
+            long.step();
+            short.step();
+        }
+
+        let mut short = NormalScanEdge::new(middle, top);
+        short.step();
+        for y in (middle.y + 1)..=top.y {
+            self.draw_toon_scanline(lighting, long.point(), short.point(), y);
+            long.step();
+            short.step();
         }
     }
 
@@ -1194,20 +1392,6 @@ fn perspective_xyz(point: &[f64]) -> Option<(f64, f64, f64)> {
     Some((point[0] / w, point[1] / w, point[2] / w))
 }
 
-fn point_on_edge(start: ScanPoint, end: ScanPoint, y: i32) -> ScanPoint {
-    let dy = end.y - start.y;
-    if dy == 0 {
-        return end;
-    }
-
-    let t = f64::from(y - start.y) / f64::from(dy);
-    ScanPoint {
-        x: start.x + (end.x - start.x) * t,
-        y,
-        z: start.z + (end.z - start.z) * t,
-    }
-}
-
 impl ColorScanPoint {
     fn is_finite(&self) -> bool {
         self.x.is_finite()
@@ -1223,40 +1407,6 @@ impl NormalScanPoint {
             && self.normal[0].is_finite()
             && self.normal[1].is_finite()
             && self.normal[2].is_finite()
-    }
-}
-
-fn color_point_on_edge(start: ColorScanPoint, end: ColorScanPoint, y: i32) -> ColorScanPoint {
-    let dy = end.y - start.y;
-    if dy == 0 {
-        return end;
-    }
-
-    let t = f64::from(y - start.y) / f64::from(dy);
-    ColorScanPoint {
-        x: start.x + (end.x - start.x) * t,
-        y,
-        z: start.z + (end.z - start.z) * t,
-        color: [
-            start.color[0] + (end.color[0] - start.color[0]) * t,
-            start.color[1] + (end.color[1] - start.color[1]) * t,
-            start.color[2] + (end.color[2] - start.color[2]) * t,
-        ],
-    }
-}
-
-fn normal_point_on_edge(start: NormalScanPoint, end: NormalScanPoint, y: i32) -> NormalScanPoint {
-    let dy = end.y - start.y;
-    if dy == 0 {
-        return end;
-    }
-
-    let t = f64::from(y - start.y) / f64::from(dy);
-    NormalScanPoint {
-        x: start.x + (end.x - start.x) * t,
-        y,
-        z: start.z + (end.z - start.z) * t,
-        normal: start.normal + (end.normal - start.normal) * t,
     }
 }
 

@@ -7,12 +7,20 @@ use super::{
 };
 use crate::{
     gmath::{
-        edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix, stack::MatrixStack,
+        edge_matrix::EdgeMatrix,
+        matrix::Matrix,
+        polygon_matrix::PolygonMatrix,
+        stack::MatrixStack,
+        vector::{Point, Vector},
     },
     graphics::{
-        colors::Rgb,
+        camera::RayCamera,
+        colors::{LinearRgb, Rgb},
         display::{Canvas, PolygonColorMode, ShadingMode as CanvasShadingMode},
         lighting::{Lighting, PointLight, ReflectionConstants, SurfaceMaterial},
+        raytracing::{DiffuseLight, PathTracer, SamplingTargetList},
+        scene::SurfaceScene,
+        texture::{Texture, TextureFilter},
     },
 };
 use std::{
@@ -22,10 +30,7 @@ use std::{
 
 #[cfg(feature = "external")]
 use {
-    crate::{
-        external::MaterialMesh,
-        graphics::texture::{Texture, TextureFilter, TextureWrap},
-    },
+    crate::{external::MaterialMesh, graphics::texture::TextureWrap},
     std::sync::Arc,
 };
 
@@ -35,6 +40,10 @@ pub(crate) struct AssetCaches {
     mesh_cache: HashMap<PathBuf, Arc<MaterialMesh>>,
     texture_cache: HashMap<PathBuf, Arc<Texture>>,
 }
+
+const DEFAULT_RAYTRACE_SAMPLES_PER_PIXEL: u32 = 16;
+const DEFAULT_RAYTRACE_MAX_DEPTH: u32 = 8;
+const DEFAULT_RAYTRACE_LIGHT_RADIUS: f64 = 10.0;
 
 /// Rendering configuration for one MDL execution.
 #[derive(Debug, Clone)]
@@ -48,6 +57,9 @@ pub struct RenderConfig {
     source_dir: Option<PathBuf>,
     save_enabled: bool,
     save_override: Option<PathBuf>,
+    raytrace_samples_per_pixel: u32,
+    raytrace_max_depth: u32,
+    raytrace_light_radius: f64,
     #[cfg(feature = "external")]
     texture_wrap: (TextureWrap, TextureWrap),
 }
@@ -67,6 +79,9 @@ impl RenderConfig {
             source_dir: None,
             save_enabled: true,
             save_override: None,
+            raytrace_samples_per_pixel: DEFAULT_RAYTRACE_SAMPLES_PER_PIXEL,
+            raytrace_max_depth: DEFAULT_RAYTRACE_MAX_DEPTH,
+            raytrace_light_radius: DEFAULT_RAYTRACE_LIGHT_RADIUS,
             #[cfg(feature = "external")]
             texture_wrap: (TextureWrap::Clamp, TextureWrap::Clamp),
         }
@@ -85,6 +100,9 @@ impl RenderConfig {
             source_dir: None,
             save_enabled: true,
             save_override: None,
+            raytrace_samples_per_pixel: DEFAULT_RAYTRACE_SAMPLES_PER_PIXEL,
+            raytrace_max_depth: DEFAULT_RAYTRACE_MAX_DEPTH,
+            raytrace_light_radius: DEFAULT_RAYTRACE_LIGHT_RADIUS,
             #[cfg(feature = "external")]
             texture_wrap: (TextureWrap::Clamp, TextureWrap::Clamp),
         }
@@ -122,6 +140,37 @@ impl RenderConfig {
     #[must_use]
     pub fn save_override(mut self, output: impl Into<PathBuf>) -> Self {
         self.save_override = Some(output.into());
+        self
+    }
+
+    /// Sets the samples per pixel used by MDL `shading raytrace` output.
+    #[must_use]
+    pub fn raytrace_samples_per_pixel(mut self, samples_per_pixel: u32) -> Self {
+        self.raytrace_samples_per_pixel = samples_per_pixel.max(1);
+        self
+    }
+
+    /// Sets the maximum path depth used by MDL `shading raytrace` output.
+    #[must_use]
+    pub fn raytrace_max_depth(mut self, max_depth: u32) -> Self {
+        self.raytrace_max_depth = max_depth.max(1);
+        self
+    }
+
+    /// Sets the world-space radius used when MDL point lights are converted into path-traced
+    /// emissive spheres.
+    ///
+    /// MDL lights are mathematical points, which stochastic path tracers cannot hit directly.
+    /// The MDL raytrace bridge turns each point light into a small emissive sphere with this
+    /// radius. The radius is measured in scene units, not pixels, so preview and final renders use
+    /// the same physical light size.
+    #[must_use]
+    pub fn raytrace_light_radius(mut self, radius: f64) -> Self {
+        self.raytrace_light_radius = if radius.is_finite() && radius > f64::EPSILON {
+            radius
+        } else {
+            DEFAULT_RAYTRACE_LIGHT_RADIUS
+        };
         self
     }
 
@@ -227,6 +276,9 @@ struct SceneState {
     lights: Vec<Light>,
     ambient: Vec3,
     camera: Option<Camera>,
+    surface_scene: SurfaceScene,
+    raytrace_enabled: bool,
+    surface_capture_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -238,6 +290,10 @@ struct OutputState {
     source_dir: Option<PathBuf>,
     save_enabled: bool,
     save_override: Option<PathBuf>,
+    background: Rgb,
+    raytrace_samples_per_pixel: u32,
+    raytrace_max_depth: u32,
+    raytrace_light_radius: f64,
     #[cfg(feature = "external")]
     texture_wrap: (TextureWrap, TextureWrap),
 }
@@ -413,6 +469,7 @@ impl Runtime {
 
     pub(crate) fn clear_canvas(&mut self) {
         self.canvas.clear_canvas();
+        self.scene.clear_geometry();
     }
 
     pub(crate) fn reset(&mut self) {
@@ -507,10 +564,8 @@ impl Runtime {
 
     pub(crate) fn add_light(&mut self, name: Option<String>, light: Light) {
         let first_user_light = self.scene.lights.is_empty();
-        let point_light = PointLight::positional(
-            crate::gmath::vector::Vector::new(light.position.x, light.position.y, light.position.z),
-            rgb_from_vec3(light.color),
-        );
+        let point_light =
+            PointLight::positional(vec3_to_vector(light.position), rgb_from_vec3(light.color));
         let lighting = self.canvas.lighting_mut();
         lighting.point_light = point_light;
         if first_user_light {
@@ -537,6 +592,28 @@ impl Runtime {
                 focal,
             },
         });
+    }
+
+    pub(crate) fn set_raytrace_enabled(&mut self, enabled: bool) {
+        self.scene.raytrace_enabled = enabled;
+        if enabled {
+            self.scene.surface_capture_enabled = true;
+        }
+    }
+
+    /// Returns true when MDL output commands should use the path tracer.
+    #[must_use]
+    pub fn raytrace_enabled(&self) -> bool {
+        self.scene.raytrace_enabled
+    }
+
+    pub(crate) fn should_capture_surfaces(&self) -> bool {
+        self.scene.surface_capture_enabled
+    }
+
+    #[cfg(test)]
+    pub(crate) fn captured_surface_count(&self) -> usize {
+        self.scene.surface_scene.len()
     }
 
     pub(crate) fn set_basename(&mut self, basename: String) {
@@ -635,8 +712,22 @@ impl Runtime {
         self.scratch.tmp_polygon.apply_in_place(transform);
     }
 
+    pub(crate) fn tmp_polygons(&self) -> &PolygonMatrix {
+        &self.scratch.tmp_polygon
+    }
+
     pub(crate) fn draw_tmp_polygons(&mut self) {
         self.canvas.draw_polygons(&self.scratch.tmp_polygon);
+    }
+
+    pub(crate) fn add_surface_mesh(
+        &mut self,
+        polygons: PolygonMatrix,
+        material: impl Into<SurfaceMaterial>,
+    ) {
+        if self.scene.surface_capture_enabled {
+            self.scene.surface_scene.add_mesh(polygons, material);
+        }
     }
 
     #[cfg(feature = "external")]
@@ -650,7 +741,13 @@ impl Runtime {
 
     pub(crate) fn display(&self) -> Result<(), ExecutionError> {
         if self.output.display_enabled {
-            self.canvas.display().map_err(ExecutionError::Io)?;
+            if self.scene.raytrace_enabled {
+                self.raytrace_canvas()
+                    .display()
+                    .map_err(ExecutionError::Io)?;
+            } else {
+                self.canvas.display().map_err(ExecutionError::Io)?;
+            }
         }
         Ok(())
     }
@@ -676,24 +773,70 @@ impl Runtime {
             std::fs::create_dir_all(parent).map_err(ExecutionError::Io)?;
         }
 
+        let canvas = if self.scene.raytrace_enabled {
+            self.raytrace_canvas()
+        } else {
+            self.canvas.clone()
+        };
+
         match path
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("ppm") => self
-                .canvas
+            Some("ppm") => canvas
                 .save_binary(path_to_str(path)?)
                 .map_err(ExecutionError::Io),
-            _ => self
-                .canvas
+            _ => canvas
                 .save_extension(path_to_str(path)?)
                 .map_err(ExecutionError::Io),
         }
     }
 
-    #[cfg(feature = "external")]
+    fn raytrace_canvas(&self) -> Canvas {
+        let aspect_ratio = f64::from(self.canvas.width()) / f64::from(self.canvas.height().max(1));
+        let mut camera = RayCamera::new(self.canvas.width().max(1), aspect_ratio)
+            .with_samples_per_pixel(self.output.raytrace_samples_per_pixel)
+            .with_max_depth(self.output.raytrace_max_depth)
+            .with_background(LinearRgb::from_rgb_srgb(self.output.background));
+
+        if let Some(mdl_camera) = self.scene.camera {
+            let eye = vec3_to_point(mdl_camera.eye);
+            let aim = vec3_to_point(mdl_camera.aim);
+            let lookat = raytrace_lookat_or_default_forward(eye, aim);
+            camera = camera.with_look_at(eye, lookat);
+            if mdl_camera.focal.is_finite() && mdl_camera.focal > f64::EPSILON {
+                let vertical_fov = 2.0
+                    * (f64::from(self.canvas.height()) * 0.5 / mdl_camera.focal)
+                        .atan()
+                        .to_degrees();
+                if vertical_fov.is_finite() && 0.0 < vertical_fov && vertical_fov < 180.0 {
+                    camera = camera.with_vertical_fov(vertical_fov);
+                }
+            }
+        }
+
+        let mut ray_scene = self.scene.surface_scene.to_ray_scene();
+        let mut sampling_targets = SamplingTargetList::with_capacity(self.scene.lights.len());
+        for light in &self.scene.lights {
+            let center = vec3_to_point(light.position);
+            let radius = self.output.raytrace_light_radius;
+            let emit = LinearRgb::from_rgb_linear_units(rgb_from_vec3(light.color)) * 12.0;
+            let material = ray_scene.add_material(DiffuseLight::new(emit));
+            ray_scene.add_sphere(center, radius, material);
+            sampling_targets.add_sphere(center, radius);
+        }
+        ray_scene.build_bvh();
+
+        let tracer = PathTracer::new(camera);
+        if sampling_targets.is_empty() {
+            tracer.render(&ray_scene)
+        } else {
+            tracer.render_with_lights(&ray_scene, &sampling_targets)
+        }
+    }
+
     pub(crate) fn resolve_mesh_path(&self, filename: &str, source_name: Option<&Path>) -> PathBuf {
         let path = Path::new(filename);
         if path.is_absolute() {
@@ -757,6 +900,19 @@ impl Runtime {
             .insert(path.to_path_buf(), Arc::clone(&texture));
         Ok(texture)
     }
+
+    #[cfg(not(feature = "external"))]
+    pub(crate) fn load_texture(path: &Path) -> Result<Texture, ExecutionError> {
+        let image = crate::graphics::texture::load_ppm_canvas(path).map_err(|error| {
+            ExecutionError::Texture {
+                filename: path.display().to_string(),
+                error,
+            }
+        })?;
+        Ok(Texture::from_canvas(image)
+            .filter(TextureFilter::Linear)
+            .mipmapped())
+    }
 }
 
 impl SceneState {
@@ -768,6 +924,9 @@ impl SceneState {
             lights: Vec::new(),
             ambient: default_ambient(),
             camera: None,
+            surface_scene: SurfaceScene::new(),
+            raytrace_enabled: false,
+            surface_capture_enabled: false,
         }
     }
 
@@ -777,6 +936,13 @@ impl SceneState {
         self.lights.clear();
         self.ambient = default_ambient();
         self.camera = None;
+        self.surface_scene.clear();
+        self.raytrace_enabled = false;
+        self.surface_capture_enabled = false;
+    }
+
+    fn clear_geometry(&mut self) {
+        self.surface_scene.clear();
     }
 }
 
@@ -810,6 +976,10 @@ impl OutputState {
             source_dir: config.source_dir.clone(),
             save_enabled: config.save_enabled,
             save_override: config.save_override.clone(),
+            background: config.background,
+            raytrace_samples_per_pixel: config.raytrace_samples_per_pixel,
+            raytrace_max_depth: config.raytrace_max_depth,
+            raytrace_light_radius: config.raytrace_light_radius,
             #[cfg(feature = "external")]
             texture_wrap: config.texture_wrap,
         }
@@ -854,6 +1024,22 @@ pub(crate) fn rgb_from_vec3(color: Vec3) -> Rgb {
     )
 }
 
+fn vec3_to_point(point: Vec3) -> Point {
+    Point::new(point.x, point.y, point.z)
+}
+
+fn vec3_to_vector(vector: Vec3) -> Vector {
+    Vector::new(vector.x, vector.y, vector.z)
+}
+
+fn raytrace_lookat_or_default_forward(eye: Point, aim: Point) -> Point {
+    if (aim - eye).length_squared() > f64::EPSILON {
+        aim
+    } else {
+        eye + Vector::new(0.0, 0.0, -1.0)
+    }
+}
+
 fn default_ambient() -> Vec3 {
     let ambient = Lighting::default().ambient;
     Vec3::new(
@@ -868,6 +1054,10 @@ mod tests {
     use super::*;
     use crate::graphics::colors::LinearRgb;
 
+    fn assert_close(left: f64, right: f64) {
+        assert!((left - right).abs() < f64::EPSILON);
+    }
+
     #[test]
     fn material_constants_to_surface_material_uses_reflection_coefficients_only() {
         let constants = MaterialConstants {
@@ -880,5 +1070,60 @@ mod tests {
         assert_eq!(surface.ambient_color, LinearRgb::new(0.1, 0.4, 0.7));
         assert_eq!(surface.base_color, LinearRgb::new(0.2, 0.5, 0.8));
         assert_eq!(surface.specular_color, LinearRgb::new(0.3, 0.6, 0.9));
+    }
+
+    #[test]
+    fn render_config_controls_mdl_raytrace_quality() {
+        let default_output = OutputState::from_config(&RenderConfig::new(10, 10));
+
+        assert_eq!(
+            default_output.raytrace_samples_per_pixel,
+            DEFAULT_RAYTRACE_SAMPLES_PER_PIXEL
+        );
+        assert_eq!(
+            default_output.raytrace_max_depth,
+            DEFAULT_RAYTRACE_MAX_DEPTH
+        );
+        assert_close(
+            default_output.raytrace_light_radius,
+            DEFAULT_RAYTRACE_LIGHT_RADIUS,
+        );
+
+        let custom = RenderConfig::new(10, 10)
+            .raytrace_samples_per_pixel(0)
+            .raytrace_max_depth(0)
+            .raytrace_light_radius(2.5);
+        let output = OutputState::from_config(&custom);
+
+        assert_eq!(output.raytrace_samples_per_pixel, 1);
+        assert_eq!(output.raytrace_max_depth, 1);
+        assert_close(output.raytrace_light_radius, 2.5);
+    }
+
+    #[test]
+    fn raytrace_light_radius_is_independent_of_render_resolution() {
+        let small = OutputState::from_config(&RenderConfig::new(100, 100));
+        let large = OutputState::from_config(&RenderConfig::new(800, 600));
+
+        assert_close(small.raytrace_light_radius, large.raytrace_light_radius);
+        assert_close(small.raytrace_light_radius, DEFAULT_RAYTRACE_LIGHT_RADIUS);
+    }
+
+    #[test]
+    fn invalid_raytrace_light_radius_uses_default() {
+        for radius in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let output =
+                OutputState::from_config(&RenderConfig::new(10, 10).raytrace_light_radius(radius));
+
+            assert_close(output.raytrace_light_radius, DEFAULT_RAYTRACE_LIGHT_RADIUS);
+        }
+    }
+
+    #[test]
+    fn degenerate_raytrace_camera_keeps_requested_eye() {
+        let eye = Point::new(1.0, 2.0, 3.0);
+        let lookat = raytrace_lookat_or_default_forward(eye, eye);
+
+        assert_eq!(lookat, Point::new(1.0, 2.0, 2.0));
     }
 }

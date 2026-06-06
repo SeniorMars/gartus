@@ -1,7 +1,20 @@
 //! Ray-tracing helpers following the "Ray Tracing" book series.
 //!
-//! Shared renderer-neutral APIs use [`LinearRgb`]. The ray-tracing module keeps
-//! [`LinearColor`] as a compatibility alias for the terminology used by the books and examples.
+//! Shared renderer-neutral APIs use [`crate::graphics::colors::LinearRgb`]. The ray-tracing module
+//! keeps [`LinearColor`](crate::graphics::raytracing::LinearColor) as a compatibility alias for the
+//! terminology used by the books and examples.
+//!
+//! Start with [`PathTracer`](crate::graphics::raytracing::PathTracer) and
+//! [`RayCamera`](crate::graphics::camera::RayCamera) for rendering. For application-owned mesh
+//! scenes, prefer [`crate::graphics::scene::SurfaceScene`] and
+//! [`PathTracer::render_scene`](crate::graphics::raytracing::PathTracer::render_scene) so raster and
+//! ray paths share the same material data. Use [`RayScene`](crate::graphics::raytracing::RayScene)
+//! directly for path-tracing-specific primitives, emissive geometry, and scenes that need the
+//! cached BVH. Use
+//! [`SamplingTargetList`](crate::graphics::raytracing::SamplingTargetList) with
+//! [`PathTracer::render_with_lights`](crate::graphics::raytracing::PathTracer::render_with_lights)
+//! to importance-sample real emitters or other important geometry without mixing those targets into
+//! the world intersection container.
 
 pub use crate::gmath::random::SampleRng;
 mod bvh;
@@ -757,9 +770,9 @@ mod tests {
         let context = PdfContext::new(Point::new(2.0, 0.0, 0.0), 0.0);
         let mut rng = SampleRng::new(83);
 
-        assert_eq!(
+        assert_close(
             instance.pdf_value(context, Vector::new(0.0, 0.0, -1.0)),
-            0.0
+            0.0,
         );
         assert_eq!(
             instance.random_direction(context, &mut rng),

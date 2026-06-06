@@ -36,6 +36,9 @@ impl SurfaceMesh {
 /// This is the preferred user-facing scene container for mesh/material content that should render
 /// through both pipelines. Use [`Self::rasterize`] for the canvas raster path, or pass a
 /// `SurfaceScene` to [`crate::graphics::raytracing::PathTracer::render_scene`] for path tracing.
+/// Rasterization maps [`SurfaceMaterial`] into Phong-style lighting data; path tracing currently
+/// compiles surface materials to Lambertian ray materials unless you build a low-level
+/// [`crate::graphics::raytracing::RayScene`] yourself.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfaceScene {
     meshes: Vec<SurfaceMesh>,
@@ -59,6 +62,11 @@ impl SurfaceScene {
     /// Adds a polygon mesh with shared material data.
     pub fn add_mesh(&mut self, polygons: PolygonMatrix, material: impl Into<SurfaceMaterial>) {
         self.meshes.push(SurfaceMesh::new(polygons, material));
+    }
+
+    /// Removes all meshes.
+    pub fn clear(&mut self) {
+        self.meshes.clear();
     }
 
     /// Returns all scene meshes.

@@ -1,3 +1,9 @@
+//! Final Cornell-box render using *The Rest of Your Life* importance sampling.
+//!
+//! The world remains a book-style `HittableList`, while `SamplingTargetList` contains only the
+//! ceiling light and glass sphere used for explicit importance sampling. Use
+//! `cargo run --profile render --example life` for full renders.
+
 use gartus::{
     gmath::vector::{Point, Vector},
     graphics::{

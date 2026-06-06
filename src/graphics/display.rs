@@ -532,8 +532,7 @@ impl Canvas {
         self.pixels.chunks_exact_mut(self.width as usize)
     }
 
-    /// Returns a reference to the (x, y) [Pixel] of body of in the
-    /// [Canvas].
+    /// Returns a reference to the `(x, y)` pixel in the canvas.
     ///
     /// Returns `None` if out of bounds.
     #[must_use]
@@ -542,8 +541,7 @@ impl Canvas {
         Some(&self.pixels[y as usize * self.width as usize + x as usize])
     }
 
-    /// Returns a mutable reference to the (x, y) [Pixel] of body of in the
-    /// [Canvas].
+    /// Returns a mutable reference to the `(x, y)` pixel in the canvas.
     ///
     /// Returns `None` if out of bounds.
     pub fn get_pixel_mut(&mut self, x: i64, y: i64) -> Option<&mut Rgb> {
@@ -592,7 +590,7 @@ impl Canvas {
     ///
     /// # Arguments
     ///
-    /// * `pixel` - A [Pixel] that will be plotted at (x, y)
+    /// * `pixel` - RGB value that will be plotted at `(x, y)`
     /// * `x` - An signed int that represents horizontal location
     /// * `y` - An signed int that represents vertical location
     ///

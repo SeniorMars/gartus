@@ -380,7 +380,10 @@ impl Material for Metal {
         hit: &HitRecord<'_>,
         rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
-        let reflected = ray_in.direction().normalized().reflected(hit.normal);
+        let reflected = ray_in
+            .direction()
+            .normalized()
+            .reflected(hit.shading_normal);
         let scattered_direction = reflected + self.fuzz * rng.random_unit_vector();
         if scattered_direction.dot(hit.normal) <= 0.0 {
             return None;

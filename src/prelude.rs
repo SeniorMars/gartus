@@ -1,4 +1,9 @@
-//! Contains common types that can be glob-imported (`*`) for convience
+//! Common types that can be glob-imported for examples and small programs.
+//!
+//! The root prelude exports renderer-neutral scene/material/texture types plus the high-level
+//! path-tracing entry points. Low-level PDF internals intentionally stay out of the prelude; import
+//! them from `gartus::graphics::raytracing::pdf` or `gartus::gmath::sampling` when you are working
+//! on sampling code directly.
 pub use crate::{
     gmath::{
         edge_matrix::EdgeMatrix,
@@ -16,7 +21,8 @@ pub use crate::{
     graphics::{
         animation::{AnimationRenderOptions, FrameRecorder},
         camera::{
-            Camera3D, PixelSampleMode, ProjectedSegment, ScreenPoint, sort_segments_back_to_front,
+            AdaptiveSampling, Camera3D, PixelSampleMode, ProjectedSegment, ScreenPoint,
+            sort_segments_back_to_front,
         },
         colors::{ColorRamp, ColorSpace, Hsl, Hsv, LinearRgb, Rgb},
         display::{Canvas, Domain2D, PolygonColorMode, ShadingMode},

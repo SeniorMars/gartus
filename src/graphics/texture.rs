@@ -1,4 +1,6 @@
 use std::{fmt, sync::Arc};
+#[cfg(not(feature = "external"))]
+use std::{fs, path::Path, str::FromStr};
 
 use super::{
     colors::{LinearRgb, Rgb},
@@ -48,6 +50,10 @@ impl TextureSample {
 }
 
 /// Texture data that can be sampled as linear RGB by any renderer.
+///
+/// This is the canonical texture trait for both raster and ray-tracing code. Bitmap-backed
+/// textures decode display RGB bytes into linear color by default; callers that need data textures
+/// should keep those values in an explicit raw-linear representation.
 pub trait SurfaceTexture: fmt::Debug + Send + Sync {
     /// Returns the linear color for a surface sample.
     fn sample_linear(&self, sample: TextureSample) -> LinearRgb;
@@ -257,6 +263,187 @@ impl Texture {
             },
         }
     }
+}
+
+#[cfg(not(feature = "external"))]
+pub(crate) fn load_ppm_canvas(path: &Path) -> Result<Canvas, String> {
+    let buffer = fs::read(path).map_err(|error| error.to_string())?;
+    let mut cursor = 0;
+
+    let magic = next_ppm_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing magic")?;
+    let width = parse_ppm_token::<u32>(
+        next_ppm_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing width")?,
+    )?;
+    let height = parse_ppm_token::<u32>(
+        next_ppm_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing height")?,
+    )?;
+    let maxval = parse_ppm_token::<u16>(
+        next_ppm_token(&buffer, &mut cursor).ok_or("Invalid PPM file: missing maxval")?,
+    )?;
+
+    if maxval == 0 {
+        return Err("unsupported PPM maxval 0; maxval must be 1..=65535".to_string());
+    }
+
+    let pixel_count = u64::from(width) * u64::from(height);
+    let pixel_count = usize::try_from(pixel_count).map_err(|_| "PPM image too large")?;
+
+    let pixels = match magic {
+        b"P3" => parse_p3_pixels(&buffer, &mut cursor, pixel_count, maxval)?,
+        b"P6" => parse_p6_pixels(&buffer, &mut cursor, pixel_count, maxval)?,
+        other => {
+            return Err(format!(
+                "Invalid PPM file: unsupported magic {}",
+                String::from_utf8_lossy(other)
+            ));
+        }
+    };
+
+    Ok(Canvas::from_pixels(width, height, pixels))
+}
+
+#[cfg(not(feature = "external"))]
+fn next_ppm_token<'a>(buffer: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    loop {
+        while *cursor < buffer.len() && buffer[*cursor].is_ascii_whitespace() {
+            *cursor += 1;
+        }
+
+        if *cursor < buffer.len() && buffer[*cursor] == b'#' {
+            while *cursor < buffer.len() && buffer[*cursor] != b'\n' {
+                *cursor += 1;
+            }
+            continue;
+        }
+
+        break;
+    }
+
+    if *cursor >= buffer.len() {
+        return None;
+    }
+
+    let start = *cursor;
+    while *cursor < buffer.len()
+        && !buffer[*cursor].is_ascii_whitespace()
+        && buffer[*cursor] != b'#'
+    {
+        *cursor += 1;
+    }
+
+    Some(&buffer[start..*cursor])
+}
+
+#[cfg(not(feature = "external"))]
+fn parse_ppm_token<T>(token: &[u8]) -> Result<T, String>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let token = std::str::from_utf8(token).map_err(|error| error.to_string())?;
+    token.parse::<T>().map_err(|error| error.to_string())
+}
+
+#[cfg(not(feature = "external"))]
+fn scale_ppm_channel(value: u16, maxval: u16) -> Result<u8, String> {
+    if value > maxval {
+        return Err(format!("PPM channel value {value} exceeds maxval {maxval}"));
+    }
+
+    Ok(
+        u8::try_from((u32::from(value) * 255 + u32::from(maxval) / 2) / u32::from(maxval))
+            .unwrap_or(255),
+    )
+}
+
+#[cfg(not(feature = "external"))]
+fn parse_p3_pixels(
+    buffer: &[u8],
+    cursor: &mut usize,
+    pixel_count: usize,
+    maxval: u16,
+) -> Result<Vec<Rgb>, String> {
+    let remaining = buffer.len().saturating_sub(*cursor);
+    let estimated_token_capacity = remaining.div_ceil(2);
+    let mut pixels = Vec::with_capacity(pixel_count.min(estimated_token_capacity / 3));
+    for _ in 0..pixel_count {
+        let red = parse_ppm_token::<u16>(
+            next_ppm_token(buffer, cursor).ok_or("Invalid PPM file: missing red channel")?,
+        )?;
+        let green = parse_ppm_token::<u16>(
+            next_ppm_token(buffer, cursor).ok_or("Invalid PPM file: missing green channel")?,
+        )?;
+        let blue = parse_ppm_token::<u16>(
+            next_ppm_token(buffer, cursor).ok_or("Invalid PPM file: missing blue channel")?,
+        )?;
+
+        pixels.push(Rgb::new(
+            scale_ppm_channel(red, maxval)?,
+            scale_ppm_channel(green, maxval)?,
+            scale_ppm_channel(blue, maxval)?,
+        ));
+    }
+    Ok(pixels)
+}
+
+#[cfg(not(feature = "external"))]
+fn parse_p6_pixels(
+    buffer: &[u8],
+    cursor: &mut usize,
+    pixel_count: usize,
+    maxval: u16,
+) -> Result<Vec<Rgb>, String> {
+    consume_p6_separator(buffer, cursor)?;
+
+    let bytes_per_sample = if maxval < 256 { 1 } else { 2 };
+    let needed = pixel_count
+        .checked_mul(3)
+        .and_then(|count| count.checked_mul(bytes_per_sample))
+        .ok_or("PPM image data is too large")?;
+    if buffer.len().saturating_sub(*cursor) < needed {
+        return Err(format!(
+            "Invalid PPM file: expected {needed} bytes of pixel data, found {}",
+            buffer.len().saturating_sub(*cursor)
+        ));
+    }
+
+    let mut pixels = Vec::with_capacity(pixel_count);
+    if bytes_per_sample == 1 {
+        for chunk in buffer[*cursor..*cursor + needed].chunks_exact(3) {
+            pixels.push(Rgb::new(
+                scale_ppm_channel(u16::from(chunk[0]), maxval)?,
+                scale_ppm_channel(u16::from(chunk[1]), maxval)?,
+                scale_ppm_channel(u16::from(chunk[2]), maxval)?,
+            ));
+        }
+    } else {
+        for chunk in buffer[*cursor..*cursor + needed].chunks_exact(6) {
+            let red = u16::from_be_bytes([chunk[0], chunk[1]]);
+            let green = u16::from_be_bytes([chunk[2], chunk[3]]);
+            let blue = u16::from_be_bytes([chunk[4], chunk[5]]);
+            pixels.push(Rgb::new(
+                scale_ppm_channel(red, maxval)?,
+                scale_ppm_channel(green, maxval)?,
+                scale_ppm_channel(blue, maxval)?,
+            ));
+        }
+    }
+
+    Ok(pixels)
+}
+
+#[cfg(not(feature = "external"))]
+fn consume_p6_separator(buffer: &[u8], cursor: &mut usize) -> Result<(), String> {
+    if *cursor >= buffer.len() || !buffer[*cursor].is_ascii_whitespace() {
+        return Err("Invalid PPM file: missing binary data separator".to_string());
+    }
+
+    let separator = buffer[*cursor];
+    *cursor += 1;
+    if separator == b'\r' && *cursor < buffer.len() && buffer[*cursor] == b'\n' {
+        *cursor += 1;
+    }
+    Ok(())
 }
 
 impl SurfaceTexture for Texture {
@@ -486,6 +673,8 @@ fn mip_level_pair_from_lod(lod: f64, max_level: usize) -> (usize, usize, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "external"))]
+    use std::path::PathBuf;
 
     fn test_texture() -> Texture {
         Texture::from_canvas(Canvas::from_pixels(
@@ -493,6 +682,35 @@ mod tests {
             2,
             vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
         ))
+    }
+
+    #[cfg(not(feature = "external"))]
+    fn temp_ppm_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("gartus-texture-{name}-{}.ppm", std::process::id()))
+    }
+
+    #[cfg(not(feature = "external"))]
+    #[test]
+    fn ppm_loader_rejects_huge_p3_header_without_large_preallocation() {
+        let path = temp_ppm_path("huge-p3");
+        std::fs::write(&path, b"P3\n1000000 1000000\n255\n").unwrap();
+
+        let error = load_ppm_canvas(&path).expect_err("truncated huge image should fail");
+
+        assert!(error.contains("missing red channel"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(not(feature = "external"))]
+    #[test]
+    fn ppm_loader_accepts_p6_crlf_separator() {
+        let path = temp_ppm_path("p6-crlf");
+        std::fs::write(&path, b"P6\r\n1 1\r\n255\r\n\xff\x00\x80").unwrap();
+
+        let canvas = load_ppm_canvas(&path).expect("parse p6 ppm");
+
+        assert_eq!(canvas.pixels(), &[Rgb::new(255, 0, 128)]);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

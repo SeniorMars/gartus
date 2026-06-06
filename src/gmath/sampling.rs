@@ -1,10 +1,19 @@
 //! Generic probability density functions and sampling distributions.
+//!
+//! These PDFs operate on directions over solid angle, not on scene intersections. The path tracer
+//! composes them with ray-specific PDFs in [`crate::graphics::raytracing::pdf`]. Keeping the
+//! sphere, cosine, and mixture distributions here makes the sampling math reusable outside the
+//! renderer.
 
 use super::{geometry::OrthonormalBasis, random::SampleRng, vector::Vector};
 
 const SPHERE_AREA: f64 = 4.0 * std::f64::consts::PI;
 
 /// Direction-sampling probability density function over solid angle.
+///
+/// `value(direction)` must describe the probability density of directions returned by
+/// `generate(rng)`. Callers can then use the Monte Carlo estimator `f(direction) / value(direction)`
+/// without bias.
 pub trait Pdf {
     /// Returns the PDF value for `direction`.
     fn value(&self, direction: Vector) -> f64;
@@ -14,6 +23,8 @@ pub trait Pdf {
 }
 
 /// Uniform distribution over the unit sphere.
+///
+/// This is useful for isotropic volume scattering and as a simple baseline distribution.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SpherePdf;
 
@@ -28,6 +39,9 @@ impl Pdf for SpherePdf {
 }
 
 /// Cosine-weighted hemisphere distribution around a surface normal.
+///
+/// This matches ideal Lambertian diffuse scattering. Directions are generated relative to an
+/// [`OrthonormalBasis`] built from the supplied normal.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CosinePdf {
     basis: OrthonormalBasis,
@@ -68,6 +82,10 @@ impl Pdf for CosinePdf {
 }
 
 /// Equal-weight mixture of two PDFs.
+///
+/// Mixtures are useful for combining a material PDF with a light/target PDF. `generate` chooses one
+/// input distribution with 50% probability, while `value` evaluates both inputs and averages their
+/// densities for the generated direction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MixturePdf<P0, P1> {
     first: P0,

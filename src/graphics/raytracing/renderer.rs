@@ -1,4 +1,10 @@
 //! Path-tracing render entrypoints.
+//!
+//! [`PathTracer`] is the high-level wrapper around [`RayCamera`]. Prefer
+//! [`PathTracer::render_scene`] for renderer-neutral [`SurfaceScene`] content. Use
+//! [`PathTracer::render`] or [`PathTracer::render_with_lights`] when you already have a compiled
+//! [`RayScene`], a book-style [`HittableList`](crate::graphics::raytracing::HittableList), or a
+//! custom [`Hittable`] world.
 
 use super::{Hittable, RayScene};
 use crate::graphics::{camera::RayCamera, display::Canvas, scene::SurfaceScene};
@@ -7,7 +13,9 @@ use crate::graphics::{camera::RayCamera, display::Canvas, scene::SurfaceScene};
 ///
 /// Prefer [`Self::render_scene`] for renderer-neutral mesh scenes. Use [`Self::render`] and
 /// [`Self::render_with_lights`] when you already have a low-level [`RayScene`] or custom
-/// [`Hittable`] world.
+/// [`Hittable`] world. Indoor or small-light scenes usually converge faster with
+/// [`Self::render_with_lights`] and a lights-only
+/// [`SamplingTargetList`](crate::graphics::raytracing::SamplingTargetList).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PathTracer {
     camera: RayCamera,
@@ -34,6 +42,9 @@ impl PathTracer {
     }
 
     /// Renders `world` with path-traced material scattering.
+    ///
+    /// This samples only the material PDFs. Prefer [`Self::render_with_lights`] for scenes where
+    /// small emitters, windows, or glass caustic targets should drive importance sampling.
     pub fn render(self, world: &dyn Hittable) -> Canvas {
         self.camera.render_world(world)
     }
@@ -41,13 +52,16 @@ impl PathTracer {
     /// Compiles and renders a renderer-neutral surface scene.
     ///
     /// Surface meshes are converted to a [`RayScene`] with Lambertian materials derived from the
-    /// shared [`SurfaceScene`] material data.
+    /// shared [`SurfaceScene`] material data. This is the intended public path for scene data that
+    /// should be reusable by both raster and ray renderers.
     pub fn render_scene(self, scene: &SurfaceScene) -> Canvas {
         let ray_scene = RayScene::from(scene);
         self.render(&ray_scene)
     }
 
     /// Compiles and renders a surface scene while importance-sampling `lights`.
+    ///
+    /// Use this when a renderer-neutral scene still needs explicit path-tracing sampling targets.
     pub fn render_scene_with_lights(self, scene: &SurfaceScene, lights: &dyn Hittable) -> Canvas {
         let ray_scene = RayScene::from(scene);
         self.render_with_lights(&ray_scene, lights)

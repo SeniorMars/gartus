@@ -368,6 +368,8 @@ pub enum ShadingMode {
     Gouraud,
     /// Phong shading.
     Phong,
+    /// Toon banded-lighting shading.
+    Toon,
     /// Ray-traced rendering.
     Raytrace,
 }
@@ -503,7 +505,7 @@ mod tests {
         assert_eq!(surface.ambient_color, LinearRgb::new(0.1, 0.4, 0.7));
         assert_eq!(surface.base_color, LinearRgb::new(0.2, 0.5, 0.8));
         assert_eq!(surface.specular_color, LinearRgb::new(0.3, 0.6, 0.9));
-        assert_eq!(surface.shininess, f64::from(DEFAULT_SPECULAR_EXPONENT));
+        assert!((surface.shininess - f64::from(DEFAULT_SPECULAR_EXPONENT)).abs() < f64::EPSILON);
         assert_eq!(surface.refractive_index, None);
         assert_eq!(surface.diffuse_texture, None);
     }

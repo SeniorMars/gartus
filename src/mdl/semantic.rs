@@ -332,6 +332,9 @@ pub fn compile(program: Program) -> Result<CompiledProgram, Vec<Diagnostic>> {
             }
         }
     }
+    if errors.is_empty() {
+        validate_vary_overlaps(&animation_ops, &mut errors);
+    }
 
     if !errors.is_empty() {
         return Err(errors);
@@ -387,6 +390,35 @@ fn apply_vary(frame_knobs: &mut [KnobMap], vary: &VarySpec) {
         let t = interpolation_t(frame, vary.start_frame, vary.end_frame);
         let t = apply_vary_interpolation(t, vary.interpolation);
         knobs.insert(vary.knob.clone(), lerp(vary.start_val, vary.end_val, t));
+    }
+}
+
+fn validate_vary_overlaps(animation_ops: &[AnimationOp], errors: &mut Vec<Diagnostic>) {
+    let mut varies = Vec::new();
+    for op in animation_ops {
+        if let AnimationOp::Vary(vary) = op {
+            varies.push(vary);
+        }
+    }
+
+    for (index, vary) in varies.iter().enumerate() {
+        for previous in &varies[..index] {
+            if vary.knob != previous.knob {
+                continue;
+            }
+            let overlap_start = vary.start_frame.max(previous.start_frame);
+            let overlap_end = vary.end_frame.min(previous.end_frame);
+            if overlap_start <= overlap_end {
+                errors.push(diagnostic_at(
+                    Some(&vary.location),
+                    format!(
+                        "`vary` for knob `{}` overlaps a previous `vary` on frames {overlap_start}..={overlap_end}",
+                        vary.knob
+                    ),
+                ));
+                break;
+            }
+        }
     }
 }
 
@@ -642,6 +674,26 @@ mod tests {
 
         assert_approx_eq(vary_then_tween.animation().frame_knobs()[1]["k"], 30.0);
         assert_approx_eq(tween_then_vary.animation().frame_knobs()[1]["k"], 5.0);
+    }
+
+    #[test]
+    fn compile_rejects_overlapping_vary_ranges_for_same_knob() {
+        let program = parse_script("frames 5\nvary k 0 3 0 1\nvary k 2 4 10 20").unwrap();
+        let errors = compile(program).unwrap_err();
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, 3);
+        assert!(errors[0].message.contains("overlaps a previous `vary`"));
+        assert!(errors[0].message.contains("2..=3"));
+    }
+
+    #[test]
+    fn compile_allows_overlapping_vary_ranges_for_different_knobs() {
+        let program = parse_script("frames 3\nvary x 0 2 0 1\nvary y 0 2 10 20").unwrap();
+        let compiled = compile(program).unwrap();
+
+        assert_approx_eq(compiled.animation().frame_knobs()[1]["x"], 0.5);
+        assert_approx_eq(compiled.animation().frame_knobs()[1]["y"], 15.0);
     }
 
     #[test]

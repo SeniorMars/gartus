@@ -1,4 +1,12 @@
 //! Path-tracing scene containers and compatibility adapters.
+//!
+//! The main scene tiers are:
+//!
+//! - [`SurfaceScene`]: renderer-neutral mesh/material data shared by raster and ray renderers.
+//! - [`RayScene`]: compiled, data-oriented path-tracing scene with a cached BVH.
+//! - [`HittableList`]: book-style boxed hittable collection for custom objects and examples.
+//! - [`SamplingTargetList`]: importance-sampling targets such as lights, windows, or caustic
+//!   objects.
 
 use super::{
     Aabb, HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
@@ -161,6 +169,10 @@ impl Hittable for HittableList {
 /// This is meant for lights, glass caustic targets, windows, or other geometry that should drive
 /// path-sampling PDFs. Unlike [`HittableList`], it is not a scene container and does not report
 /// ray intersections; use it only as the `lights` / sampling-target argument to path tracing.
+///
+/// Keep this list small and intentional. Passing the full world as a sampling target is unbiased
+/// when every object's PDF methods are valid, but it usually wastes samples on non-emissive or
+/// low-importance geometry.
 #[derive(Default)]
 pub struct SamplingTargetList {
     objects: Vec<Box<dyn Hittable>>,
@@ -477,6 +489,10 @@ pub struct RayPrimitive {
 /// use `RayScene` directly for low-level ray-specific materials, emissive primitives, and custom
 /// path-tracing scenes. [`HittableList`], [`BvhNode`], and [`SphereList`] remain useful
 /// compatibility or educational adapters for boxed/custom hittables and book-style examples.
+///
+/// For large procedural scenes, reserve capacity with [`Self::with_capacity`], insert primitives in
+/// bulk with [`Self::add_primitives`], and call [`Self::build_bvh`] before rendering when you want
+/// to pay BVH construction cost up front.
 #[derive(Debug, Default)]
 pub struct RayScene {
     materials: Vec<RayMaterial>,

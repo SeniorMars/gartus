@@ -1,3 +1,9 @@
+//! Recreates the major renders from *Ray Tracing in One Weekend*.
+//!
+//! Outputs PNG files to `final/raytracing/`. Use `cargo run --profile render --example
+//! raytracing_weekend` for full renders; lower `WIDTH`, `FINAL_WIDTH`, or `SAMPLES` while
+//! iterating.
+
 use gartus::{
     gmath::vector::{Point, Vector},
     graphics::{

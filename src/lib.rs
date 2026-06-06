@@ -1,23 +1,82 @@
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![warn(clippy::pedantic)]
-//! An amateur computer graphics engine made in Rust.
+//! A Rust graphics playground for raster drawing, mesh scenes, MDL scripts, and path tracing.
 //!
-//! Provides an "art canvas" to work with drawings, a mini matrix library
-//! with several 3D transformations, and an MDL compiler front end for scripts.
-//! This library is still a work in progress project. Be warn.
+//! `gartus` started as a classroom-style computer graphics engine: a [`Canvas`], matrix and vector
+//! math, polygon drawing, lighting, and a Motion Description Language (MDL) front end. It now also
+//! includes a small physically based path tracer following the *Ray Tracing* book series.
 //!
-//! New script code should use [`mdl`]. The legacy two-line parser is available
-//! behind the `old_parser` feature.
+//! [`Canvas`]: crate::graphics::display::Canvas
 //!
-//! # The prelude
+//! # Main Layers
 //!
-//! Importing each trait individually can become a chore, so the `prelude`
-//! module is provided to allow you to import the main traits all at once.
-//! For example:
+//! - [`gmath`] contains the shared math layer: vectors, points, matrices, rays, analytic geometry,
+//!   random sampling, Perlin noise, and directional PDFs.
+//! - [`graphics`] contains renderer-facing APIs: [`Canvas`], colors, raster drawing, cameras,
+//!   lighting, renderer-neutral surface materials/textures/scenes, and the path tracer.
+//! - [`mdl`] contains the MDL compiler front end and runtime execution path for script-driven
+//!   renders.
+//!
+//! # Raster Rendering
+//!
+//! Use [`Canvas`] for direct pixel and line work, or [`SurfaceScene`] for mesh/material scene data
+//! that should remain independent of the renderer. A [`SurfaceScene`] can be rasterized directly:
+//!
+//! ```rust
+//! use gartus::prelude::*;
+//!
+//! let camera = Camera3D::new(400, 400);
+//! let scene = SurfaceScene::new();
+//! let canvas = scene.rasterize(&camera);
+//! assert_eq!(canvas.width(), 400);
+//! ```
+//!
+//! [`SurfaceScene`]: crate::graphics::scene::SurfaceScene
+//!
+//! # Path Tracing
+//!
+//! Start with [`PathTracer`] and [`RayCamera`]. For renderer-neutral mesh content, pass a
+//! [`SurfaceScene`] to [`PathTracer::render_scene`]. For ray-specific materials, emissive geometry,
+//! or procedural scenes, build a [`RayScene`] directly so its cached BVH can accelerate traversal.
+//!
+//! Indoor scenes with small emitters usually converge faster when you pass a dedicated
+//! [`SamplingTargetList`] to [`PathTracer::render_with_lights`] instead of using the whole world as
+//! the light target.
+//!
+//! ```rust
+//! use gartus::prelude::*;
+//!
+//! let camera = RayCamera::new(200, 1.0)
+//!     .with_samples_per_pixel(8)
+//!     .with_max_depth(8);
+//! let scene = RayScene::new();
+//! let image = PathTracer::new(camera).render(&scene);
+//! assert_eq!(image.width(), 200);
+//! ```
+//!
+//! [`PathTracer`]: crate::graphics::raytracing::PathTracer
+//! [`RayCamera`]: crate::graphics::camera::RayCamera
+//! [`RayScene`]: crate::graphics::raytracing::RayScene
+//! [`SamplingTargetList`]: crate::graphics::raytracing::SamplingTargetList
+//! [`PathTracer::render_scene`]: crate::graphics::raytracing::PathTracer::render_scene
+//! [`PathTracer::render_with_lights`]: crate::graphics::raytracing::PathTracer::render_with_lights
+//!
+//! # Scripts
+//!
+//! New script code should use [`mdl`]. The legacy two-line parser is available only behind the
+//! `old_parser` feature.
+//!
+//! # Preludes
+//!
+//! Use the root prelude for examples and small programs:
 //!
 //! ```rust
 //! use gartus::prelude::*;
 //! ```
+//!
+//! The root prelude intentionally excludes low-level PDF internals. Import sampling code from
+//! [`gmath::sampling`] or [`graphics::raytracing::pdf`] when implementing new probability
+//! distributions.
 
 #[cfg(feature = "external")]
 /// A module that includes method to read external PPM and allows them to be used with this system.

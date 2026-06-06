@@ -12,7 +12,7 @@ use super::{
     semantic::CompiledProgram,
 };
 use crate::{
-    gmath::{edge_matrix::DEFAULT_CURVE_STEP, matrix::Matrix},
+    gmath::{edge_matrix::DEFAULT_CURVE_STEP, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::{
         animation::{AnimationError, AnimationRenderOptions, FrameRecorder},
         colors::Rgb,
@@ -41,6 +41,24 @@ use rayon::prelude::*;
 
 const DEFAULT_3D_STEPS: usize = 100;
 
+/// MDL pipeline stage required before a command can be executed directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredPipelineStage {
+    /// Include expansion performed by [`crate::mdl::loader`].
+    IncludeExpansion,
+    /// Animation planning performed by [`crate::mdl::semantic`].
+    AnimationCompilation,
+}
+
+impl fmt::Display for RequiredPipelineStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IncludeExpansion => f.write_str("include expansion"),
+            Self::AnimationCompilation => f.write_str("animation compilation"),
+        }
+    }
+}
+
 /// Error produced while executing an MDL program.
 #[derive(Debug)]
 pub enum ExecutionError {
@@ -63,10 +81,13 @@ pub enum ExecutionError {
     UnknownConstants(String),
     /// Geometry referenced an unknown saved coordinate system.
     UnknownCoordSystem(String),
-    /// A command is parsed but not part of this executor slice yet.
-    UnsupportedCommand(&'static str),
-    /// A shading mode has no renderer yet.
-    UnsupportedShading(ShadingMode),
+    /// A valid command reached the executor before its required front-end stage ran.
+    CommandRequiresStage {
+        /// Command name.
+        command: &'static str,
+        /// Stage that must process this command before direct execution.
+        stage: RequiredPipelineStage,
+    },
     /// A named color was not recognized.
     UnknownColor(String),
     /// A filter name, argument count, or argument value was invalid.
@@ -133,10 +154,10 @@ impl fmt::Display for ExecutionError {
             Self::UnknownKnob(name) => write!(f, "unknown knob `{name}`"),
             Self::UnknownConstants(name) => write!(f, "unknown constants `{name}`"),
             Self::UnknownCoordSystem(name) => write!(f, "unknown coordinate system `{name}`"),
-            Self::UnsupportedCommand(command) => {
-                write!(f, "command `{command}` requires a later MDL compiler stage")
-            }
-            Self::UnsupportedShading(mode) => write!(f, "unsupported shading mode `{mode:?}`"),
+            Self::CommandRequiresStage { command, stage } => write!(
+                f,
+                "command `{command}` requires {stage} before direct execution"
+            ),
             Self::UnknownColor(name) => write!(f, "unknown color `{name}`"),
             Self::InvalidFilter {
                 name,
@@ -175,8 +196,7 @@ impl Error for ExecutionError {
             | Self::UnknownKnob(_)
             | Self::UnknownConstants(_)
             | Self::UnknownCoordSystem(_)
-            | Self::UnsupportedCommand(_)
-            | Self::UnsupportedShading(_)
+            | Self::CommandRequiresStage { .. }
             | Self::UnknownColor(_)
             | Self::InvalidFilter { .. }
             | Self::Mesh { .. }
@@ -258,7 +278,8 @@ pub fn for_each_compiled_frame(
 
 /// Executes every compiled frame and writes `basenameNNNNNNNN.ppm` files into `dir`.
 ///
-/// The generated frame basename comes from the compiled [`AnimationPlan`](super::AnimationPlan).
+/// The generated frame basename comes from the compiled
+/// [`AnimationPlan`](crate::mdl::animation::AnimationPlan).
 /// Ordinary MDL `save` commands are disabled while frames render so each frame is
 /// written exactly once after command execution.
 ///
@@ -729,25 +750,51 @@ fn execute_texture_shape(
     points: &[Vec3; 4],
     source_name: Option<&Path>,
 ) -> Result<(), ExecutionError> {
-    let transform = runtime.top_transform().clone();
+    let points = transformed_texture_quad(runtime, points);
+    capture_textured_quad_surface(runtime, points);
     let path = runtime.resolve_mesh_path(filename, source_name);
     let texture = runtime.load_texture_cached(&path)?;
-    let points = points.map(|point| {
-        let transformed = transform.transform_homogeneous_point(&[point.x, point.y, point.z, 1.0]);
-        (transformed[0], transformed[1], transformed[2])
-    });
     runtime.canvas_mut().draw_textured_quad(&texture, points);
     Ok(())
 }
 
 #[cfg(not(feature = "external"))]
 fn execute_texture_shape(
-    _runtime: &mut Runtime,
-    _filename: &str,
-    _points: &[Vec3; 4],
-    _source_name: Option<&Path>,
+    runtime: &mut Runtime,
+    filename: &str,
+    points: &[Vec3; 4],
+    source_name: Option<&Path>,
 ) -> Result<(), ExecutionError> {
-    Err(ExecutionError::UnsupportedCommand("texture"))
+    let points = transformed_texture_quad(runtime, points);
+    capture_textured_quad_surface(runtime, points);
+    let path = runtime.resolve_mesh_path(filename, source_name);
+    let texture = Runtime::load_texture(&path)?;
+    runtime.canvas_mut().draw_textured_quad(&texture, points);
+    Ok(())
+}
+
+fn transformed_texture_quad(runtime: &Runtime, points: &[Vec3; 4]) -> [(f64, f64, f64); 4] {
+    let transform = runtime.top_transform().clone();
+    points.map(|point| {
+        let transformed = transform.transform_homogeneous_point(&[point.x, point.y, point.z, 1.0]);
+        (transformed[0], transformed[1], transformed[2])
+    })
+}
+
+fn capture_textured_quad_surface(runtime: &mut Runtime, points: [(f64, f64, f64); 4]) {
+    if !runtime.should_capture_surfaces() {
+        return;
+    }
+
+    let mut polygons = PolygonMatrix::with_capacity(6);
+    polygons.push_polygons(&[
+        [points[0], points[1], points[2]],
+        [points[0], points[2], points[3]],
+    ]);
+    runtime.add_surface_mesh(
+        polygons,
+        crate::graphics::material::SurfaceMaterial::default(),
+    );
 }
 
 fn execute_mesh_shape(
@@ -970,8 +1017,18 @@ fn execute_animation_command(
         AnimationCommand::Set { knob, value } => runtime.set_knob(knob.clone(), *value),
         AnimationCommand::SetKnobs(value) => runtime.set_all_knobs(*value),
         AnimationCommand::SaveKnobs(name) => runtime.save_knobs(name.clone()),
-        AnimationCommand::Tween { .. } => return Err(ExecutionError::UnsupportedCommand("tween")),
-        AnimationCommand::Vary { .. } => return Err(ExecutionError::UnsupportedCommand("vary")),
+        AnimationCommand::Tween { .. } => {
+            return Err(ExecutionError::CommandRequiresStage {
+                command: "tween",
+                stage: RequiredPipelineStage::AnimationCompilation,
+            });
+        }
+        AnimationCommand::Vary { .. } => {
+            return Err(ExecutionError::CommandRequiresStage {
+                command: "vary",
+                stage: RequiredPipelineStage::AnimationCompilation,
+            });
+        }
     }
     Ok(())
 }
@@ -1003,7 +1060,7 @@ fn execute_render_state_command(
             material,
             color,
         } => runtime.set_constants(name.clone(), *material, *color),
-        RenderCommand::Shading(mode) => set_shading(runtime, *mode)?,
+        RenderCommand::Shading(mode) => set_shading(runtime, *mode),
         RenderCommand::SaveCoordSystem(name) => runtime.save_coord_system(name.clone()),
     }
     Ok(())
@@ -1030,7 +1087,10 @@ fn execute_output_command(
 
 fn execute_misc_command(runtime: &mut Runtime, command: &Command) -> Result<(), ExecutionError> {
     match command {
-        Command::Include(_) => Err(ExecutionError::UnsupportedCommand("include")),
+        Command::Include(_) => Err(ExecutionError::CommandRequiresStage {
+            command: "include",
+            stage: RequiredPipelineStage::IncludeExpansion,
+        }),
         Command::Filter(filter) => execute_filter_command(runtime, filter),
         _ => unreachable!("non-misc command dispatched to misc executor"),
     }
@@ -1061,10 +1121,17 @@ fn draw_polygons(
 ) -> Result<(), ExecutionError> {
     let transform = runtime.transform_for(coord_system)?;
     let material = runtime.material_for(constants)?;
+    let surface_material = material.map_or_else(
+        crate::graphics::material::SurfaceMaterial::default,
+        Into::into,
+    );
     let previous = runtime.apply_draw_state(material);
 
     runtime.with_tmp_polygons(build);
     runtime.transform_tmp_polygons(&transform);
+    if runtime.should_capture_surfaces() {
+        runtime.add_surface_mesh(runtime.tmp_polygons().clone(), surface_material);
+    }
     runtime.draw_tmp_polygons();
 
     runtime.restore_draw_state(previous);
@@ -1138,6 +1205,10 @@ fn draw_mesh(
     for group in &mesh.groups {
         let draw_material =
             material_with_mesh_material(material, group.material.as_ref(), group.diffuse_color);
+        let surface_material = draw_material.map_or_else(
+            crate::graphics::material::SurfaceMaterial::default,
+            Into::into,
+        );
         let texture = group
             .material
             .as_ref()
@@ -1147,15 +1218,17 @@ fn draw_mesh(
         let previous = runtime.apply_draw_state(draw_material);
 
         if let Some(texture) = texture {
+            capture_external_mesh_group_surface(
+                runtime,
+                group,
+                &transform,
+                reverse,
+                surface_material.clone(),
+            );
             draw_textured_mesh_group(runtime, group, &texture, &transform, reverse);
         } else {
-            runtime.with_tmp_polygons(|polygons| {
-                polygons.extend(&group.polygons);
-                if reverse {
-                    polygons.reverse_winding();
-                }
-                polygons.apply_in_place(&transform);
-            });
+            prepare_external_mesh_group_polygons(runtime, group, &transform, reverse);
+            capture_prepared_mesh_surface(runtime, surface_material);
             if reverse {
                 runtime.draw_tmp_polygons();
             } else {
@@ -1167,6 +1240,48 @@ fn draw_mesh(
     }
 
     Ok(())
+}
+
+#[cfg(feature = "external")]
+fn capture_external_mesh_group_surface(
+    runtime: &mut Runtime,
+    group: &MaterialMeshGroup,
+    transform: &Matrix,
+    reverse: bool,
+    material: crate::graphics::material::SurfaceMaterial,
+) {
+    if !runtime.should_capture_surfaces() {
+        return;
+    }
+
+    prepare_external_mesh_group_polygons(runtime, group, transform, reverse);
+    capture_prepared_mesh_surface(runtime, material);
+}
+
+#[cfg(feature = "external")]
+fn prepare_external_mesh_group_polygons(
+    runtime: &mut Runtime,
+    group: &MaterialMeshGroup,
+    transform: &Matrix,
+    reverse: bool,
+) {
+    runtime.with_tmp_polygons(|polygons| {
+        polygons.extend(&group.polygons);
+        if reverse {
+            polygons.reverse_winding();
+        }
+        polygons.apply_in_place(transform);
+    });
+}
+
+#[cfg(feature = "external")]
+fn capture_prepared_mesh_surface(
+    runtime: &mut Runtime,
+    material: crate::graphics::material::SurfaceMaterial,
+) {
+    if runtime.should_capture_surfaces() {
+        runtime.add_surface_mesh(runtime.tmp_polygons().clone(), material);
+    }
 }
 
 #[cfg(feature = "external")]
@@ -1402,7 +1517,7 @@ fn draw_mesh(
         error: "mesh command requires the `external` feature".to_string(),
     })
 }
-fn set_shading(runtime: &mut Runtime, mode: ShadingMode) -> Result<(), ExecutionError> {
+fn set_shading(runtime: &mut Runtime, mode: ShadingMode) {
     let (shading, color_mode) = match mode {
         ShadingMode::Wireframe => (CanvasShadingMode::Wireframe, PolygonColorMode::LineColor),
         ShadingMode::Flat => (CanvasShadingMode::Flat, PolygonColorMode::PhongReflection),
@@ -1411,11 +1526,15 @@ fn set_shading(runtime: &mut Runtime, mode: ShadingMode) -> Result<(), Execution
             PolygonColorMode::PhongReflection,
         ),
         ShadingMode::Phong => (CanvasShadingMode::Phong, PolygonColorMode::PhongReflection),
-        ShadingMode::Raytrace => return Err(ExecutionError::UnsupportedShading(mode)),
+        ShadingMode::Toon => (CanvasShadingMode::Toon, PolygonColorMode::PhongReflection),
+        ShadingMode::Raytrace => {
+            runtime.set_raytrace_enabled(true);
+            return;
+        }
     };
+    runtime.set_raytrace_enabled(false);
     runtime.canvas_mut().set_shading_mode(shading);
     runtime.canvas_mut().set_polygon_color_mode(color_mode);
-    Ok(())
 }
 
 #[cfg(feature = "filters")]
@@ -1531,12 +1650,15 @@ fn filter_f32(name: &str, value: f64) -> Result<f32, ExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionError, execute_compiled_frame, execute_compiled_frames_to_files,
-        execute_compiled_program, execute_into, execute_program,
+        ExecutionError, RequiredPipelineStage, execute_compiled_frame,
+        execute_compiled_frames_to_files, execute_compiled_program, execute_into, execute_program,
     };
     use crate::{
         gmath::matrix::Matrix,
-        graphics::colors::Rgb,
+        graphics::{
+            colors::Rgb,
+            display::{PolygonColorMode, ShadingMode as CanvasShadingMode},
+        },
         mdl::{
             animation::FrameOutputConfig,
             ast::Vec3,
@@ -1578,6 +1700,107 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error_kind(&error), ExecutionError::StackUnderflow));
+    }
+
+    #[test]
+    fn raw_include_requires_loader_expansion() {
+        let program = parse_script("include child.mdl").unwrap();
+        let error = execute_program(&program, &RenderConfig::new(10, 10).display_enabled(false))
+            .unwrap_err();
+
+        assert!(matches!(
+            error_kind(&error),
+            ExecutionError::CommandRequiresStage {
+                command: "include",
+                stage: RequiredPipelineStage::IncludeExpansion,
+            }
+        ));
+    }
+
+    #[test]
+    fn raw_animation_planning_commands_require_semantic_compilation() {
+        for (source, command) in [
+            ("frames 2\nvary k 0 1 0 1", "vary"),
+            ("tween 0 1 start end", "tween"),
+        ] {
+            let program = parse_script(source).unwrap();
+            let error =
+                execute_program(&program, &RenderConfig::new(10, 10).display_enabled(false))
+                    .unwrap_err();
+
+            assert!(matches!(
+                error_kind(&error),
+                ExecutionError::CommandRequiresStage {
+                    command: actual,
+                    stage: RequiredPipelineStage::AnimationCompilation,
+                } if *actual == command
+            ));
+        }
+    }
+
+    #[test]
+    fn shading_toon_sets_canvas_toon_mode() {
+        let runtime = execute("shading toon");
+
+        assert_eq!(runtime.canvas().shading_mode(), CanvasShadingMode::Toon);
+        assert_eq!(
+            runtime.canvas().polygon_color_mode(),
+            PolygonColorMode::PhongReflection
+        );
+    }
+
+    #[test]
+    fn shading_raytrace_enables_path_tracing() {
+        let runtime = execute("shading raytrace");
+
+        assert!(runtime.raytrace_enabled());
+    }
+
+    #[test]
+    fn raster_only_shapes_do_not_capture_raytrace_surfaces() {
+        let runtime = execute("sphere 0 0 0 20");
+
+        assert_eq!(runtime.captured_surface_count(), 0);
+    }
+
+    #[test]
+    fn raytrace_shapes_capture_surfaces() {
+        let runtime = execute("shading raytrace\nsphere 0 0 0 20");
+
+        assert!(runtime.captured_surface_count() > 0);
+    }
+
+    #[test]
+    fn raster_shading_disables_path_tracing() {
+        let runtime = execute("shading raytrace\nshading flat");
+
+        assert!(!runtime.raytrace_enabled());
+        assert_eq!(runtime.canvas().shading_mode(), CanvasShadingMode::Flat);
+    }
+
+    #[test]
+    fn shading_raytrace_saves_path_traced_output() {
+        let path =
+            std::env::temp_dir().join(format!("gartus-mdl-raytrace-{}.ppm", std::process::id()));
+        let script = format!(
+            "\
+shading raytrace
+camera 0 0 -5 0 0 0
+focal 20
+light key 0 4 -3 255 255 255
+constants matte 0.1 0.1 0.1 0.7 0.2 0.2 0.0 0.0 0.0
+sphere matte 0 0 0 1
+save {}
+",
+            path.display()
+        );
+
+        let program = parse_script(&script).unwrap();
+        execute_program(&program, &RenderConfig::new(20, 20).display_enabled(false)).unwrap();
+
+        assert!(path.exists());
+        assert!(std::fs::metadata(&path).unwrap().len() > 0);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -2301,7 +2524,6 @@ f 4 5 6
         assert!(drawn);
     }
 
-    #[cfg(feature = "external")]
     #[test]
     fn texture_command_maps_image_onto_quad() {
         let dir = std::env::temp_dir().join(format!("gartus-mdl-texture-{}", std::process::id()));
@@ -2331,6 +2553,36 @@ f 4 5 6
         assert!(!textured_pixels.is_empty());
         assert!(textured_pixels.iter().any(|pixel| pixel.blue > 0));
         assert!(textured_pixels.iter().any(|pixel| pixel.green > 0));
+        let _ = std::fs::remove_file(texture_path);
+        let _ = std::fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn texture_command_is_captured_for_raytrace() {
+        let dir = std::env::temp_dir().join(format!(
+            "gartus-mdl-raytrace-texture-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp texture dir");
+        let texture_path = dir.join("checker.ppm");
+        std::fs::write(
+            &texture_path,
+            b"P3\n2 2\n255\n255 0 0 0 255 0 0 0 255 255 255 255\n",
+        )
+        .expect("write texture");
+        let program =
+            parse_script("shading raytrace\ntexture checker.ppm 10 10 0 60 10 0 60 60 0 10 60 0")
+                .unwrap();
+
+        let runtime = execute_program(
+            &program,
+            &RenderConfig::new_with_bg(80, 80, Rgb::WHITE, Rgb::BLACK)
+                .display_enabled(false)
+                .source_dir(&dir),
+        )
+        .unwrap();
+
+        assert_eq!(runtime.captured_surface_count(), 1);
         let _ = std::fs::remove_file(texture_path);
         let _ = std::fs::remove_dir(dir);
     }
@@ -2376,6 +2628,50 @@ f 1/1 2/2 3/3
         assert!(runtime.canvas().pixels().iter().any(|pixel| {
             pixel.blue > 0 && pixel.blue > pixel.red.saturating_mul(2) && pixel.blue > pixel.green
         }));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(feature = "external")]
+    #[test]
+    fn textured_mesh_group_is_captured_for_raytrace() {
+        let dir = std::env::temp_dir().join(format!(
+            "gartus-mdl-raytrace-textured-mesh-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp textured mesh dir");
+        std::fs::write(
+            dir.join("tri.obj"),
+            "\
+mtllib tri.mtl
+v 10 10 0
+v 60 10 0
+v 10 60 0
+vt 0 0
+vt 1 0
+vt 0 1
+usemtl tex
+f 1/1 2/2 3/3
+",
+        )
+        .expect("write obj");
+        std::fs::write(
+            dir.join("tri.mtl"),
+            "newmtl tex\nKd 1 1 1\nmap_Kd tex.ppm\n",
+        )
+        .expect("write mtl");
+        std::fs::write(dir.join("tex.ppm"), b"P3\n1 1\n255\n0 0 255\n").expect("write texture");
+        let program = parse_script("shading raytrace\nmesh :tri.obj").unwrap();
+
+        let runtime = execute_program(
+            &program,
+            &RenderConfig::new_with_bg(80, 80, Rgb::WHITE, Rgb::BLACK)
+                .display_enabled(false)
+                .source_dir(&dir),
+        )
+        .unwrap();
+
+        assert_eq!(runtime.captured_surface_count(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

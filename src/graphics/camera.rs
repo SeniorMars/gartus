@@ -22,6 +22,10 @@ const RUSSIAN_ROULETTE_MIN_SURVIVAL_PROBABILITY: f64 = 0.05;
 const RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY: f64 = 0.95;
 
 /// Pixel sampling pattern used for stochastic ray-camera renders.
+///
+/// Use [`PixelSampleMode::StratifiedGrid`] for deterministic final renders with an exact sample
+/// count. Use [`PixelSampleMode::Random`] with [`RayCamera::with_adaptive_sampling`] for preview
+/// renders that may stop easy pixels before the maximum sample count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PixelSampleMode {
     /// Place each sample randomly inside the pixel square.
@@ -110,7 +114,13 @@ pub struct ProjectedSegment {
     pub color: Rgb,
 }
 
-/// A simple pinhole camera that emits one ray through each image pixel.
+/// Perspective path-tracing camera with stochastic pixel, lens, and time sampling.
+///
+/// `RayCamera` is the low-level camera used by [`crate::graphics::raytracing::PathTracer`]. It
+/// supports fixed random sampling, stratified jittered grids, optional adaptive sampling, defocus
+/// blur, motion-blur shutter intervals, and Russian roulette path termination. For expensive final
+/// renders, use the crate's `render` cargo profile and keep [`Self::max_depth`] as a safety cap;
+/// Russian roulette is enabled after five bounces by default.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RayCamera {
     aspect_ratio: f64,
@@ -1068,23 +1078,25 @@ impl RayCamera {
                 if let Some(settings) = self.adaptive_sampling {
                     pixel_color = self.render_world_pixel_adaptive(x, y, world, lights, settings);
                 } else {
+                    let mut accepted_samples = 0;
                     for _ in 0..sample_count {
-                        Self::add_finite_sample(
+                        accepted_samples += u32::from(Self::add_finite_sample(
                             &mut pixel_color,
                             self.sample_world_color(x, y, world, lights, &mut rng),
-                        );
+                        ));
                     }
-                    pixel_color = pixel_color / f64::from(sample_count);
+                    pixel_color = Self::average_accepted_samples(pixel_color, accepted_samples);
                 }
             }
             PixelSampleMode::Stratified | PixelSampleMode::StratifiedGrid { .. } => {
                 let grid_width = self.active_stratified_grid_width();
+                let mut accepted_samples = 0;
                 for sample_y in 0..grid_width {
                     for sample_x in 0..grid_width {
                         let ray = self.ray_for_pixel_stratified_sample(
                             x, y, sample_x, sample_y, grid_width, &mut rng,
                         );
-                        Self::add_finite_sample(
+                        accepted_samples += u32::from(Self::add_finite_sample(
                             &mut pixel_color,
                             Self::ray_color(
                                 &ray,
@@ -1095,10 +1107,10 @@ impl RayCamera {
                                 self.russian_roulette_min_depth,
                                 &mut rng,
                             ),
-                        );
+                        ));
                     }
                 }
-                pixel_color = pixel_color / f64::from(sample_count);
+                pixel_color = Self::average_accepted_samples(pixel_color, accepted_samples);
             }
         }
 
@@ -1172,9 +1184,20 @@ impl RayCamera {
             .sqrt()
     }
 
-    fn add_finite_sample(pixel_color: &mut LinearColor, sample: LinearColor) {
+    fn add_finite_sample(pixel_color: &mut LinearColor, sample: LinearColor) -> bool {
         if sample.is_finite() {
             *pixel_color += sample;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn average_accepted_samples(pixel_color: LinearColor, accepted_samples: u32) -> LinearColor {
+        if accepted_samples == 0 {
+            LinearColor::default()
+        } else {
+            pixel_color / f64::from(accepted_samples)
         }
     }
 
