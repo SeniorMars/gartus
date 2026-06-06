@@ -80,6 +80,9 @@ impl CameraPose {
 }
 
 /// Orthonormal camera frame with origin.
+///
+/// This is the camera-space companion to [`OrthonormalBasis`]: use `CameraFrame` when an origin
+/// and view direction matter, and use [`OrthonormalBasis`] for direction-only local sample frames.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraFrame {
     /// Camera origin.
@@ -101,6 +104,9 @@ impl CameraFrame {
 }
 
 /// Orthonormal basis for mapping local sample directions into world space.
+///
+/// This is a direction-only frame. For camera placement and projection, use [`CameraPose`] /
+/// [`CameraFrame`], which include the eye point and view-up constrained camera axes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrthonormalBasis {
     u: Vector,

@@ -1,10 +1,12 @@
 //! Participating media for path tracing.
 
 use super::{
-    Aabb, HitRecord, Hittable, INFINITY, Interval, LinearColor, MaterialRef, RayTexture,
-    material::Isotropic,
+    Aabb, HitRecord, Hittable, INFINITY, Interval, LinearColor, MaterialRef, material::Isotropic,
 };
-use crate::gmath::{random::SampleRng, ray::Ray, vector::Vector};
+use crate::{
+    gmath::{random::SampleRng, ray::Ray, vector::Vector},
+    graphics::texture::SurfaceTexture,
+};
 use std::{fmt, sync::Arc};
 
 /// A constant-density participating medium bounded by another hittable object.
@@ -45,7 +47,7 @@ impl ConstantMedium {
     pub fn from_texture(
         boundary: impl Hittable + 'static,
         density: f64,
-        texture: impl RayTexture + 'static,
+        texture: impl SurfaceTexture + 'static,
     ) -> Self {
         Self::with_phase_function(
             boundary,

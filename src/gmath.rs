@@ -22,6 +22,8 @@ pub mod quaternion;
 pub mod random;
 /// Hosts the [Ray] struct for path/ray tracing
 pub mod ray;
+/// Probability density functions and sampling distributions.
+pub mod sampling;
 /// Hosts a coordinate-system stack for hierarchical 3D transforms.
 pub mod stack;
 /// Hosts all the functions needed to start applying 3D transformations to matrices.

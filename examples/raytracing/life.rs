@@ -7,29 +7,31 @@ use gartus::{
         lighting::RefractiveIndex,
         raytracing::{
             Dielectric, DiffuseLight, HittableList, Lambertian, MaterialRef, PathTracer, Quad,
-            RotateY, Sphere, Translate, box_object,
+            RotateY, SamplingTargetList, Sphere, Translate, box_object,
         },
     },
 };
 use std::{error::Error, fs, sync::Arc};
 
 const IMAGE_WIDTH: u32 = 600;
-const SAMPLES_PER_PIXEL: u32 = 1_000;
-const MAX_DEPTH: u32 = 50;
+const STRATIFIED_GRID_WIDTH: u32 = 32;
+const MAX_DEPTH: u32 = 20;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Final-quality render. For iteration, lower IMAGE_WIDTH and STRATIFIED_GRID_WIDTH, or switch
+    // to random sampling with RayCamera::with_adaptive_sampling(...).
     fs::create_dir_all("final/raytracing")?;
 
     let (world, sampling_targets) = life_final_scene();
     let canvas = render_scene(&world, &sampling_targets);
-    let path = "final/raytracing/life_final.ppm";
-    canvas.save_binary(path)?;
+    let path = "final/raytracing/life_final.png";
+    canvas.save_extension(path)?;
     println!("saved {path}");
 
     Ok(())
 }
 
-fn life_final_scene() -> (HittableList, HittableList) {
+fn life_final_scene() -> (HittableList, SamplingTargetList) {
     let red = Lambertian::new(LinearRgb::new(0.65, 0.05, 0.05));
     let white = Lambertian::new(LinearRgb::new(0.73, 0.73, 0.73));
     let white_shared: MaterialRef = Arc::new(white.clone());
@@ -91,25 +93,24 @@ fn life_final_scene() -> (HittableList, HittableList) {
         glass,
     ));
 
-    let mut sampling_targets = HittableList::with_capacity(2);
-    sampling_targets.add(Quad::new(
+    let mut sampling_targets = SamplingTargetList::with_capacity(2);
+    sampling_targets.add_quad(
         Point::new(343.0, 554.0, 332.0),
         Vector::new(-130.0, 0.0, 0.0),
         Vector::new(0.0, 0.0, -105.0),
-    ));
-    sampling_targets.add(Sphere::new(Point::new(190.0, 90.0, 190.0), 90.0));
+    );
+    sampling_targets.add_sphere(Point::new(190.0, 90.0, 190.0), 90.0);
 
     (world, sampling_targets)
 }
 
 fn render_scene(
     world: &dyn gartus::graphics::raytracing::Hittable,
-    lights: &HittableList,
+    lights: &SamplingTargetList,
 ) -> Canvas {
     PathTracer::new(
         RayCamera::new(IMAGE_WIDTH, 1.0)
-            .with_samples_per_pixel(SAMPLES_PER_PIXEL)
-            .with_stratified_sampling()
+            .with_stratified_grid_width(STRATIFIED_GRID_WIDTH)
             .with_max_depth(MAX_DEPTH)
             .with_background(LinearRgb::default())
             .with_vertical_fov(40.0)

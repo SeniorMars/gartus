@@ -410,6 +410,27 @@ impl PointLight {
     }
 }
 
+impl From<&SurfaceMaterial> for PhongMaterial {
+    fn from(material: &SurfaceMaterial) -> Self {
+        Self::new(
+            reflection_from_linear_rgb(material.ambient_color),
+            reflection_from_linear_rgb(material.base_color),
+            reflection_from_linear_rgb(material.specular_color),
+            material.shininess,
+        )
+    }
+}
+
+impl From<SurfaceMaterial> for PhongMaterial {
+    fn from(material: SurfaceMaterial) -> Self {
+        Self::from(&material)
+    }
+}
+
+fn reflection_from_linear_rgb(color: LinearRgb) -> ReflectionConstants {
+    ReflectionConstants::new(color.red, color.green, color.blue)
+}
+
 /// Lighting inputs for Phong reflection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lighting {
@@ -718,6 +739,23 @@ mod tests {
             PhongMaterial::POLISHED_GOLD.specular
         );
         assert_eq!(lighting.specular_exponent, 83);
+    }
+
+    #[test]
+    fn surface_material_converts_to_phong_material() {
+        let surface = SurfaceMaterial::new(
+            LinearRgb::new(0.1, 0.2, 0.3),
+            LinearRgb::new(0.4, 0.5, 0.6),
+            LinearRgb::new(0.7, 0.8, 0.9),
+            32.0,
+        );
+
+        let phong = PhongMaterial::from(&surface);
+
+        assert_eq!(phong.ambient, ReflectionConstants::new(0.1, 0.2, 0.3));
+        assert_eq!(phong.diffuse, ReflectionConstants::new(0.4, 0.5, 0.6));
+        assert_eq!(phong.specular, ReflectionConstants::new(0.7, 0.8, 0.9));
+        assert_eq!(phong.shininess, 32.0);
     }
 
     #[test]

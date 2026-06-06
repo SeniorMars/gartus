@@ -5,7 +5,7 @@ use super::{
     lighting::PreparedLighting,
     texture::Texture,
 };
-use crate::gmath::vector::Vector;
+use crate::gmath::{geometry::TriangleGeometry, vector::Vector};
 
 const PERSPECTIVE_EPS: f64 = 1e-12;
 
@@ -644,11 +644,8 @@ fn flat_textured_modulation(lighting: &PreparedLighting, vertices: [TexturedVert
     let p1 = vertices[1].position_tuple();
     let p2 = vertices[2].position_tuple();
     let normal = triangle_normal(p0, p1, p2);
-    let point = Vector::new(
-        (p0.0 + p1.0 + p2.0) / 3.0,
-        (p0.1 + p1.1 + p2.1) / 3.0,
-        (p0.2 + p1.2 + p2.2) / 3.0,
-    );
+    let centroid = TriangleGeometry::from_tuples([p0, p1, p2]).centroid();
+    let point = Vector::new(centroid.x(), centroid.y(), centroid.z());
     lighting.illuminate_at(normal, point)
 }
 

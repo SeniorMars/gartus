@@ -488,3 +488,23 @@ impl From<Material> for SurfaceMaterial {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphics::colors::LinearRgb;
+
+    #[test]
+    fn mdl_material_converts_to_surface_material_channels() {
+        let material = Material::new(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9);
+
+        let surface = SurfaceMaterial::from(material);
+
+        assert_eq!(surface.ambient_color, LinearRgb::new(0.1, 0.4, 0.7));
+        assert_eq!(surface.base_color, LinearRgb::new(0.2, 0.5, 0.8));
+        assert_eq!(surface.specular_color, LinearRgb::new(0.3, 0.6, 0.9));
+        assert_eq!(surface.shininess, f64::from(DEFAULT_SPECULAR_EXPONENT));
+        assert_eq!(surface.refractive_index, None);
+        assert_eq!(surface.diffuse_texture, None);
+    }
+}

@@ -71,6 +71,23 @@ impl Default for Interval {
     }
 }
 
+/// Context for evaluating or generating a directional PDF sample.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PdfContext {
+    /// Point from which outgoing directions are sampled.
+    pub origin: Point,
+    /// Ray time used by motion-blurred sampling targets.
+    pub time: f64,
+}
+
+impl PdfContext {
+    /// Creates a sampling context.
+    #[must_use]
+    pub const fn new(origin: Point, time: f64) -> Self {
+        Self { origin, time }
+    }
+}
+
 /// Geometry-only ray intersection information.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SurfaceHit {
@@ -262,28 +279,28 @@ impl RayGeometry {
         Self::Quad(QuadGeometry::new(corner, u, v))
     }
 
-    pub(crate) fn pdf_value(self, origin: Point, direction: Vector) -> f64 {
+    pub(crate) fn pdf_value(self, context: PdfContext, direction: Vector) -> f64 {
         match self {
-            Self::Sphere(geometry) => sphere_pdf_value(geometry, origin, direction),
+            Self::Sphere(geometry) => sphere_pdf_value(geometry, context.origin, direction),
             Self::MovingSphere(geometry) => {
-                let sphere = SphereGeometry::new(geometry.center_start(), geometry.radius());
-                sphere_pdf_value(sphere, origin, direction)
+                let sphere = moving_sphere_at(geometry, context.time);
+                sphere_pdf_value(sphere, context.origin, direction)
             }
-            Self::Triangle(geometry) => triangle_pdf_value(geometry, origin, direction),
-            Self::Quad(geometry) => quad_pdf_value(geometry, origin, direction),
+            Self::Triangle(geometry) => triangle_pdf_value(geometry, context.origin, direction),
+            Self::Quad(geometry) => quad_pdf_value(geometry, context.origin, direction),
         }
     }
 
-    pub(crate) fn random_direction(self, origin: Point, rng: &mut SampleRng) -> Vector {
+    pub(crate) fn random_direction(self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         match self {
-            Self::Sphere(geometry) => random_direction_to_sphere(geometry, origin, rng),
+            Self::Sphere(geometry) => random_direction_to_sphere(geometry, context.origin, rng),
             Self::MovingSphere(geometry) => random_direction_to_sphere(
-                SphereGeometry::new(geometry.center_start(), geometry.radius()),
-                origin,
+                moving_sphere_at(geometry, context.time),
+                context.origin,
                 rng,
             ),
-            Self::Triangle(geometry) => random_direction_to_triangle(geometry, origin, rng),
-            Self::Quad(geometry) => random_direction_to_quad(geometry, origin, rng),
+            Self::Triangle(geometry) => random_direction_to_triangle(geometry, context.origin, rng),
+            Self::Quad(geometry) => random_direction_to_quad(geometry, context.origin, rng),
         }
     }
 }
@@ -536,12 +553,12 @@ pub trait Hittable: Send + Sync {
     }
 
     /// Returns the probability density for sampling `direction` from `origin`.
-    fn pdf_value(&self, _origin: Point, _direction: Vector) -> f64 {
+    fn pdf_value(&self, _context: PdfContext, _direction: Vector) -> f64 {
         0.0
     }
 
     /// Returns a random direction from `origin` toward this object.
-    fn random_direction(&self, _origin: Point, _rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, _context: PdfContext, _rng: &mut SampleRng) -> Vector {
         Vector::new(1.0, 0.0, 0.0)
     }
 }
@@ -633,12 +650,12 @@ impl Hittable for Sphere {
         self.object.bounding_box()
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
-        sphere_pdf_value(self.geometry(), origin, direction)
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        sphere_pdf_value(self.geometry(), context.origin, direction)
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
-        random_direction_to_sphere(self.geometry(), origin, rng)
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        random_direction_to_sphere(self.geometry(), context.origin, rng)
     }
 }
 
@@ -733,20 +750,20 @@ impl Hittable for MovingSphere {
         self.object.bounding_box()
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         let geometry = self.geometry();
         sphere_pdf_value(
-            SphereGeometry::new(geometry.center_start(), geometry.radius()),
-            origin,
+            moving_sphere_at(geometry, context.time),
+            context.origin,
             direction,
         )
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         let geometry = self.geometry();
         random_direction_to_sphere(
-            SphereGeometry::new(geometry.center_start(), geometry.radius()),
-            origin,
+            moving_sphere_at(geometry, context.time),
+            context.origin,
             rng,
         )
     }
@@ -837,12 +854,12 @@ impl Hittable for Quad {
         self.object.bounding_box()
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
-        quad_pdf_value(self.geometry(), origin, direction)
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        quad_pdf_value(self.geometry(), context.origin, direction)
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
-        random_direction_to_quad(self.geometry(), origin, rng)
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        random_direction_to_quad(self.geometry(), context.origin, rng)
     }
 }
 
@@ -960,6 +977,10 @@ pub(crate) fn sphere_uv(point_on_unit_sphere: Vector) -> (f64, f64) {
     let theta = (-point_on_unit_sphere.y()).acos();
     let phi = (-point_on_unit_sphere.z()).atan2(point_on_unit_sphere.x()) + PI;
     (phi / (2.0 * PI), theta / PI)
+}
+
+fn moving_sphere_at(geometry: MovingSphereGeometry, time: f64) -> SphereGeometry {
+    SphereGeometry::new(geometry.center_at(time), geometry.radius())
 }
 
 fn sphere_pdf_value(geometry: SphereGeometry, origin: Point, direction: Vector) -> f64 {

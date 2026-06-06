@@ -1,7 +1,8 @@
 //! Path-tracing scene containers and compatibility adapters.
 
 use super::{
-    Aabb, HitRecord, Hittable, Intersect, Interval, RayGeometry, RayMaterial, SampleRng, Sphere,
+    Aabb, HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
+    RayMaterial, SampleRng, Sphere,
     bvh::{BvhPrimitiveInfo, FlatBvh, RayTraversal},
 };
 use crate::{
@@ -135,7 +136,7 @@ impl Hittable for HittableList {
         }
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         if self.objects.is_empty() {
             return 0.0;
         }
@@ -143,14 +144,123 @@ impl Hittable for HittableList {
         let weight = reciprocal_count(self.objects.len());
         self.objects
             .iter()
-            .map(|object| weight * object.pdf_value(origin, direction))
+            .map(|object| weight * object.pdf_value(context, direction))
             .sum()
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         rng.random_index(self.objects.len()).map_or_else(
             || Vector::new(1.0, 0.0, 0.0),
-            |index| self.objects[index].random_direction(origin, rng),
+            |index| self.objects[index].random_direction(context, rng),
+        )
+    }
+}
+
+/// Dedicated importance-sampling target list.
+///
+/// This is meant for lights, glass caustic targets, windows, or other geometry that should drive
+/// path-sampling PDFs. Unlike [`HittableList`], it is not a scene container and does not report
+/// ray intersections; use it only as the `lights` / sampling-target argument to path tracing.
+#[derive(Default)]
+pub struct SamplingTargetList {
+    objects: Vec<Box<dyn Hittable>>,
+}
+
+impl fmt::Debug for SamplingTargetList {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SamplingTargetList")
+            .field("len", &self.objects.len())
+            .finish()
+    }
+}
+
+impl SamplingTargetList {
+    /// Creates an empty sampling target list.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty sampling target list with reserved capacity.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            objects: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Adds a sphere sampling target.
+    pub fn add_sphere(&mut self, center: Point, radius: f64) {
+        self.objects.push(Box::new(Sphere::new(center, radius)));
+    }
+
+    /// Adds a moving sphere sampling target.
+    pub fn add_moving_sphere(&mut self, center_start: Point, center_end: Point, radius: f64) {
+        self.objects.push(Box::new(MovingSphere::new(
+            center_start,
+            center_end,
+            radius,
+        )));
+    }
+
+    /// Adds a quad sampling target.
+    pub fn add_quad(&mut self, corner: Point, u: Vector, v: Vector) {
+        self.objects.push(Box::new(Quad::new(corner, u, v)));
+    }
+
+    /// Adds a custom sampling target.
+    ///
+    /// The object should implement meaningful [`Hittable::pdf_value`] and
+    /// [`Hittable::random_direction`] methods.
+    pub fn add_target(&mut self, object: impl Hittable + 'static) {
+        self.objects.push(Box::new(object));
+    }
+
+    /// Removes all sampling targets.
+    pub fn clear(&mut self) {
+        self.objects.clear();
+    }
+
+    /// Returns the number of sampling targets.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Returns true when there are no sampling targets.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+}
+
+impl Hittable for SamplingTargetList {
+    fn hit_with_rng(
+        &self,
+        _ray: &Ray,
+        _ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        None
+    }
+
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        if self.objects.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.objects.len());
+        self.objects
+            .iter()
+            .map(|object| weight * object.pdf_value(context, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.objects.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| self.objects[index].random_direction(context, rng),
         )
     }
 }
@@ -211,7 +321,7 @@ impl Hittable for BvhNode {
         Some(self.bounds)
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         if self.objects.is_empty() {
             return 0.0;
         }
@@ -219,14 +329,14 @@ impl Hittable for BvhNode {
         let weight = reciprocal_count(self.objects.len());
         self.objects
             .iter()
-            .map(|object| weight * object.pdf_value(origin, direction))
+            .map(|object| weight * object.pdf_value(context, direction))
             .sum()
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         rng.random_index(self.objects.len()).map_or_else(
             || Vector::new(1.0, 0.0, 0.0),
-            |index| self.objects[index].random_direction(origin, rng),
+            |index| self.objects[index].random_direction(context, rng),
         )
     }
 }
@@ -360,10 +470,13 @@ pub struct RayPrimitive {
 
 /// Primary data-oriented path-tracing scene.
 ///
-/// `RayScene` is the canonical internal scene for built-in path-traced primitives. It stores
+/// `RayScene` is the canonical compiled scene for built-in path-traced primitives. It stores
 /// compact [`RayPrimitive`] values plus a material table, and caches a scene-level BVH over those
-/// primitives. [`HittableList`], [`BvhNode`], and [`SphereList`] remain useful compatibility or
-/// educational adapters for boxed/custom hittables and book-style examples.
+/// primitives. General mesh/material application code should usually build a
+/// [`SurfaceScene`] and let [`crate::graphics::raytracing::PathTracer::render_scene`] compile it;
+/// use `RayScene` directly for low-level ray-specific materials, emissive primitives, and custom
+/// path-tracing scenes. [`HittableList`], [`BvhNode`], and [`SphereList`] remain useful
+/// compatibility or educational adapters for boxed/custom hittables and book-style examples.
 #[derive(Debug, Default)]
 pub struct RayScene {
     materials: Vec<RayMaterial>,
@@ -693,7 +806,7 @@ impl Hittable for RayScene {
         })
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         if self.primitives.is_empty() {
             return 0.0;
         }
@@ -701,17 +814,17 @@ impl Hittable for RayScene {
         let weight = reciprocal_count(self.primitives.len());
         self.primitives
             .iter()
-            .map(|primitive| weight * primitive.geometry.pdf_value(origin, direction))
+            .map(|primitive| weight * primitive.geometry.pdf_value(context, direction))
             .sum()
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         rng.random_index(self.primitives.len()).map_or_else(
             || Vector::new(1.0, 0.0, 0.0),
             |index| {
                 self.primitives[index]
                     .geometry
-                    .random_direction(origin, rng)
+                    .random_direction(context, rng)
             },
         )
     }
@@ -789,7 +902,7 @@ impl Hittable for SphereList {
         })
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         if self.spheres.is_empty() {
             return 0.0;
         }
@@ -797,14 +910,14 @@ impl Hittable for SphereList {
         let weight = reciprocal_count(self.spheres.len());
         self.spheres
             .iter()
-            .map(|sphere| weight * sphere.pdf_value(origin, direction))
+            .map(|sphere| weight * sphere.pdf_value(context, direction))
             .sum()
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         rng.random_index(self.spheres.len()).map_or_else(
             || Vector::new(1.0, 0.0, 0.0),
-            |index| self.spheres[index].random_direction(origin, rng),
+            |index| self.spheres[index].random_direction(context, rng),
         )
     }
 }

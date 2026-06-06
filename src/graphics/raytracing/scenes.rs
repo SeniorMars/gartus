@@ -3,11 +3,13 @@
 use super::{
     BvhNode, ConstantMedium, Dielectric, DiffuseLight, Hittable, HittableList, INFINITY, Interval,
     Lambertian, LinearColor, MaterialRef, Metal, MovingSphere, PI, Quad, RayMaterial, RayScene,
-    RayTexture, RotateY, SampleRng, Sphere, SphereList, Translate, box_object, component_mul,
-    hit_sphere,
+    RotateY, SampleRng, Sphere, SphereList, Translate, box_object, component_mul, hit_sphere,
 };
 use crate::gmath::{ray::Ray, vector::Point, vector::Vector};
-use crate::graphics::lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex};
+use crate::graphics::{
+    lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex},
+    texture::SurfaceTexture,
+};
 use std::sync::Arc;
 
 /// Computes the blue-to-white background gradient for a ray.
@@ -385,7 +387,7 @@ pub fn cornell_smoke_world() -> HittableList {
 /// Panics if one of the built-in final-scene ground boxes or clustered spheres does not provide a
 /// bounding box.
 #[must_use]
-pub fn next_week_final_scene_world(earth_texture: impl RayTexture + 'static) -> HittableList {
+pub fn next_week_final_scene_world(earth_texture: impl SurfaceTexture + 'static) -> HittableList {
     let mut rng = SampleRng::new(61);
     let ground: MaterialRef = Arc::new(Lambertian::new(LinearColor::new(0.48, 0.83, 0.53)));
     let mut boxes1 = HittableList::with_capacity(20 * 20);

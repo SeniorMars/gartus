@@ -38,11 +38,8 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        CheckerTexture, ConstantMedium, CosinePdf, Dielectric, DiffuseLight, HitRecord, Hittable,
-        HittablePdf, ImageTexture, Isotropic, Lambertian, LinearColor, Material, MaterialPdf,
-        MatrixInstance, Metal, MixturePdf, MovingSphere, NoiseTexture, PathTracer, Pdf, Quad,
-        RayGeometry, RayMaterial, RayScene, RayTexture, RotateY, ScatterRecord, SceneObject,
-        SolidColor, Sphere, SpherePdf, TextureRef, Translate, TriangleMesh, box_object,
+        Dielectric, DiffuseLight, Lambertian, LinearColor, Metal, PathTracer, Quad, RayGeometry,
+        RayMaterial, RayScene, SamplingTargetList, Sphere,
     },
 };
 

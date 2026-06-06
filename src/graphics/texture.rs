@@ -261,7 +261,7 @@ impl Texture {
 
 impl SurfaceTexture for Texture {
     fn sample_linear(&self, sample: TextureSample) -> LinearRgb {
-        LinearRgb::from_rgb_linear_units(self.sample(sample.u, sample.v))
+        LinearRgb::from_rgb_srgb(self.sample(sample.u, sample.v))
     }
 }
 

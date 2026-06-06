@@ -1,6 +1,6 @@
 //! Hittable instance transforms.
 
-use super::{Aabb, HitRecord, Hittable, Interval, degrees_to_radians};
+use super::{Aabb, HitRecord, Hittable, Interval, PdfContext, degrees_to_radians};
 use crate::gmath::{
     matrix::Matrix,
     random::SampleRng,
@@ -77,12 +77,18 @@ impl Hittable for Translate {
         self.bounds
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
-        self.object.pdf_value(origin - self.offset, direction)
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        self.object.pdf_value(
+            PdfContext::new(context.origin - self.offset, context.time),
+            direction,
+        )
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
-        self.object.random_direction(origin - self.offset, rng)
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        self.object.random_direction(
+            PdfContext::new(context.origin - self.offset, context.time),
+            rng,
+        )
     }
 }
 
@@ -164,17 +170,23 @@ impl Hittable for RotateY {
         self.bounds
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
         self.object.pdf_value(
-            rotate_y_point_inverse(origin, self.sin_theta, self.cos_theta),
+            PdfContext::new(
+                rotate_y_point_inverse(context.origin, self.sin_theta, self.cos_theta),
+                context.time,
+            ),
             rotate_y_vector_inverse(direction, self.sin_theta, self.cos_theta),
         )
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
         rotate_y_vector(
             self.object.random_direction(
-                rotate_y_point_inverse(origin, self.sin_theta, self.cos_theta),
+                PdfContext::new(
+                    rotate_y_point_inverse(context.origin, self.sin_theta, self.cos_theta),
+                    context.time,
+                ),
                 rng,
             ),
             self.sin_theta,
@@ -188,12 +200,14 @@ impl Hittable for RotateY {
 /// The transform maps object space into world space. Rays are transformed by the cached inverse
 /// before hitting the child object, then hit points and normals are transformed back to world
 /// space. Normals use the inverse-transpose transform, which keeps them correct for non-uniform
-/// scales as well as rotations and translations.
+/// scales as well as rotations and translations. Direction PDFs are forwarded only for rigid
+/// transforms because non-uniform scales do not preserve solid angle.
 pub struct MatrixInstance {
     object: Box<dyn Hittable>,
     transform: Matrix,
     inverse: Matrix,
     normal_transform: Matrix,
+    preserves_solid_angle: bool,
     bounds: Option<Aabb>,
 }
 
@@ -225,6 +239,7 @@ impl MatrixInstance {
         }
         let inverse = transform.inverse()?;
         let normal_transform = inverse.transpose();
+        let preserves_solid_angle = preserves_solid_angle(&transform);
         let bounds = object
             .bounding_box()
             .map(|bounds| transform_bounds(bounds, &transform));
@@ -233,6 +248,7 @@ impl MatrixInstance {
             transform,
             inverse,
             normal_transform,
+            preserves_solid_angle,
             bounds,
         })
     }
@@ -277,17 +293,27 @@ impl Hittable for MatrixInstance {
         self.bounds
     }
 
-    fn pdf_value(&self, origin: Point, direction: Vector) -> f64 {
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        if !self.preserves_solid_angle {
+            return 0.0;
+        }
+
         self.object.pdf_value(
-            transform_point(origin, &self.inverse),
+            PdfContext::new(transform_point(context.origin, &self.inverse), context.time),
             transform_vector(direction, &self.inverse),
         )
     }
 
-    fn random_direction(&self, origin: Point, rng: &mut SampleRng) -> Vector {
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        if !self.preserves_solid_angle {
+            return Vector::new(1.0, 0.0, 0.0);
+        }
+
         transform_vector(
-            self.object
-                .random_direction(transform_point(origin, &self.inverse), rng),
+            self.object.random_direction(
+                PdfContext::new(transform_point(context.origin, &self.inverse), context.time),
+                rng,
+            ),
             &self.transform,
         )
     }
@@ -326,6 +352,28 @@ fn transform_vector(vector: Vector, transform: &Matrix) -> Vector {
     let transformed =
         transform.transform_homogeneous_point(&[vector.x(), vector.y(), vector.z(), 0.0]);
     Vector::new(transformed[0], transformed[1], transformed[2])
+}
+
+fn preserves_solid_angle(transform: &Matrix) -> bool {
+    let x = transform_vector(Vector::new(1.0, 0.0, 0.0), transform);
+    let y = transform_vector(Vector::new(0.0, 1.0, 0.0), transform);
+    let z = transform_vector(Vector::new(0.0, 0.0, 1.0), transform);
+
+    vectors_are_finite_unit_axes(x, y, z)
+}
+
+fn vectors_are_finite_unit_axes(x: Vector, y: Vector, z: Vector) -> bool {
+    const EPSILON: f64 = 1.0e-8;
+
+    [x, y, z]
+        .into_iter()
+        .all(|axis| axis.x().is_finite() && axis.y().is_finite() && axis.z().is_finite())
+        && (x.length_squared() - 1.0).abs() <= EPSILON
+        && (y.length_squared() - 1.0).abs() <= EPSILON
+        && (z.length_squared() - 1.0).abs() <= EPSILON
+        && x.dot(y).abs() <= EPSILON
+        && x.dot(z).abs() <= EPSILON
+        && y.dot(z).abs() <= EPSILON
 }
 
 fn rotate_y_point(point: Point, sin_theta: f64, cos_theta: f64) -> Point {

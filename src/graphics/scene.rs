@@ -6,7 +6,7 @@ use crate::{
         camera::Camera3D,
         colors::Rgb,
         display::{Canvas, PolygonColorMode, ShadingMode},
-        lighting::Lighting,
+        lighting::{Lighting, PhongMaterial},
         material::SurfaceMaterial,
     },
 };
@@ -31,7 +31,11 @@ impl SurfaceMesh {
     }
 }
 
-/// Shared surface scene description.
+/// Shared surface scene description for raster and ray renderers.
+///
+/// This is the preferred user-facing scene container for mesh/material content that should render
+/// through both pipelines. Use [`Self::rasterize`] for the canvas raster path, or pass a
+/// `SurfaceScene` to [`crate::graphics::raytracing::PathTracer::render_scene`] for path tracing.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfaceScene {
     meshes: Vec<SurfaceMesh>,
@@ -101,9 +105,9 @@ impl SurfaceScene {
                 PolygonColorMode::LineColor
             })
             .build();
-        if let Some(lighting) = lighting {
-            canvas.set_lighting(lighting);
-        }
+        let lighting = lighting.inspect(|lighting| {
+            canvas.set_lighting(lighting.clone());
+        });
 
         for mesh in &self.meshes {
             let projected = project_mesh(camera, &mesh.polygons);
@@ -111,6 +115,11 @@ impl SurfaceScene {
                 continue;
             }
             canvas.line = mesh.material.base_color.gamma_encode();
+            if let Some(lighting) = &lighting {
+                let mut mesh_lighting = lighting.clone();
+                mesh_lighting.set_material(PhongMaterial::from(&mesh.material));
+                canvas.set_lighting(mesh_lighting);
+            }
             canvas.draw_polygons(&projected);
         }
 

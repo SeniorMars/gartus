@@ -862,3 +862,23 @@ fn default_ambient() -> Vec3 {
         f64::from(ambient.blue),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphics::colors::LinearRgb;
+
+    #[test]
+    fn material_constants_to_surface_material_uses_reflection_coefficients_only() {
+        let constants = MaterialConstants {
+            material: Material::new(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+            color: Vec3::new(255.0, 128.0, 64.0),
+        };
+
+        let surface = SurfaceMaterial::from(constants);
+
+        assert_eq!(surface.ambient_color, LinearRgb::new(0.1, 0.4, 0.7));
+        assert_eq!(surface.base_color, LinearRgb::new(0.2, 0.5, 0.8));
+        assert_eq!(surface.specular_color, LinearRgb::new(0.3, 0.6, 0.9));
+    }
+}

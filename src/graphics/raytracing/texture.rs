@@ -1,27 +1,18 @@
-//! Ray-tracing texture types and adapters.
+//! Ray-tracing texture types built on the renderer-neutral texture trait.
 
 use super::{LinearColor, rgb_to_linear_color};
 use crate::{
-    gmath::{
-        perlin::{Perlin, scale_point},
-        vector::Point,
-    },
+    gmath::perlin::{Perlin, scale_point},
     graphics::{
         colors::Rgb,
         display::Canvas,
-        texture::{SurfaceTexture, Texture as BitmapTexture, TextureSample},
+        texture::{SurfaceTexture, SurfaceTextureRef, Texture as BitmapTexture, TextureSample},
     },
 };
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 
-/// Procedural or image-backed texture sampled by ray-tracing materials.
-pub trait RayTexture: fmt::Debug + Send + Sync {
-    /// Returns the linear color at texture coordinate `(u, v)` and surface point `point`.
-    fn value(&self, u: f64, v: f64, point: Point) -> LinearColor;
-}
-
-/// Shared ray-texture handle.
-pub type TextureRef = Arc<dyn RayTexture>;
+/// Shared renderer-neutral surface texture handle used by ray-tracing materials.
+pub type TextureRef = SurfaceTextureRef;
 
 /// A texture that always returns one linear color.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,15 +47,9 @@ impl From<Rgb> for SolidColor {
     }
 }
 
-impl RayTexture for SolidColor {
-    fn value(&self, _u: f64, _v: f64, _point: Point) -> LinearColor {
+impl SurfaceTexture for SolidColor {
+    fn sample_linear(&self, _sample: TextureSample) -> LinearColor {
         self.color
-    }
-}
-
-impl<T: RayTexture + ?Sized> SurfaceTexture for T {
-    fn sample_linear(&self, sample: TextureSample) -> LinearColor {
-        self.value(sample.u, sample.v, sample.point)
     }
 }
 
@@ -103,16 +88,17 @@ impl CheckerTexture {
     }
 }
 
-impl RayTexture for CheckerTexture {
+impl SurfaceTexture for CheckerTexture {
     #[allow(clippy::cast_possible_truncation)]
-    fn value(&self, texture_u: f64, texture_v: f64, point: Point) -> LinearColor {
+    fn sample_linear(&self, sample: TextureSample) -> LinearColor {
+        let point = sample.point;
         let x_integer = (self.inv_scale * point.x()).floor() as i64;
         let y_integer = (self.inv_scale * point.y()).floor() as i64;
         let z_integer = (self.inv_scale * point.z()).floor() as i64;
         if (x_integer + y_integer + z_integer) % 2 == 0 {
-            self.even.value(texture_u, texture_v, point)
+            self.even.sample_linear(sample)
         } else {
-            self.odd.value(texture_u, texture_v, point)
+            self.odd.sample_linear(sample)
         }
     }
 }
@@ -154,12 +140,12 @@ impl ImageTexture {
     }
 }
 
-impl RayTexture for ImageTexture {
-    fn value(&self, u: f64, v: f64, _point: Point) -> LinearColor {
+impl SurfaceTexture for ImageTexture {
+    fn sample_linear(&self, sample: TextureSample) -> LinearColor {
         if self.texture.image().is_empty() {
             return rgb_to_linear_color(Rgb::CYAN);
         }
-        rgb_to_linear_color(self.texture.sample(u, v))
+        self.texture.sample_linear(sample)
     }
 }
 
@@ -222,8 +208,9 @@ impl Default for NoiseTexture {
     }
 }
 
-impl RayTexture for NoiseTexture {
-    fn value(&self, _u: f64, _v: f64, point: Point) -> LinearColor {
+impl SurfaceTexture for NoiseTexture {
+    fn sample_linear(&self, sample: TextureSample) -> LinearColor {
+        let point = sample.point;
         let intensity = match self.kind {
             NoiseTextureKind::Noise => {
                 0.5 * (1.0 + self.noise.noise(scale_point(point, self.scale)))
@@ -232,8 +219,8 @@ impl RayTexture for NoiseTexture {
                 self.noise.turbulence(scale_point(point, self.scale), depth)
             }
             NoiseTextureKind::Marble { depth } => {
-                0.5 * (1.0
-                    + (self.scale * point.z() + 10.0 * self.noise.turbulence(point, depth)).sin())
+                let point = scale_point(point, self.scale);
+                0.5 * (1.0 + (point.z() + 10.0 * self.noise.turbulence(point, depth)).sin())
             }
         };
         LinearColor::new(intensity, intensity, intensity)

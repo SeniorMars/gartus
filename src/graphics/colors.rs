@@ -1,6 +1,6 @@
 use crate::gmath::vector::Vector;
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul};
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, Sub};
 
 /// A trait that is meant to bound [Display]
 pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {}
@@ -82,6 +82,18 @@ impl LinearRgb {
             self.blue * rhs.blue,
         )
     }
+
+    /// Returns the largest channel value.
+    #[must_use]
+    pub fn max_component(self) -> f64 {
+        self.red.max(self.green).max(self.blue)
+    }
+
+    /// Returns `true` when every channel is finite.
+    #[must_use]
+    pub fn is_finite(self) -> bool {
+        self.red.is_finite() && self.green.is_finite() && self.blue.is_finite()
+    }
 }
 
 impl Add for LinearRgb {
@@ -101,6 +113,18 @@ impl AddAssign for LinearRgb {
         self.red += rhs.red;
         self.green += rhs.green;
         self.blue += rhs.blue;
+    }
+}
+
+impl Sub for LinearRgb {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(
+            self.red - rhs.red,
+            self.green - rhs.green,
+            self.blue - rhs.blue,
+        )
     }
 }
 
@@ -844,6 +868,18 @@ mod test {
             Rgb::from_raw_linear_color(Vector::new(0.25, 0.0, 1.0)),
             Rgb::new(63, 0, 255)
         );
+    }
+
+    #[test]
+    fn linear_rgb_reports_max_component() {
+        assert_eq!(LinearRgb::new(0.1, 0.8, 0.4).max_component(), 0.8);
+    }
+
+    #[test]
+    fn linear_rgb_reports_finite_channels() {
+        assert!(LinearRgb::new(0.1, 0.8, 0.4).is_finite());
+        assert!(!LinearRgb::new(0.1, f64::NAN, 0.4).is_finite());
+        assert!(!LinearRgb::new(0.1, f64::INFINITY, 0.4).is_finite());
     }
 
     #[test]

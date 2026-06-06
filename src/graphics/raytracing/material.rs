@@ -1,10 +1,10 @@
 //! Ray-tracing BSDF, emitter, and phase-function materials.
 
 use super::{
-    HitRecord, LinearColor, MaterialPdf, PI, Pdf, SpherePdf,
+    HitRecord, LinearColor, MaterialPdf, PI, SpherePdf,
     pdf::CosinePdf,
     rgb_to_linear_color,
-    texture::{CheckerTexture, NoiseTexture, RayTexture, SolidColor, TextureRef},
+    texture::{CheckerTexture, NoiseTexture, SolidColor, TextureRef},
 };
 use crate::{
     gmath::{random::SampleRng, ray::Ray, vector::Point},
@@ -12,21 +12,28 @@ use crate::{
         colors::Rgb,
         lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex},
         material::SurfaceMaterial,
+        texture::{SurfaceTexture, TextureSample},
     },
 };
 use std::{fmt, sync::Arc};
 
-/// A ray scattered by a material, with the color attenuation and sampling data applied to it.
+/// Material scattering result with explicit specular and PDF-sampled cases.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ScatterRecord {
-    /// Scattered ray.
-    pub ray: Ray,
-    /// Per-channel color attenuation.
-    pub attenuation: LinearColor,
-    /// PDF used by non-specular material scattering.
-    pub pdf: Option<MaterialPdf>,
-    /// True when this is a deterministic specular bounce that should bypass PDF weighting.
-    pub skip_pdf: bool,
+pub enum ScatterRecord {
+    /// Deterministic or implicitly sampled specular ray that bypasses explicit PDF weighting.
+    Specular {
+        /// Scattered specular ray.
+        ray: Ray,
+        /// Per-channel color attenuation.
+        attenuation: LinearColor,
+    },
+    /// PDF-sampled scattering event for diffuse surfaces and volumes.
+    Scattering {
+        /// Per-channel color attenuation.
+        attenuation: LinearColor,
+        /// PDF used by material scattering.
+        pdf: MaterialPdf,
+    },
 }
 
 /// A surface material that can scatter rays.
@@ -98,7 +105,7 @@ impl Lambertian {
 
     /// Creates a Lambertian material from a texture object.
     #[must_use]
-    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+    pub fn from_texture(texture: impl SurfaceTexture + 'static) -> Self {
         Self::from_shared_texture(Arc::new(texture))
     }
 
@@ -122,7 +129,7 @@ impl Lambertian {
 
     /// Returns the texture sampled for diffuse attenuation.
     #[must_use]
-    pub fn texture(&self) -> &dyn RayTexture {
+    pub fn texture(&self) -> &dyn SurfaceTexture {
         self.texture.as_ref()
     }
 
@@ -176,23 +183,22 @@ impl From<SurfaceMaterial> for Lambertian {
 impl Material for Lambertian {
     fn scatter(
         &self,
-        ray_in: &Ray,
+        _ray_in: &Ray,
         hit: &HitRecord<'_>,
-        rng: &mut SampleRng,
+        _rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
-        let pdf = CosinePdf::new(hit.normal)?;
-        let scatter_direction = pdf.generate(rng);
+        let pdf = CosinePdf::new(hit.shading_normal)?;
 
-        Some(ScatterRecord {
-            ray: Ray::with_time(hit.point, scatter_direction, ray_in.time()),
-            attenuation: self.texture.value(hit.u, hit.v, hit.point),
-            pdf: Some(MaterialPdf::Cosine(pdf)),
-            skip_pdf: false,
+        Some(ScatterRecord::Scattering {
+            attenuation: self
+                .texture
+                .sample_linear(TextureSample::new(hit.u, hit.v, hit.point)),
+            pdf: MaterialPdf::Cosine(pdf),
         })
     }
 
     fn scattering_pdf(&self, _ray_in: &Ray, hit: &HitRecord<'_>, scattered: &Ray) -> f64 {
-        let cosine_theta = hit.normal.dot(scattered.direction().normalized());
+        let cosine_theta = hit.shading_normal.dot(scattered.direction().normalized());
         if cosine_theta <= 0.0 {
             0.0
         } else {
@@ -222,13 +228,13 @@ impl DiffuseLight {
 
     /// Creates a light material from a texture object.
     #[must_use]
-    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+    pub fn from_texture(texture: impl SurfaceTexture + 'static) -> Self {
         Self::from_shared_texture(Arc::new(texture))
     }
 
     /// Returns the texture sampled for emitted radiance.
     #[must_use]
-    pub fn texture(&self) -> &dyn RayTexture {
+    pub fn texture(&self) -> &dyn SurfaceTexture {
         self.texture.as_ref()
     }
 }
@@ -243,7 +249,7 @@ impl Material for DiffuseLight {
         point: Point,
     ) -> LinearColor {
         if hit.front_face {
-            self.texture.value(u, v, point)
+            self.texture.sample_linear(TextureSample::new(u, v, point))
         } else {
             LinearColor::default()
         }
@@ -271,13 +277,13 @@ impl Isotropic {
 
     /// Creates an isotropic material from a texture object.
     #[must_use]
-    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+    pub fn from_texture(texture: impl SurfaceTexture + 'static) -> Self {
         Self::from_shared_texture(Arc::new(texture))
     }
 
     /// Returns the texture sampled for medium attenuation.
     #[must_use]
-    pub fn texture(&self) -> &dyn RayTexture {
+    pub fn texture(&self) -> &dyn SurfaceTexture {
         self.texture.as_ref()
     }
 }
@@ -285,15 +291,15 @@ impl Isotropic {
 impl Material for Isotropic {
     fn scatter(
         &self,
-        ray_in: &Ray,
+        _ray_in: &Ray,
         hit: &HitRecord<'_>,
-        rng: &mut SampleRng,
+        _rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
-        Some(ScatterRecord {
-            ray: Ray::with_time(hit.point, rng.random_unit_vector(), ray_in.time()),
-            attenuation: self.texture.value(hit.u, hit.v, hit.point),
-            pdf: Some(MaterialPdf::Sphere(SpherePdf)),
-            skip_pdf: false,
+        Some(ScatterRecord::Scattering {
+            attenuation: self
+                .texture
+                .sample_linear(TextureSample::new(hit.u, hit.v, hit.point)),
+            pdf: MaterialPdf::Sphere(SpherePdf),
         })
     }
 
@@ -380,11 +386,9 @@ impl Material for Metal {
             return None;
         }
 
-        Some(ScatterRecord {
+        Some(ScatterRecord::Specular {
             ray: Ray::with_time(hit.point, scattered_direction, ray_in.time()),
             attenuation: self.albedo,
-            pdf: None,
-            skip_pdf: true,
         })
     }
 }
@@ -481,11 +485,9 @@ impl Material for Dielectric {
             unit_direction.refracted(hit.normal, refraction_ratio)
         };
 
-        Some(ScatterRecord {
+        Some(ScatterRecord::Specular {
             ray: Ray::with_time(hit.point, direction, ray_in.time()),
             attenuation,
-            pdf: None,
-            skip_pdf: true,
         })
     }
 }
@@ -514,7 +516,7 @@ impl RayMaterial {
 
     /// Creates a textured Lambertian material variant.
     #[must_use]
-    pub fn textured_lambertian(texture: impl RayTexture + 'static) -> Self {
+    pub fn textured_lambertian(texture: impl SurfaceTexture + 'static) -> Self {
         Self::Lambertian(Lambertian::from_texture(texture))
     }
 
@@ -526,7 +528,7 @@ impl RayMaterial {
 
     /// Creates a textured diffuse light material variant.
     #[must_use]
-    pub fn textured_diffuse_light(texture: impl RayTexture + 'static) -> Self {
+    pub fn textured_diffuse_light(texture: impl SurfaceTexture + 'static) -> Self {
         Self::DiffuseLight(DiffuseLight::from_texture(texture))
     }
 
@@ -538,7 +540,7 @@ impl RayMaterial {
 
     /// Creates a textured isotropic phase-function material variant.
     #[must_use]
-    pub fn textured_isotropic(texture: impl RayTexture + 'static) -> Self {
+    pub fn textured_isotropic(texture: impl SurfaceTexture + 'static) -> Self {
         Self::Isotropic(Isotropic::from_texture(texture))
     }
 

@@ -6,7 +6,8 @@ use crate::gmath::{
     vector::{Point, Vector},
 };
 use crate::graphics::raytracing::{
-    Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians,
+    Hittable, INFINITY, Interval, LinearColor, PdfContext, ScatterRecord, component_mul,
+    degrees_to_radians,
 };
 use crate::graphics::raytracing::{
     HittablePdf, MixturePdf, Pdf, SHADOW_ACNE_EPSILON, scenes::normal_scene_color,
@@ -16,6 +17,9 @@ use crate::{
     graphics::display::Canvas,
 };
 use std::io::{self, Write};
+
+const RUSSIAN_ROULETTE_MIN_SURVIVAL_PROBABILITY: f64 = 0.05;
+const RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY: f64 = 0.95;
 
 /// Pixel sampling pattern used for stochastic ray-camera renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -27,6 +31,47 @@ pub enum PixelSampleMode {
     ///
     /// The renderer uses `floor(sqrt(samples_per_pixel))^2` samples per pixel in this mode.
     Stratified,
+    /// Divide the pixel into an explicit square grid and jitter one sample inside each cell.
+    StratifiedGrid {
+        /// Number of strata along each pixel axis.
+        grid_width: u32,
+    },
+}
+
+/// Per-pixel adaptive sampling settings for random world renders.
+///
+/// Adaptive sampling is only applied to [`PixelSampleMode::Random`]. Stratified modes keep their
+/// exact grid sample count so jittered comparisons and final renders stay deterministic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AdaptiveSampling {
+    /// Minimum samples to take before checking convergence.
+    pub min_samples: u32,
+    /// Maximum samples to take if the pixel has not converged.
+    pub max_samples: u32,
+    /// Stop once the largest channel standard deviation is below this threshold.
+    pub error_threshold: f64,
+}
+
+impl AdaptiveSampling {
+    /// Creates validated adaptive sampling settings.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `error_threshold` is not positive and finite.
+    #[must_use]
+    pub fn new(min_samples: u32, max_samples: u32, error_threshold: f64) -> Self {
+        assert!(
+            error_threshold.is_finite() && error_threshold > 0.0,
+            "adaptive sampling error threshold must be positive and finite"
+        );
+        let min_samples = min_samples.max(1);
+        let max_samples = max_samples.max(min_samples);
+        Self {
+            min_samples,
+            max_samples,
+            error_threshold,
+        }
+    }
 }
 
 /// A simple perspective camera for projecting 3D points onto a 2D canvas.
@@ -73,7 +118,9 @@ pub struct RayCamera {
     image_height: u32,
     samples_per_pixel: u32,
     pixel_sample_mode: PixelSampleMode,
+    adaptive_sampling: Option<AdaptiveSampling>,
     max_depth: u32,
+    russian_roulette_min_depth: Option<u32>,
     rng_seed: u64,
     vertical_fov: f64,
     lookfrom: Point,
@@ -98,7 +145,9 @@ struct RayCameraParams {
     aspect_ratio: f64,
     samples_per_pixel: u32,
     pixel_sample_mode: PixelSampleMode,
+    adaptive_sampling: Option<AdaptiveSampling>,
     max_depth: u32,
+    russian_roulette_min_depth: Option<u32>,
     rng_seed: u64,
     vertical_fov: f64,
     lookfrom: Point,
@@ -318,7 +367,9 @@ impl RayCamera {
             aspect_ratio,
             samples_per_pixel: 1,
             pixel_sample_mode: PixelSampleMode::Random,
+            adaptive_sampling: None,
             max_depth: 10,
+            russian_roulette_min_depth: Some(5),
             rng_seed: 1,
             vertical_fov: 90.0,
             lookfrom: Point::new(0.0, 0.0, 0.0),
@@ -370,7 +421,9 @@ impl RayCamera {
             image_height,
             samples_per_pixel: params.samples_per_pixel.max(1),
             pixel_sample_mode: params.pixel_sample_mode,
+            adaptive_sampling: params.adaptive_sampling,
             max_depth: params.max_depth,
+            russian_roulette_min_depth: params.russian_roulette_min_depth,
             rng_seed: params.rng_seed,
             vertical_fov: params.vertical_fov,
             lookfrom: params.lookfrom,
@@ -398,7 +451,9 @@ impl RayCamera {
             aspect_ratio: self.aspect_ratio,
             samples_per_pixel: self.samples_per_pixel,
             pixel_sample_mode: self.pixel_sample_mode,
+            adaptive_sampling: self.adaptive_sampling,
             max_depth: self.max_depth,
+            russian_roulette_min_depth: self.russian_roulette_min_depth,
             rng_seed: self.rng_seed,
             vertical_fov: self.vertical_fov,
             lookfrom: self.lookfrom,
@@ -497,6 +552,35 @@ impl RayCamera {
         self.initialize()
     }
 
+    /// Enables adaptive per-pixel sampling for random stochastic world renders.
+    ///
+    /// The camera takes at least `min_samples`, up to `max_samples`, and stops early when the
+    /// largest channel standard deviation drops below `error_threshold`. Adaptive sampling is
+    /// ignored for stratified modes because those modes promise an exact jittered grid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `error_threshold` is not positive and finite.
+    #[must_use]
+    pub fn with_adaptive_sampling(
+        mut self,
+        min_samples: u32,
+        max_samples: u32,
+        error_threshold: f64,
+    ) -> Self {
+        let adaptive_sampling = AdaptiveSampling::new(min_samples, max_samples, error_threshold);
+        self.adaptive_sampling = Some(adaptive_sampling);
+        self.samples_per_pixel = adaptive_sampling.max_samples;
+        self
+    }
+
+    /// Disables adaptive per-pixel sampling.
+    #[must_use]
+    pub fn without_adaptive_sampling(mut self) -> Self {
+        self.adaptive_sampling = None;
+        self
+    }
+
     /// Enables stratified jittered samples inside each rendered pixel.
     ///
     /// This follows the sampling pattern from *Ray Tracing: The Rest of Your Life* and uses
@@ -506,10 +590,39 @@ impl RayCamera {
         self.with_pixel_sample_mode(PixelSampleMode::Stratified)
     }
 
+    /// Enables stratified sampling with an explicit square grid width.
+    ///
+    /// A `grid_width` of 32 gives exactly 1024 samples per pixel, regardless of the value last
+    /// passed to [`Self::with_samples_per_pixel`].
+    #[must_use]
+    pub fn with_stratified_grid_width(mut self, grid_width: u32) -> Self {
+        let grid_width = grid_width.max(1);
+        self.samples_per_pixel = grid_width.saturating_mul(grid_width);
+        self.with_pixel_sample_mode(PixelSampleMode::StratifiedGrid { grid_width })
+    }
+
     /// Sets the maximum ray-bounce recursion depth for diffuse world rendering.
     #[must_use]
     pub fn with_max_depth(mut self, max_depth: u32) -> Self {
         self.max_depth = max_depth;
+        self
+    }
+
+    /// Starts Russian roulette path termination after `min_depth` completed bounces.
+    ///
+    /// Surviving paths are scaled by the inverse survival probability, keeping the estimator
+    /// unbiased while avoiding low-energy long tails. Use [`Self::without_russian_roulette`] for
+    /// exact fixed-depth debugging renders.
+    #[must_use]
+    pub fn with_russian_roulette_min_depth(mut self, min_depth: u32) -> Self {
+        self.russian_roulette_min_depth = Some(min_depth);
+        self
+    }
+
+    /// Disables Russian roulette path termination.
+    #[must_use]
+    pub fn without_russian_roulette(mut self) -> Self {
+        self.russian_roulette_min_depth = None;
         self
     }
 
@@ -640,6 +753,12 @@ impl RayCamera {
         self.pixel_sample_mode
     }
 
+    /// Returns adaptive sampling settings, if enabled.
+    #[must_use]
+    pub const fn adaptive_sampling(self) -> Option<AdaptiveSampling> {
+        self.adaptive_sampling
+    }
+
     /// Returns the actual number of samples used per pixel for the current sampling mode.
     #[must_use]
     pub fn effective_samples_per_pixel(self) -> u32 {
@@ -649,6 +768,7 @@ impl RayCamera {
                 let sqrt_spp = Self::stratified_grid_width(self.samples_per_pixel);
                 sqrt_spp * sqrt_spp
             }
+            PixelSampleMode::StratifiedGrid { grid_width } => grid_width.saturating_mul(grid_width),
         }
     }
 
@@ -656,6 +776,12 @@ impl RayCamera {
     #[must_use]
     pub fn max_depth(self) -> u32 {
         self.max_depth
+    }
+
+    /// Returns the bounce count after which Russian roulette termination starts.
+    #[must_use]
+    pub const fn russian_roulette_min_depth(self) -> Option<u32> {
+        self.russian_roulette_min_depth
     }
 
     /// Returns the vertical field of view in degrees.
@@ -806,13 +932,14 @@ impl RayCamera {
         world: &dyn Hittable,
         lights: Option<&dyn Hittable>,
         background: LinearColor,
+        russian_roulette_min_depth: Option<u32>,
         rng: &mut SampleRng,
     ) -> LinearColor {
         let mut current_ray = *ray;
         let mut attenuation = LinearColor::new(1.0, 1.0, 1.0);
         let mut color = LinearColor::default();
 
-        for _ in 0..depth {
+        for bounce_index in 0..depth {
             let Some(record) = world.hit_with_rng(
                 &current_ray,
                 Interval::new(SHADOW_ACNE_EPSILON, INFINITY),
@@ -831,48 +958,98 @@ impl RayCamera {
                 return color;
             };
 
-            if scatter.skip_pdf {
-                attenuation = component_mul(attenuation, scatter.attenuation);
-                current_ray = scatter.ray;
-                continue;
+            match scatter {
+                ScatterRecord::Specular {
+                    ray,
+                    attenuation: scatter_attenuation,
+                } => {
+                    attenuation = component_mul(attenuation, scatter_attenuation);
+                    current_ray = ray;
+                    if !Self::russian_roulette_survives(
+                        bounce_index,
+                        russian_roulette_min_depth,
+                        &mut attenuation,
+                        rng,
+                    ) {
+                        return color;
+                    }
+                }
+                ScatterRecord::Scattering {
+                    attenuation: scatter_attenuation,
+                    pdf: material_pdf,
+                } => {
+                    let light_pdf = lights.map(|lights| {
+                        HittablePdf::new(lights, PdfContext::new(record.point, current_ray.time()))
+                    });
+
+                    let (scattered_direction, pdf_value) = if let Some(light_pdf) = light_pdf {
+                        let mixture_pdf = MixturePdf::new(light_pdf, material_pdf);
+                        let direction = mixture_pdf.generate(rng);
+                        (direction, mixture_pdf.value(direction))
+                    } else {
+                        let direction = material_pdf.generate(rng);
+                        (direction, material_pdf.value(direction))
+                    };
+
+                    if !pdf_value.is_finite() || pdf_value <= f64::EPSILON {
+                        return color;
+                    }
+
+                    let scattered_ray =
+                        Ray::with_time(record.point, scattered_direction, current_ray.time());
+                    let scattering_pdf =
+                        record
+                            .material
+                            .scattering_pdf(&current_ray, &record, &scattered_ray);
+                    if !scattering_pdf.is_finite() || scattering_pdf <= 0.0 {
+                        return color;
+                    }
+
+                    attenuation = component_mul(
+                        attenuation,
+                        scatter_attenuation * (scattering_pdf / pdf_value),
+                    );
+                    current_ray = scattered_ray;
+                    if !Self::russian_roulette_survives(
+                        bounce_index,
+                        russian_roulette_min_depth,
+                        &mut attenuation,
+                        rng,
+                    ) {
+                        return color;
+                    }
+                }
             }
-
-            let Some(material_pdf) = scatter.pdf else {
-                return color;
-            };
-            let light_pdf = lights.map(|lights| HittablePdf::new(lights, record.point));
-
-            let (scattered_direction, pdf_value) = if let Some(light_pdf) = light_pdf {
-                let mixture_pdf = MixturePdf::new(&light_pdf, &material_pdf);
-                let direction = mixture_pdf.generate(rng);
-                (direction, mixture_pdf.value(direction))
-            } else {
-                let direction = material_pdf.generate(rng);
-                (direction, material_pdf.value(direction))
-            };
-
-            if !pdf_value.is_finite() || pdf_value <= f64::EPSILON {
-                return color;
-            }
-
-            let scattered_ray =
-                Ray::with_time(record.point, scattered_direction, current_ray.time());
-            let scattering_pdf =
-                record
-                    .material
-                    .scattering_pdf(&current_ray, &record, &scattered_ray);
-            if !scattering_pdf.is_finite() || scattering_pdf <= 0.0 {
-                return color;
-            }
-
-            attenuation = component_mul(
-                attenuation,
-                scatter.attenuation * (scattering_pdf / pdf_value),
-            );
-            current_ray = scattered_ray;
         }
 
         color
+    }
+
+    fn russian_roulette_survives(
+        bounce_index: u32,
+        min_depth: Option<u32>,
+        attenuation: &mut LinearColor,
+        rng: &mut SampleRng,
+    ) -> bool {
+        if min_depth.is_none_or(|min_depth| bounce_index < min_depth) {
+            return true;
+        }
+
+        let max_component = attenuation.max_component();
+        if !max_component.is_finite() || max_component <= f64::EPSILON {
+            return false;
+        }
+
+        let survival_probability = max_component.clamp(
+            RUSSIAN_ROULETTE_MIN_SURVIVAL_PROBABILITY,
+            RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY,
+        );
+        if rng.random_double() >= survival_probability {
+            return false;
+        }
+
+        *attenuation = *attenuation / survival_probability;
+        true
     }
 
     fn render_world_pixel(
@@ -888,39 +1065,125 @@ impl RayCamera {
 
         match self.pixel_sample_mode {
             PixelSampleMode::Random => {
-                for _ in 0..sample_count {
-                    let ray = self.ray_for_pixel_sample(x, y, &mut rng);
-                    pixel_color += Self::ray_color(
-                        &ray,
-                        self.max_depth,
-                        world,
-                        lights,
-                        self.background,
-                        &mut rng,
-                    );
+                if let Some(settings) = self.adaptive_sampling {
+                    pixel_color = self.render_world_pixel_adaptive(x, y, world, lights, settings);
+                } else {
+                    for _ in 0..sample_count {
+                        Self::add_finite_sample(
+                            &mut pixel_color,
+                            self.sample_world_color(x, y, world, lights, &mut rng),
+                        );
+                    }
+                    pixel_color = pixel_color / f64::from(sample_count);
                 }
             }
-            PixelSampleMode::Stratified => {
-                let grid_width = Self::stratified_grid_width(self.samples_per_pixel);
+            PixelSampleMode::Stratified | PixelSampleMode::StratifiedGrid { .. } => {
+                let grid_width = self.active_stratified_grid_width();
                 for sample_y in 0..grid_width {
                     for sample_x in 0..grid_width {
                         let ray = self.ray_for_pixel_stratified_sample(
                             x, y, sample_x, sample_y, grid_width, &mut rng,
                         );
-                        pixel_color += Self::ray_color(
-                            &ray,
-                            self.max_depth,
-                            world,
-                            lights,
-                            self.background,
-                            &mut rng,
+                        Self::add_finite_sample(
+                            &mut pixel_color,
+                            Self::ray_color(
+                                &ray,
+                                self.max_depth,
+                                world,
+                                lights,
+                                self.background,
+                                self.russian_roulette_min_depth,
+                                &mut rng,
+                            ),
                         );
                     }
                 }
+                pixel_color = pixel_color / f64::from(sample_count);
             }
         }
 
-        Rgb::from_linear_color(pixel_color / f64::from(sample_count))
+        Rgb::from_linear_color(pixel_color)
+    }
+
+    fn sample_world_color(
+        self,
+        x: u32,
+        y: u32,
+        world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
+        rng: &mut SampleRng,
+    ) -> LinearColor {
+        let ray = self.ray_for_pixel_sample(x, y, rng);
+        Self::ray_color(
+            &ray,
+            self.max_depth,
+            world,
+            lights,
+            self.background,
+            self.russian_roulette_min_depth,
+            rng,
+        )
+    }
+
+    fn render_world_pixel_adaptive(
+        self,
+        x: u32,
+        y: u32,
+        world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
+        settings: AdaptiveSampling,
+    ) -> LinearColor {
+        let mut rng = SampleRng::new(Self::pixel_seed(self.rng_seed, x, y));
+        let mut mean = LinearColor::default();
+        let mut m2 = LinearColor::default();
+        let mut accepted_samples = 0;
+
+        for _ in 0..settings.max_samples {
+            let sample = self.sample_world_color(x, y, world, lights, &mut rng);
+            if !sample.is_finite() {
+                continue;
+            }
+
+            accepted_samples += 1;
+            let count = f64::from(accepted_samples);
+            let delta = sample - mean;
+            mean += delta / count;
+            let delta2 = sample - mean;
+            m2 += delta.component_mul(delta2);
+
+            if accepted_samples >= settings.min_samples
+                && Self::adaptive_error(m2, accepted_samples) < settings.error_threshold
+            {
+                break;
+            }
+        }
+
+        mean
+    }
+
+    fn adaptive_error(m2: LinearColor, sample_count: u32) -> f64 {
+        if sample_count <= 1 {
+            return f64::INFINITY;
+        }
+
+        (m2 / f64::from(sample_count - 1))
+            .max_component()
+            .max(0.0)
+            .sqrt()
+    }
+
+    fn add_finite_sample(pixel_color: &mut LinearColor, sample: LinearColor) {
+        if sample.is_finite() {
+            *pixel_color += sample;
+        }
+    }
+
+    fn active_stratified_grid_width(self) -> u32 {
+        match self.pixel_sample_mode {
+            PixelSampleMode::Random => 1,
+            PixelSampleMode::Stratified => Self::stratified_grid_width(self.samples_per_pixel),
+            PixelSampleMode::StratifiedGrid { grid_width } => grid_width.max(1),
+        }
     }
 
     fn render_normal_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
@@ -935,8 +1198,8 @@ impl RayCamera {
                     pixel_color += normal_scene_color(&ray, world);
                 }
             }
-            PixelSampleMode::Stratified => {
-                let grid_width = Self::stratified_grid_width(self.samples_per_pixel);
+            PixelSampleMode::Stratified | PixelSampleMode::StratifiedGrid { .. } => {
+                let grid_width = self.active_stratified_grid_width();
                 for sample_y in 0..grid_width {
                     for sample_x in 0..grid_width {
                         let ray = self.ray_for_pixel_stratified_sample(
@@ -975,6 +1238,9 @@ impl RayCamera {
     }
 
     /// Renders a hittable world while importance-sampling directions toward `lights`.
+    ///
+    /// Pass a lights-only or otherwise important target set here; passing the full scene is valid
+    /// but usually raises variance by sampling non-emissive geometry.
     pub fn render_world_with_lights(self, world: &dyn Hittable, lights: &dyn Hittable) -> Canvas {
         self.render_world_with_optional_lights(world, Some(lights))
     }
@@ -1265,8 +1531,24 @@ mod tests {
         assert_eq!(camera.image_height(), 22);
         assert_eq!(camera.samples_per_pixel(), 25);
         assert_eq!(camera.max_depth(), 50);
+        assert_eq!(camera.russian_roulette_min_depth(), Some(5));
         assert_close(camera.defocus_angle(), 0.0);
         assert_close(camera.focus_distance(), 1.0);
+    }
+
+    #[test]
+    fn ray_camera_tracks_russian_roulette_setting() {
+        let camera = RayCamera::default()
+            .with_russian_roulette_min_depth(3)
+            .without_russian_roulette();
+
+        assert_eq!(camera.russian_roulette_min_depth(), None);
+        assert_eq!(
+            camera
+                .with_russian_roulette_min_depth(7)
+                .russian_roulette_min_depth(),
+            Some(7)
+        );
     }
 
     #[test]
@@ -1278,6 +1560,52 @@ mod tests {
         assert_eq!(camera.samples_per_pixel(), 50);
         assert_eq!(camera.pixel_sample_mode(), PixelSampleMode::Stratified);
         assert_eq!(camera.effective_samples_per_pixel(), 49);
+    }
+
+    #[test]
+    fn ray_camera_tracks_adaptive_sampling_settings() {
+        let camera = RayCamera::new(40, 1.0).with_adaptive_sampling(16, 128, 0.01);
+
+        assert_eq!(
+            camera.adaptive_sampling(),
+            Some(AdaptiveSampling {
+                min_samples: 16,
+                max_samples: 128,
+                error_threshold: 0.01,
+            })
+        );
+        assert_eq!(camera.samples_per_pixel(), 128);
+        assert_eq!(camera.effective_samples_per_pixel(), 128);
+        assert_eq!(camera.without_adaptive_sampling().adaptive_sampling(), None);
+    }
+
+    #[test]
+    fn adaptive_sampling_settings_are_sanitized() {
+        let settings = AdaptiveSampling::new(0, 0, 0.5);
+
+        assert_eq!(settings.min_samples, 1);
+        assert_eq!(settings.max_samples, 1);
+        assert_close(settings.error_threshold, 0.5);
+    }
+
+    #[test]
+    fn adaptive_error_uses_largest_channel_variance() {
+        let m2 = LinearColor::new(1.0, 4.0, 9.0);
+
+        assert_close(RayCamera::adaptive_error(m2, 4), 3.0_f64.sqrt());
+        assert!(RayCamera::adaptive_error(m2, 1).is_infinite());
+    }
+
+    #[test]
+    fn ray_camera_supports_explicit_stratified_grid_width() {
+        let camera = RayCamera::new(40, 1.0).with_stratified_grid_width(32);
+
+        assert_eq!(camera.samples_per_pixel(), 1024);
+        assert_eq!(
+            camera.pixel_sample_mode(),
+            PixelSampleMode::StratifiedGrid { grid_width: 32 }
+        );
+        assert_eq!(camera.effective_samples_per_pixel(), 1024);
     }
 
     #[test]
@@ -1294,6 +1622,64 @@ mod tests {
                 assert_close(offset.z(), 0.0);
             }
         }
+    }
+
+    #[test]
+    fn russian_roulette_skips_until_configured_depth() {
+        let mut rng = SampleRng::new(41);
+        let mut attenuation = LinearColor::default();
+
+        assert!(RayCamera::russian_roulette_survives(
+            3,
+            Some(5),
+            &mut attenuation,
+            &mut rng
+        ));
+        assert_eq!(attenuation, LinearColor::default());
+
+        assert!(RayCamera::russian_roulette_survives(
+            5,
+            None,
+            &mut attenuation,
+            &mut rng
+        ));
+    }
+
+    #[test]
+    fn russian_roulette_terminates_zero_throughput() {
+        let mut rng = SampleRng::new(43);
+        let mut attenuation = LinearColor::default();
+
+        assert!(!RayCamera::russian_roulette_survives(
+            5,
+            Some(5),
+            &mut attenuation,
+            &mut rng
+        ));
+    }
+
+    #[test]
+    fn russian_roulette_scales_surviving_throughput() {
+        let survived = (0..100).find_map(|seed| {
+            let mut rng = SampleRng::new(seed);
+            let mut attenuation = LinearColor::new(2.0, 1.0, 0.5);
+            RayCamera::russian_roulette_survives(5, Some(5), &mut attenuation, &mut rng)
+                .then_some(attenuation)
+        });
+
+        let attenuation = survived.expect("at least one deterministic seed should survive");
+        assert_close(
+            attenuation.x(),
+            2.0 / RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY,
+        );
+        assert_close(
+            attenuation.y(),
+            1.0 / RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY,
+        );
+        assert_close(
+            attenuation.z(),
+            0.5 / RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY,
+        );
     }
 
     #[test]

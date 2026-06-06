@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     for (name, canvas) in renders {
-        let path = format!("final/raytracing/{name}.ppm");
-        canvas.save_binary(&path)?;
+        let path = format!("final/raytracing/{name}.png");
+        canvas.save_extension(&path)?;
         println!("saved {path}");
     }
 

@@ -1,4 +1,7 @@
-//! Minimal ray-tracing helpers following the early "Ray Tracing in One Weekend" steps.
+//! Ray-tracing helpers following the "Ray Tracing" book series.
+//!
+//! Shared renderer-neutral APIs use [`LinearRgb`]. The ray-tracing module keeps
+//! [`LinearColor`] as a compatibility alias for the terminology used by the books and examples.
 
 pub use crate::gmath::random::SampleRng;
 mod bvh;
@@ -25,14 +28,25 @@ pub use material::{
 };
 pub use mesh::{MeshTriangle, TriangleMesh};
 pub use object::{
-    HitRecord, Hittable, Intersect, Interval, MovingSphere, Quad, RayGeometry, SceneObject, Sphere,
-    SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
+    HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
+    SceneObject, Sphere, SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
 };
 pub use pdf::{CosinePdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf};
 pub use renderer::PathTracer;
-pub use scene::{BvhNode, HittableList, MaterialId, RayPrimitive, RayScene, SphereList};
-pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, RayTexture, SolidColor, TextureRef};
+pub use scene::{
+    BvhNode, HittableList, MaterialId, RayPrimitive, RayScene, SamplingTargetList, SphereList,
+};
+pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, SolidColor, TextureRef};
 pub use volume::ConstantMedium;
+
+/// Common ray-tracing types for `use gartus::graphics::raytracing::prelude::*`.
+pub mod prelude {
+    pub use super::{
+        Dielectric, DiffuseLight, Lambertian, LinearColor, MaterialId, Metal, PathTracer, Quad,
+        RayGeometry, RayMaterial, RayPrimitive, RayScene, SamplingTargetList, Sphere,
+    };
+    pub use crate::graphics::camera::{AdaptiveSampling, RayCamera};
+}
 
 /// Floating-point infinity for ray intervals.
 pub const INFINITY: f64 = f64::INFINITY;
@@ -99,7 +113,10 @@ mod tests {
     };
     use crate::graphics::lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex};
     use crate::graphics::raytracing::object::sphere_uv;
-    use crate::graphics::{camera::RayCamera, display::Canvas};
+    use crate::graphics::texture::{SurfaceTexture, TextureSample};
+    use crate::graphics::{
+        camera::RayCamera, display::Canvas, material::SurfaceMaterial, scene::SurfaceScene,
+    };
     use std::sync::Arc;
 
     fn assert_close(actual: f64, expected: f64) {
@@ -154,6 +171,15 @@ mod tests {
     }
 
     #[test]
+    fn cosine_pdf_values_accept_non_unit_directions() {
+        let pdf = CosinePdf::new(Vector::new(0.0, 1.0, 0.0)).expect("valid normal");
+
+        assert_close(pdf.value(Vector::new(0.0, 2.0, 0.0)), 1.0 / PI);
+        assert_close(pdf.value(Vector::default()), 0.0);
+        assert_close(pdf.value(Vector::new(0.0, -2.0, 0.0)), 0.0);
+    }
+
+    #[test]
     fn first_sphere_render_has_red_center() {
         let canvas = RayCamera::new(40, WIDESCREEN_ASPECT_RATIO).render(first_sphere_color);
         let center = canvas
@@ -161,6 +187,29 @@ mod tests {
             .expect("center pixel should be inside the canvas");
 
         assert_eq!(*center, Rgb::RED);
+    }
+
+    #[test]
+    fn surface_scene_converts_to_lambertian_ray_scene() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((0.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 1.0, -1.0));
+        let material = SurfaceMaterial::new(
+            LinearColor::new(0.1, 0.2, 0.3),
+            LinearColor::new(0.4, 0.5, 0.6),
+            LinearColor::new(0.7, 0.8, 0.9),
+            16.0,
+        );
+        let mut scene = SurfaceScene::new();
+
+        scene.add_mesh(polygons, material);
+        let ray_scene = scene.to_ray_scene();
+
+        assert_eq!(ray_scene.len(), 1);
+        assert_eq!(ray_scene.material_count(), 1);
+        assert!(matches!(
+            ray_scene.material(0),
+            Some(RayMaterial::Lambertian(_))
+        ));
     }
 
     #[test]
@@ -249,7 +298,7 @@ mod tests {
         let texture = SolidColor::new(LinearColor::new(0.2, 0.4, 0.6));
 
         assert_eq!(
-            texture.value(0.75, 0.25, Point::new(10.0, -4.0, 2.0)),
+            texture.sample_linear(TextureSample::new(0.75, 0.25, Point::new(10.0, -4.0, 2.0))),
             LinearColor::new(0.2, 0.4, 0.6)
         );
     }
@@ -263,11 +312,11 @@ mod tests {
         );
 
         assert_eq!(
-            texture.value(0.0, 0.0, Point::new(0.1, 0.1, 0.1)),
+            texture.sample_linear(TextureSample::new(0.0, 0.0, Point::new(0.1, 0.1, 0.1))),
             LinearColor::new(0.1, 0.2, 0.3)
         );
         assert_eq!(
-            texture.value(0.0, 0.0, Point::new(1.1, 0.1, 0.1)),
+            texture.sample_linear(TextureSample::new(0.0, 0.0, Point::new(1.1, 0.1, 0.1))),
             LinearColor::new(0.8, 0.7, 0.6)
         );
     }
@@ -278,11 +327,11 @@ mod tests {
             ImageTexture::from_canvas(Canvas::from_pixels(2, 1, vec![Rgb::RED, Rgb::GREEN]));
 
         assert_eq!(
-            texture.value(0.0, 0.5, Point::new(0.0, 0.0, 0.0)),
+            texture.sample_linear(TextureSample::new(0.0, 0.5, Point::new(0.0, 0.0, 0.0))),
             LinearColor::new(1.0, 0.0, 0.0)
         );
         assert_eq!(
-            texture.value(1.0, 0.5, Point::new(0.0, 0.0, 0.0)),
+            texture.sample_linear(TextureSample::new(1.0, 0.5, Point::new(0.0, 0.0, 0.0))),
             LinearColor::new(0.0, 1.0, 0.0)
         );
     }
@@ -312,9 +361,15 @@ mod tests {
             .scatter(&ray, &hit, &mut rng)
             .expect("lambertian should scatter");
 
-        assert_eq!(scatter.attenuation, LinearColor::new(0.8, 0.7, 0.6));
-        assert!(scatter.pdf.is_some());
-        assert!(!scatter.skip_pdf);
+        assert_eq!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation: LinearColor::new(0.8, 0.7, 0.6),
+                pdf: MaterialPdf::Cosine(
+                    CosinePdf::new(Vector::new(0.0, 1.0, 0.0)).expect("normal should create pdf")
+                )
+            }
+        );
     }
 
     #[test]
@@ -364,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn isotropic_scatter_uses_random_direction_and_texture_attenuation() {
+    fn isotropic_scatter_uses_sphere_pdf_and_texture_attenuation() {
         let material = Isotropic::new(LinearColor::new(0.25, 0.5, 0.75));
         let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.5);
         let hit = HitRecord {
@@ -384,10 +439,13 @@ mod tests {
             .scatter(&ray, &hit, &mut rng)
             .expect("isotropic medium should scatter");
 
-        assert_eq!(scatter.ray.origin(), &hit.point);
-        assert_close(scatter.ray.direction().length(), 1.0);
-        assert_close(scatter.ray.time(), ray.time());
-        assert_eq!(scatter.attenuation, LinearColor::new(0.25, 0.5, 0.75));
+        assert_eq!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation: LinearColor::new(0.25, 0.5, 0.75),
+                pdf: MaterialPdf::Sphere(SpherePdf)
+            }
+        );
     }
 
     #[test]
@@ -457,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn lambertian_scatter_returns_attenuated_ray_from_hit_point() {
+    fn lambertian_scatter_returns_attenuation_and_pdf() {
         let material = Lambertian::new(LinearColor::new(0.2, 0.4, 0.6));
         let sphere = Sphere::with_material(Point::new(0.0, 0.0, -1.0), 0.5, material);
         let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
@@ -471,29 +529,34 @@ mod tests {
             .scatter(&ray, &hit, &mut rng)
             .expect("lambertian should scatter");
 
-        assert_eq!(scatter.ray.origin(), &hit.point);
-        assert_close(scatter.ray.time(), ray.time());
-        assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
-        assert!(scatter.pdf.is_some());
-        assert!(!scatter.skip_pdf);
+        assert_eq!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation: LinearColor::new(0.2, 0.4, 0.6),
+                pdf: MaterialPdf::Cosine(
+                    CosinePdf::new(hit.shading_normal).expect("normal should create pdf")
+                )
+            }
+        );
     }
 
     #[test]
     fn lambertian_scattering_pdf_is_cosine_weighted() {
         let material = Lambertian::new(LinearColor::new(0.2, 0.4, 0.6));
         let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, -1.0, 0.0));
-        let hit = HitRecord::new(
+        let mut hit = HitRecord::new(
             &ray,
             Point::new(0.0, 0.0, 0.0),
             Vector::new(0.0, 1.0, 0.0),
             1.0,
             &material,
         );
+        hit.set_shading_normal(Vector::new(1.0, 0.0, 0.0));
         let upward = Ray::new(hit.point, Vector::new(0.0, 1.0, 0.0));
         let tangent = Ray::new(hit.point, Vector::new(1.0, 0.0, 0.0));
 
-        assert_close(material.scattering_pdf(&ray, &hit, &upward), 1.0 / PI);
-        assert_close(material.scattering_pdf(&ray, &hit, &tangent), 0.0);
+        assert_close(material.scattering_pdf(&ray, &hit, &upward), 0.0);
+        assert_close(material.scattering_pdf(&ray, &hit, &tangent), 1.0 / PI);
     }
 
     #[test]
@@ -520,6 +583,20 @@ mod tests {
     }
 
     #[test]
+    fn moving_sphere_pdf_uses_sampling_context_time() {
+        let sphere =
+            MovingSphere::new(Point::new(0.0, 0.0, -1.0), Point::new(0.0, 1.0, -1.0), 0.25);
+        let origin = Point::new(0.0, 0.0, 0.0);
+        let late_direction = Vector::new(0.0, 1.0, -1.0);
+
+        assert_close(
+            sphere.pdf_value(PdfContext::new(origin, 0.0), late_direction),
+            0.0,
+        );
+        assert!(sphere.pdf_value(PdfContext::new(origin, 1.0), late_direction) > 0.0);
+    }
+
+    #[test]
     fn quad_hit_records_texture_coordinates_and_material() {
         let quad = Quad::with_material(
             Point::new(-2.0, -2.0, -1.0),
@@ -543,7 +620,13 @@ mod tests {
         assert_close(record.u, 0.5);
         assert_close(record.v, 0.75);
         assert_eq!(record.normal, Vector::new(0.0, 0.0, 1.0));
-        assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+        assert!(matches!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation,
+                pdf: MaterialPdf::Cosine(_),
+            } if attenuation == LinearColor::new(0.2, 0.4, 0.6)
+        ));
         assert!(quad.bounding_box().is_some());
     }
 
@@ -555,12 +638,13 @@ mod tests {
             Vector::new(0.0, 2.0, 0.0),
         );
         let origin = Point::new(0.0, 0.0, 0.0);
+        let context = PdfContext::new(origin, 0.0);
 
-        assert_close(quad.pdf_value(origin, Vector::new(0.0, 0.0, -1.0)), 0.25);
-        assert_close(quad.pdf_value(origin, Vector::new(0.0, 1.0, 0.0)), 0.0);
+        assert_close(quad.pdf_value(context, Vector::new(0.0, 0.0, -1.0)), 0.25);
+        assert_close(quad.pdf_value(context, Vector::new(0.0, 1.0, 0.0)), 0.0);
 
         let mut rng = SampleRng::new(31);
-        assert!(quad.random_direction(origin, &mut rng).z() < 0.0);
+        assert!(quad.random_direction(context, &mut rng).z() < 0.0);
     }
 
     #[test]
@@ -569,11 +653,17 @@ mod tests {
         let solid_angle = 2.0 * PI * (1.0_f64 - 0.75_f64.sqrt());
 
         assert_close(
-            sphere.pdf_value(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+            sphere.pdf_value(
+                PdfContext::new(Point::new(0.0, 0.0, 0.0), 0.0),
+                Vector::new(0.0, 0.0, -1.0),
+            ),
             1.0 / solid_angle,
         );
         assert_close(
-            sphere.pdf_value(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0)),
+            sphere.pdf_value(
+                PdfContext::new(Point::new(0.0, 0.0, 0.0), 0.0),
+                Vector::new(0.0, 1.0, 0.0),
+            ),
             0.0,
         );
     }
@@ -660,6 +750,24 @@ mod tests {
     }
 
     #[test]
+    fn scaled_matrix_instance_does_not_advertise_solid_angle_pdf() {
+        let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let transform = Matrix::translate(2.0, 0.0, 0.0) * Matrix::scale(2.0, 1.0, 1.0);
+        let instance = MatrixInstance::new(sphere, transform).expect("transform should invert");
+        let context = PdfContext::new(Point::new(2.0, 0.0, 0.0), 0.0);
+        let mut rng = SampleRng::new(83);
+
+        assert_eq!(
+            instance.pdf_value(context, Vector::new(0.0, 0.0, -1.0)),
+            0.0
+        );
+        assert_eq!(
+            instance.random_direction(context, &mut rng),
+            Vector::new(1.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
     fn constant_medium_samples_hit_inside_boundary() {
         let boundary = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
         let medium = ConstantMedium::new(boundary, 1.0e9, LinearColor::new(1.0, 1.0, 1.0));
@@ -692,10 +800,13 @@ mod tests {
             .scatter(&ray, &hit, &mut rng)
             .expect("front-face metal hit should scatter");
 
-        assert_eq!(scatter.ray.origin(), &hit.point);
-        assert_eq!(scatter.ray.direction(), &Vector::new(0.0, 0.0, 1.0));
-        assert_close(scatter.ray.time(), ray.time());
-        assert_eq!(scatter.attenuation, LinearColor::new(0.8, 0.8, 0.8));
+        assert_eq!(
+            scatter,
+            ScatterRecord::Specular {
+                ray: Ray::with_time(hit.point, Vector::new(0.0, 0.0, 1.0), ray.time()),
+                attenuation: LinearColor::new(0.8, 0.8, 0.8)
+            }
+        );
     }
 
     #[test]
@@ -717,10 +828,13 @@ mod tests {
             .scatter(&ray, &hit, &mut rng)
             .expect("dielectric should scatter");
 
-        assert_eq!(scatter.ray.origin(), &hit.point);
-        assert_eq!(scatter.ray.direction(), &Vector::new(0.0, 0.0, -1.0));
-        assert_close(scatter.ray.time(), ray.time());
-        assert_eq!(scatter.attenuation, LinearColor::new(1.0, 1.0, 1.0));
+        assert_eq!(
+            scatter,
+            ScatterRecord::Specular {
+                ray: Ray::with_time(hit.point, Vector::new(0.0, 0.0, -1.0), ray.time()),
+                attenuation: LinearColor::new(1.0, 1.0, 1.0)
+            }
+        );
     }
 
     #[test]
@@ -821,7 +935,13 @@ mod tests {
         assert_eq!(scene.len(), 1);
         assert_eq!(scene.material_count(), 1);
         assert!(scene.has_bvh());
-        assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+        assert!(matches!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation,
+                pdf: MaterialPdf::Cosine(_),
+            } if attenuation == LinearColor::new(0.2, 0.4, 0.6)
+        ));
     }
 
     #[test]
@@ -944,6 +1064,43 @@ mod tests {
         assert_eq!(tracer.camera().image_width(), 4);
         assert_eq!(canvas.width(), 4);
         assert!(canvas.upper_left_origin);
+    }
+
+    #[test]
+    fn path_tracer_renders_shared_surface_scene() {
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((-0.5, -0.5, -1.0), (0.5, -0.5, -1.0), (0.0, 0.5, -1.0));
+        let mut scene = SurfaceScene::new();
+        scene.add_mesh(polygons, SurfaceMaterial::default());
+
+        let canvas = PathTracer::new(
+            RayCamera::new(2, 1.0)
+                .with_samples_per_pixel(1)
+                .with_max_depth(1),
+        )
+        .render_scene(&scene);
+
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 2);
+    }
+
+    #[test]
+    fn sampling_target_list_samples_explicit_targets() {
+        let mut targets = SamplingTargetList::new();
+        targets.add_quad(
+            Point::new(-1.0, -1.0, -1.0),
+            Vector::new(2.0, 0.0, 0.0),
+            Vector::new(0.0, 2.0, 0.0),
+        );
+        let context = PdfContext::new(Point::new(0.0, 0.0, 0.0), 0.0);
+        let mut rng = SampleRng::new(113);
+
+        assert_eq!(targets.len(), 1);
+        assert_close(
+            targets.pdf_value(context, Vector::new(0.0, 0.0, -1.0)),
+            0.25,
+        );
+        assert!(targets.random_direction(context, &mut rng).z() < 0.0);
     }
 
     #[test]
