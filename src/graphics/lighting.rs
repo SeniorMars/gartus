@@ -1,6 +1,9 @@
 //! Phong reflection lighting for polygon fills.
 
-use crate::{gmath::vector::Vector, graphics::colors::Rgb};
+use crate::{
+    gmath::vector::Vector,
+    graphics::colors::{LinearRgb, Rgb},
+};
 
 /// Default specular exponent from the course lighting source.
 pub const DEFAULT_SPECULAR_EXPONENT: u32 = 4;
@@ -244,6 +247,85 @@ impl PhongMaterial {
     );
 }
 
+/// Renderer-neutral surface material data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceMaterial {
+    /// Ambient/base occlusion color used by local lighting renderers.
+    pub ambient_color: LinearRgb,
+    /// Diffuse/base surface color.
+    pub base_color: LinearRgb,
+    /// Specular reflection color.
+    pub specular_color: LinearRgb,
+    /// Specular exponent or roughness hint, depending on renderer.
+    pub shininess: f64,
+    /// Optional refractive index for transparent materials.
+    pub refractive_index: Option<RefractiveIndex>,
+    /// Optional diffuse texture path or key.
+    pub diffuse_texture: Option<std::path::PathBuf>,
+}
+
+impl SurfaceMaterial {
+    /// Creates an opaque surface material.
+    #[must_use]
+    pub fn new(
+        ambient_color: LinearRgb,
+        base_color: LinearRgb,
+        specular_color: LinearRgb,
+        shininess: f64,
+    ) -> Self {
+        Self {
+            ambient_color,
+            base_color,
+            specular_color,
+            shininess,
+            refractive_index: None,
+            diffuse_texture: None,
+        }
+    }
+
+    /// Adds a refractive index hint.
+    #[must_use]
+    pub fn with_refractive_index(mut self, refractive_index: RefractiveIndex) -> Self {
+        self.refractive_index = Some(refractive_index);
+        self
+    }
+
+    /// Adds a diffuse texture path or cache key.
+    #[must_use]
+    pub fn with_diffuse_texture(mut self, diffuse_texture: impl Into<std::path::PathBuf>) -> Self {
+        self.diffuse_texture = Some(diffuse_texture.into());
+        self
+    }
+}
+
+impl Default for SurfaceMaterial {
+    fn default() -> Self {
+        Self::new(
+            LinearRgb::new(0.1, 0.1, 0.1),
+            LinearRgb::new(0.5, 0.5, 0.5),
+            LinearRgb::new(0.5, 0.5, 0.5),
+            f64::from(DEFAULT_SPECULAR_EXPONENT),
+        )
+    }
+}
+
+impl From<ReflectionConstants> for LinearRgb {
+    fn from(reflectance: ReflectionConstants) -> Self {
+        Self::new(reflectance.red, reflectance.green, reflectance.blue)
+    }
+}
+
+impl From<PhongMaterial> for SurfaceMaterial {
+    fn from(material: PhongMaterial) -> Self {
+        Self::new(
+            material.ambient.into(),
+            material.diffuse.into(),
+            material.specular.into(),
+            material.shininess,
+        )
+    }
+}
+
 /// Index of refraction for a transparent medium.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RefractiveIndex(pub f64);
@@ -251,8 +333,22 @@ pub struct RefractiveIndex(pub f64);
 impl RefractiveIndex {
     /// Creates a refractive index value.
     #[must_use]
-    pub const fn new(index: f64) -> Self {
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is not positive and finite.
+    pub fn new(index: f64) -> Self {
+        assert!(
+            index.is_finite() && index > 0.0,
+            "refractive index must be positive and finite"
+        );
         Self(index)
+    }
+
+    /// Creates a refractive index value, returning `None` for invalid indices.
+    #[must_use]
+    pub fn try_new(index: f64) -> Option<Self> {
+        (index.is_finite() && index > 0.0).then_some(Self(index))
     }
 
     /// Vacuum index of refraction.
@@ -275,7 +371,7 @@ impl RefractiveIndex {
     /// Returns this index relative to an enclosing medium.
     #[must_use]
     pub fn relative_to(self, enclosing: Self) -> Self {
-        Self(self.0 / enclosing.0)
+        Self::new(self.0 / enclosing.0)
     }
 }
 
@@ -662,6 +758,19 @@ mod tests {
             RefractiveIndex::AIR.relative_to(RefractiveIndex::GLASS),
             RefractiveIndex::new(RefractiveIndex::AIR.0 / RefractiveIndex::GLASS.0)
         );
+    }
+
+    #[test]
+    fn refractive_index_rejects_invalid_values() {
+        assert_eq!(RefractiveIndex::try_new(1.5), Some(RefractiveIndex(1.5)));
+        assert_eq!(RefractiveIndex::try_new(0.0), None);
+        assert_eq!(RefractiveIndex::try_new(f64::NAN), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "refractive index must be positive and finite")]
+    fn refractive_index_new_panics_on_zero() {
+        let _ = RefractiveIndex::new(0.0);
     }
 
     #[test]

@@ -1,4 +1,5 @@
-use super::{geometry::SphereGeometry, matrix::Matrix};
+use super::ray::Ray;
+use super::{geometry::SphereGeometry, matrix::Matrix, vector::Point};
 use std::f64::consts::PI;
 use std::fmt;
 
@@ -16,6 +17,186 @@ pub struct Bounds3 {
     pub min: (f64, f64, f64),
     /// Maximum x, y, and z coordinates.
     pub max: (f64, f64, f64),
+}
+
+impl Bounds3 {
+    /// Creates axis-aligned bounds from explicit min and max coordinates.
+    #[must_use]
+    pub const fn new(min: (f64, f64, f64), max: (f64, f64, f64)) -> Self {
+        Self { min, max }
+    }
+
+    /// Creates axis-aligned bounds from two opposite corners.
+    #[must_use]
+    pub fn from_points(a: Point, b: Point) -> Self {
+        Self::new(
+            (a.x().min(b.x()), a.y().min(b.y()), a.z().min(b.z())),
+            (a.x().max(b.x()), a.y().max(b.y()), a.z().max(b.z())),
+        )
+    }
+
+    /// Returns the union of two bounding boxes.
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        Self::new(
+            (
+                self.min.0.min(other.min.0),
+                self.min.1.min(other.min.1),
+                self.min.2.min(other.min.2),
+            ),
+            (
+                self.max.0.max(other.max.0),
+                self.max.1.max(other.max.1),
+                self.max.2.max(other.max.2),
+            ),
+        )
+    }
+
+    /// Returns the union of this bounding box and a point.
+    #[must_use]
+    pub fn union_point(self, point: Point) -> Self {
+        self.union(Self::from_points(point, point))
+    }
+
+    /// Returns bounds expanded along any axis thinner than `epsilon`.
+    #[must_use]
+    pub fn padded(self, epsilon: f64) -> Self {
+        let epsilon = epsilon.abs();
+        let half = 0.5 * epsilon;
+        let mut min = self.min;
+        let mut max = self.max;
+
+        if (max.0 - min.0).abs() < epsilon {
+            min.0 -= half;
+            max.0 += half;
+        }
+        if (max.1 - min.1).abs() < epsilon {
+            min.1 -= half;
+            max.1 += half;
+        }
+        if (max.2 - min.2).abs() < epsilon {
+            min.2 -= half;
+            max.2 += half;
+        }
+
+        Self { min, max }
+    }
+
+    /// Compatibility alias for [`Self::union`].
+    #[must_use]
+    pub fn surrounding(self, other: Self) -> Self {
+        self.union(other)
+    }
+
+    /// Returns the center of this bounding box.
+    #[must_use]
+    pub fn centroid(self) -> Point {
+        Point::new(
+            0.5 * (self.min.0 + self.max.0),
+            0.5 * (self.min.1 + self.max.1),
+            0.5 * (self.min.2 + self.max.2),
+        )
+    }
+
+    /// Returns the bounding box surface area.
+    #[must_use]
+    pub fn surface_area(self) -> f64 {
+        let dx = (self.max.0 - self.min.0).max(0.0);
+        let dy = (self.max.1 - self.min.1).max(0.0);
+        let dz = (self.max.2 - self.min.2).max(0.0);
+        2.0 * (dx * dy + dx * dz + dy * dz)
+    }
+
+    /// Returns the longest axis: 0 for x, 1 for y, and 2 for z.
+    #[must_use]
+    pub fn largest_axis(self) -> usize {
+        let dx = self.max.0 - self.min.0;
+        let dy = self.max.1 - self.min.1;
+        let dz = self.max.2 - self.min.2;
+        if dx >= dy && dx >= dz {
+            0
+        } else if dy >= dz {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Compatibility alias for [`Self::largest_axis`].
+    #[must_use]
+    pub fn longest_axis(self) -> usize {
+        self.largest_axis()
+    }
+
+    /// Returns the minimum coordinate for an axis.
+    ///
+    /// # Panics
+    /// Panics if `axis` is not 0, 1, or 2.
+    #[must_use]
+    pub fn axis_min(self, axis: usize) -> f64 {
+        match axis {
+            0 => self.min.0,
+            1 => self.min.1,
+            2 => self.min.2,
+            _ => panic!("bounds axis index out of bounds"),
+        }
+    }
+
+    /// Returns the maximum coordinate for an axis.
+    ///
+    /// # Panics
+    /// Panics if `axis` is not 0, 1, or 2.
+    #[must_use]
+    pub fn axis_max(self, axis: usize) -> f64 {
+        match axis {
+            0 => self.max.0,
+            1 => self.max.1,
+            2 => self.max.2,
+            _ => panic!("bounds axis index out of bounds"),
+        }
+    }
+
+    /// Returns true if `ray` intersects this box in `t_min..t_max`.
+    #[must_use]
+    pub fn hit_ray(&self, ray: &Ray, mut t_min: f64, mut t_max: f64) -> bool {
+        let origin = [ray.origin().x(), ray.origin().y(), ray.origin().z()];
+        let direction = [
+            ray.direction().x(),
+            ray.direction().y(),
+            ray.direction().z(),
+        ];
+        let min = [self.min.0, self.min.1, self.min.2];
+        let max = [self.max.0, self.max.1, self.max.2];
+
+        for axis in 0..3 {
+            if direction[axis].abs() <= f64::EPSILON {
+                if origin[axis] < min[axis] || origin[axis] > max[axis] {
+                    return false;
+                }
+                continue;
+            }
+
+            let inv_direction = 1.0 / direction[axis];
+            let mut t0 = (min[axis] - origin[axis]) * inv_direction;
+            let mut t1 = (max[axis] - origin[axis]) * inv_direction;
+            if inv_direction < 0.0 {
+                std::mem::swap(&mut t0, &mut t1);
+            }
+            t_min = t_min.max(t0);
+            t_max = t_max.min(t1);
+            if t_max <= t_min {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Compatibility alias for [`Self::hit_ray`].
+    #[must_use]
+    pub fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> bool {
+        self.hit_ray(ray, t_min, t_max)
+    }
 }
 
 /// Scaling options for converting a row-major height map into a triangle mesh.
@@ -894,7 +1075,7 @@ impl fmt::Display for PolygonMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{Canvas, Rgb};
+    use crate::prelude::{Canvas, Rgb, Vector};
 
     #[test]
     fn point_matrix_has_four_rows_and_zero_cols() {
@@ -1227,5 +1408,42 @@ mod tests {
         assert_eq!((p0[0], p0[1], p0[2]), (-5.0, 0.0, -10.0));
         assert_eq!((p1[0], p1[1], p1[2]), (-5.0, 1.0, 10.0));
         assert_eq!((p2[0], p2[1], p2[2]), (5.0, 0.5, 10.0));
+    }
+
+    #[test]
+    fn bounds3_unions_points_and_reports_surface_area() {
+        let bounds = Bounds3::from_points(Point::new(0.0, 0.0, 0.0), Point::new(1.0, 1.0, 1.0))
+            .union_point(Point::new(2.0, -1.0, 0.5));
+
+        assert_eq!(bounds.min, (0.0, -1.0, 0.0));
+        assert_eq!(bounds.max, (2.0, 1.0, 1.0));
+        assert_eq!(bounds.centroid(), Point::new(1.0, 0.0, 0.5));
+        assert!((bounds.surface_area() - 16.0).abs() < 1e-10);
+        assert_eq!(bounds.largest_axis(), 0);
+    }
+
+    #[test]
+    fn bounds3_padding_expands_flat_axes() {
+        let bounds =
+            Bounds3::from_points(Point::new(1.0, 2.0, 3.0), Point::new(4.0, 2.0, 3.0)).padded(0.2);
+
+        assert!((bounds.min.0 - 1.0).abs() < 1e-10);
+        assert!((bounds.max.0 - 4.0).abs() < 1e-10);
+        assert!((bounds.min.1 - 1.9).abs() < 1e-10);
+        assert!((bounds.max.1 - 2.1).abs() < 1e-10);
+        assert!((bounds.min.2 - 2.9).abs() < 1e-10);
+        assert!((bounds.max.2 - 3.1).abs() < 1e-10);
+    }
+    #[test]
+    fn bounds3_slab_test_hits_and_misses() {
+        use crate::gmath::ray::Ray;
+
+        let bounds = Bounds3::from_points(Point::new(-1.0, -1.0, -1.0), Point::new(1.0, 1.0, 1.0));
+
+        let hit = Ray::new(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, -1.0));
+        assert!(bounds.hit_ray(&hit, 0.0, f64::INFINITY));
+
+        let miss = Ray::new(Point::new(2.0, 0.0, 3.0), Vector::new(0.0, 0.0, -1.0));
+        assert!(!bounds.hit_ray(&miss, 0.0, f64::INFINITY));
     }
 }

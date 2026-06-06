@@ -11,7 +11,11 @@ use crate::gmath::{
     matrix::Matrix,
     polygon_matrix::{Bounds3, PolygonMatrix},
 };
-use crate::graphics::{colors::Rgb, draw::VertexNormalPlan};
+use crate::graphics::{
+    colors::{LinearRgb, Rgb},
+    draw::VertexNormalPlan,
+    lighting::SurfaceMaterial,
+};
 
 type MeshResult<T> = Result<T, MeshError>;
 type Point3 = (f64, f64, f64);
@@ -126,6 +130,25 @@ pub struct MeshMaterial {
 impl MeshMaterial {
     fn diffuse_color(&self) -> Option<Rgb> {
         self.diffuse.map(rgb_from_unit_color)
+    }
+}
+
+impl From<MeshMaterial> for SurfaceMaterial {
+    fn from(material: MeshMaterial) -> Self {
+        let to_color = |coefficients: Option<[f64; 3]>, fallback: LinearRgb| {
+            coefficients.map_or(fallback, |[red, green, blue]| {
+                LinearRgb::new(red, green, blue)
+            })
+        };
+
+        let mut surface = SurfaceMaterial::new(
+            to_color(material.ambient, LinearRgb::new(0.0, 0.0, 0.0)),
+            to_color(material.diffuse, LinearRgb::new(0.5, 0.5, 0.5)),
+            to_color(material.specular, LinearRgb::new(0.0, 0.0, 0.0)),
+            1.0,
+        );
+        surface.diffuse_texture = material.diffuse_texture;
+        surface
     }
 }
 
@@ -614,15 +637,7 @@ fn bounds_for_material_groups(groups: &[MaterialMeshGroup]) -> Option<Bounds3> {
     groups
         .iter()
         .filter_map(|group| group.polygons.bounds())
-        .reduce(|mut acc, bounds| {
-            acc.min.0 = acc.min.0.min(bounds.min.0);
-            acc.min.1 = acc.min.1.min(bounds.min.1);
-            acc.min.2 = acc.min.2.min(bounds.min.2);
-            acc.max.0 = acc.max.0.max(bounds.max.0);
-            acc.max.1 = acc.max.1.max(bounds.max.1);
-            acc.max.2 = acc.max.2.max(bounds.max.2);
-            acc
-        })
+        .reduce(Bounds3::union)
 }
 
 fn resolve_sibling_path(source: &Path, filename: &str) -> PathBuf {

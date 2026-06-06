@@ -1,18 +1,18 @@
 use super::colors::Rgb;
-#[cfg(feature = "fancy_math")]
+use crate::gmath::random::SampleRng;
 use crate::gmath::ray::Ray;
-use crate::gmath::vector::{Point, Vector};
-#[cfg(feature = "fancy_math")]
-use crate::graphics::raytracing::{
-    Hittable, INFINITY, Interval, SampleRng, degrees_to_radians, sky_gradient,
+use crate::gmath::{
+    geometry::CameraPose,
+    vector::{Point, Vector},
 };
-#[cfg(feature = "fancy_math")]
-use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, linear_color_to_rgb, normal_scene_color};
+use crate::graphics::raytracing::{
+    Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians, sky_gradient,
+};
+use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, normal_scene_color};
 use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
 };
-#[cfg(feature = "fancy_math")]
 use std::io::{self, Write};
 
 /// A simple perspective camera for projecting 3D points onto a 2D canvas.
@@ -52,7 +52,6 @@ pub struct ProjectedSegment {
 }
 
 /// A simple pinhole camera that emits one ray through each image pixel.
-#[cfg(feature = "fancy_math")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RayCamera {
     aspect_ratio: f64,
@@ -75,7 +74,6 @@ pub struct RayCamera {
     defocus_disk_v: Vector,
 }
 
-#[cfg(feature = "fancy_math")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RayCameraParams {
     image_width: u32,
@@ -193,18 +191,8 @@ impl Camera3D {
 
     fn camera_frame(&self) -> Option<(Point, Vector, Vector, Vector)> {
         let lookfrom = self.effective_lookfrom();
-        let forward = (self.lookat - lookfrom).normalized();
-        if forward.length_squared() <= f64::EPSILON {
-            return None;
-        }
-
-        let right = self.vup.cross(forward).normalized();
-        if right.length_squared() <= f64::EPSILON {
-            return None;
-        }
-
-        let up = forward.cross(right);
-        Some((lookfrom, right, up, forward))
+        let frame = CameraPose::new(lookfrom, self.lookat, self.vup).frame()?;
+        Some((frame.origin, -frame.right, frame.up, frame.forward))
     }
 
     /// Projects a homogeneous point into 2D screen coordinates.
@@ -266,14 +254,12 @@ impl Camera3D {
     }
 }
 
-#[cfg(feature = "fancy_math")]
 impl Default for RayCamera {
     fn default() -> Self {
         Self::new(100, 1.0)
     }
 }
 
-#[cfg(feature = "fancy_math")]
 impl RayCamera {
     /// Creates a camera with the requested image width and ideal aspect ratio.
     ///
@@ -327,9 +313,12 @@ impl RayCamera {
             viewport_height * (f64::from(params.image_width) / f64::from(image_height));
         let camera_center = params.lookfrom;
 
-        let w = (params.lookfrom - params.lookat).normalized();
-        let u = params.view_up.cross(w).normalized();
-        let v = w.cross(u);
+        let frame = CameraPose::new(params.lookfrom, params.lookat, params.view_up)
+            .frame()
+            .expect("validated camera basis");
+        let w = frame.backward();
+        let u = frame.right;
+        let v = frame.up;
 
         let viewport_u = viewport_width * u;
         let viewport_v = viewport_height * -v;
@@ -406,7 +395,7 @@ impl RayCamera {
             "view-up vector must be nonzero"
         );
         assert!(
-            view_up.cross(w).length_squared() > f64::EPSILON,
+            CameraPose::new(lookfrom, lookat, view_up).frame().is_some(),
             "view-up vector must not be parallel to the viewing direction"
         );
         assert!(
@@ -633,63 +622,97 @@ impl RayCamera {
         self.camera_center + point.x() * self.defocus_disk_u + point.y() * self.defocus_disk_v
     }
 
-    fn ray_color(ray: &Ray, depth: u32, world: &dyn Hittable, rng: &mut SampleRng) -> Vector {
-        if depth == 0 {
-            return Vector::default();
+    fn pixel_seed(seed: u64, x: u32, y: u32) -> u64 {
+        let mut z = seed
+            ^ u64::from(x).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ u64::from(y).wrapping_mul(0xD1B5_4A32_D192_ED03);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn ray_color(ray: &Ray, depth: u32, world: &dyn Hittable, rng: &mut SampleRng) -> LinearColor {
+        let mut current_ray = *ray;
+        let mut attenuation = LinearColor::new(1.0, 1.0, 1.0);
+
+        for _ in 0..depth {
+            let Some(record) =
+                world.hit(&current_ray, Interval::new(SHADOW_ACNE_EPSILON, INFINITY))
+            else {
+                return component_mul(attenuation, sky_gradient(&current_ray));
+            };
+
+            let Some(scatter) = record.material.scatter(&current_ray, &record, rng) else {
+                return LinearColor::default();
+            };
+
+            attenuation = component_mul(attenuation, scatter.attenuation);
+            current_ray = scatter.ray;
         }
 
-        if let Some(record) = world.hit(ray, Interval::new(SHADOW_ACNE_EPSILON, INFINITY)) {
-            if let Some(scatter) = record.material.scatter(ray, &record, rng) {
-                let color = Self::ray_color(&scatter.ray, depth - 1, world, rng);
-                Vector::new(
-                    scatter.attenuation.x() * color.x(),
-                    scatter.attenuation.y() * color.y(),
-                    scatter.attenuation.z() * color.z(),
-                )
-            } else {
-                Vector::default()
-            }
-        } else {
-            sky_gradient(ray)
+        LinearColor::default()
+    }
+
+    fn render_world_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
+        let mut rng = SampleRng::new(Self::pixel_seed(self.rng_seed, x, y));
+        let mut pixel_color = LinearColor::default();
+        for _ in 0..self.samples_per_pixel {
+            let ray = self.ray_for_pixel_sample(x, y, &mut rng);
+            pixel_color += Self::ray_color(&ray, self.max_depth, world, &mut rng);
         }
+        Rgb::from_linear_color(pixel_color / f64::from(self.samples_per_pixel))
+    }
+
+    fn render_normal_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
+        let mut rng = SampleRng::new(Self::pixel_seed(self.rng_seed, x, y));
+        let mut pixel_color = LinearColor::default();
+        for _ in 0..self.samples_per_pixel {
+            let ray = self.ray_for_pixel_sample(x, y, &mut rng);
+            pixel_color += normal_scene_color(&ray, world);
+        }
+        Rgb::from_linear_color(pixel_color / f64::from(self.samples_per_pixel))
+    }
+
+    fn image_canvas(width: u32, height: u32, pixels: Vec<Rgb>) -> Canvas {
+        Canvas::from_pixels_with_options(width, height, pixels, true, false)
     }
 
     /// Renders a canvas by evaluating `ray_color` for each emitted camera ray.
     pub fn render<F>(self, mut ray_color: F) -> Canvas
     where
-        F: FnMut(&Ray) -> Vector,
+        F: FnMut(&Ray) -> LinearColor,
     {
-        Canvas::from_fn(self.image_width, self.image_height, |x, y| {
-            Rgb::from(ray_color(&self.ray_for_pixel(x, y)))
-        })
+        let mut pixels = Vec::with_capacity(self.image_width as usize * self.image_height as usize);
+        for y in 0..self.image_height {
+            for x in 0..self.image_width {
+                pixels.push(Rgb::from(ray_color(&self.ray_for_pixel(x, y))));
+            }
+        }
+        Canvas::from_pixels_with_options(self.image_width, self.image_height, pixels, true, false)
     }
 
     /// Renders a hittable world using this camera's antialiasing sample count.
     pub fn render_world(self, world: &dyn Hittable) -> Canvas {
         let camera = self.initialize();
-        let mut rng = SampleRng::new(camera.rng_seed);
-        Canvas::from_fn(camera.image_width, camera.image_height, |x, y| {
-            let mut pixel_color = Vector::default();
-            for _ in 0..camera.samples_per_pixel {
-                let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
-                pixel_color += Self::ray_color(&ray, camera.max_depth, world, &mut rng);
-            }
-            linear_color_to_rgb(pixel_color / f64::from(camera.samples_per_pixel))
-        })
+        Canvas::from_fn_independent_with_options(
+            camera.image_width,
+            camera.image_height,
+            |x, y| camera.render_world_pixel(x, y, world),
+            true,
+            false,
+        )
     }
 
     /// Renders a hittable world as surface-normal colors for debugging.
     pub fn render_world_normals(self, world: &dyn Hittable) -> Canvas {
         let camera = self.initialize();
-        let mut rng = SampleRng::new(camera.rng_seed);
-        Canvas::from_fn(camera.image_width, camera.image_height, |x, y| {
-            let mut pixel_color = Vector::default();
-            for _ in 0..camera.samples_per_pixel {
-                let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
-                pixel_color += normal_scene_color(&ray, world);
-            }
-            linear_color_to_rgb(pixel_color / f64::from(camera.samples_per_pixel))
-        })
+        Canvas::from_fn_independent_with_options(
+            camera.image_width,
+            camera.image_height,
+            |x, y| camera.render_normal_pixel(x, y, world),
+            true,
+            false,
+        )
     }
 
     /// Renders a canvas while writing scanline progress messages to `log`.
@@ -702,7 +725,7 @@ impl RayCamera {
     /// Returns any write error produced by `log`.
     pub fn render_with_progress<F, W>(self, mut log: W, mut ray_color: F) -> io::Result<Canvas>
     where
-        F: FnMut(&Ray) -> Vector,
+        F: FnMut(&Ray) -> LinearColor,
         W: Write,
     {
         let mut pixels = Vec::with_capacity(self.image_width as usize * self.image_height as usize);
@@ -715,7 +738,7 @@ impl RayCamera {
         }
         writeln!(log, "\rDone.                 ")?;
 
-        Ok(Canvas::from_pixels(
+        Ok(Self::image_canvas(
             self.image_width,
             self.image_height,
             pixels,
@@ -736,26 +759,18 @@ impl RayCamera {
         W: Write,
     {
         let camera = self.initialize();
-        let mut rng = SampleRng::new(camera.rng_seed);
         let mut pixels =
             Vec::with_capacity(camera.image_width as usize * camera.image_height as usize);
         for y in 0..camera.image_height {
             write!(log, "\rScanlines remaining: {} ", camera.image_height - y)?;
             log.flush()?;
             for x in 0..camera.image_width {
-                let mut pixel_color = Vector::default();
-                for _ in 0..camera.samples_per_pixel {
-                    let ray = camera.ray_for_pixel_sample(x, y, &mut rng);
-                    pixel_color += Self::ray_color(&ray, camera.max_depth, world, &mut rng);
-                }
-                pixels.push(linear_color_to_rgb(
-                    pixel_color / f64::from(camera.samples_per_pixel),
-                ));
+                pixels.push(camera.render_world_pixel(x, y, world));
             }
         }
         writeln!(log, "\rDone.                 ")?;
 
-        Ok(Canvas::from_pixels(
+        Ok(Self::image_canvas(
             camera.image_width,
             camera.image_height,
             pixels,
@@ -929,16 +944,12 @@ mod tests {
 
         assert_close(top.y, 0.0);
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_uses_actual_integer_image_ratio() {
         let camera = RayCamera::new(400, 16.0 / 9.0);
         assert_eq!(camera.image_width(), 400);
         assert_eq!(camera.image_height(), 225);
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_sends_center_pixel_forward() {
         let camera = RayCamera::new(400, 16.0 / 9.0);
@@ -951,8 +962,6 @@ mod tests {
         assert!(ray.direction().x().abs() < 0.01);
         assert!(ray.direction().y().abs() < 0.01);
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_tracks_antialiasing_sample_count() {
         let camera = RayCamera::default()
@@ -968,8 +977,6 @@ mod tests {
         assert_close(camera.defocus_angle(), 0.0);
         assert_close(camera.focus_distance(), 1.0);
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_vertical_fov_controls_ray_spread() {
         let wide = RayCamera::new(101, 1.0).with_vertical_fov(90.0);
@@ -980,8 +987,6 @@ mod tests {
 
         assert!(wide_top.y().abs() > narrow_top.y().abs());
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_can_be_positioned_with_look_at() {
         let lookfrom = Point::new(-2.0, 2.0, 1.0);
@@ -997,8 +1002,6 @@ mod tests {
         assert_eq!(*ray.origin(), lookfrom);
         assert_close(actual_direction.dot(expected_direction), 1.0);
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_defocus_blur_offsets_sample_origin() {
         let mut rng = SampleRng::new(17);
@@ -1011,8 +1014,6 @@ mod tests {
         assert_eq!(*pinhole_ray.origin(), pinhole.camera_center());
         assert_ne!(*defocused_ray.origin(), defocused.camera_center());
     }
-
-    #[cfg(feature = "fancy_math")]
     #[test]
     fn ray_camera_world_render_is_seeded_and_deterministic() {
         let world = crate::graphics::raytracing::normal_sphere_world();
@@ -1025,5 +1026,13 @@ mod tests {
         let second = camera.render_world(&world);
 
         assert_eq!(first.pixels(), second.pixels());
+    }
+    #[test]
+    fn ray_camera_world_render_uses_image_coordinate_canvas() {
+        let world = crate::graphics::raytracing::normal_sphere_world();
+        let canvas = RayCamera::new(4, 1.0).render_world(&world);
+
+        assert!(canvas.upper_left_origin);
+        assert!(!canvas.wrapped);
     }
 }

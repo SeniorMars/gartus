@@ -1,8 +1,168 @@
 use crate::gmath::vector::Vector;
 use std::fmt::Debug;
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul};
 
 /// A trait that is meant to bound [Display]
 pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {}
+
+/// Linear RGB color components, before display gamma encoding.
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub struct LinearRgb {
+    /// Red channel in linear color space.
+    pub red: f64,
+    /// Green channel in linear color space.
+    pub green: f64,
+    /// Blue channel in linear color space.
+    pub blue: f64,
+}
+
+impl LinearRgb {
+    /// Creates a linear RGB color.
+    #[must_use]
+    pub const fn new(red: f64, green: f64, blue: f64) -> Self {
+        Self { red, green, blue }
+    }
+
+    /// Returns the red component. Kept as an alias for vector-like raytracing code.
+    #[must_use]
+    pub const fn x(self) -> f64 {
+        self.red
+    }
+
+    /// Returns the green component. Kept as an alias for vector-like raytracing code.
+    #[must_use]
+    pub const fn y(self) -> f64 {
+        self.green
+    }
+
+    /// Returns the blue component. Kept as an alias for vector-like raytracing code.
+    #[must_use]
+    pub const fn z(self) -> f64 {
+        self.blue
+    }
+
+    /// Converts display RGB bytes treated as already-linear unit values.
+    #[must_use]
+    pub fn from_rgb_linear_units(rgb: Rgb) -> Self {
+        Self::new(
+            f64::from(rgb.red) / 255.0,
+            f64::from(rgb.green) / 255.0,
+            f64::from(rgb.blue) / 255.0,
+        )
+    }
+
+    /// Decodes display RGB bytes using the library's gamma-2 approximation.
+    #[must_use]
+    pub fn from_rgb_srgb(rgb: Rgb) -> Self {
+        let decode = |channel: u8| {
+            let value = f64::from(channel) / 255.0;
+            value * value
+        };
+        Self::new(decode(rgb.red), decode(rgb.green), decode(rgb.blue))
+    }
+
+    /// Encodes this linear color to display RGB using gamma correction.
+    #[must_use]
+    pub fn gamma_encode(self) -> Rgb {
+        Rgb::from_linear_color(self)
+    }
+
+    /// Encodes this linear color to display RGB without gamma correction.
+    #[must_use]
+    pub fn raw_encode(self) -> Rgb {
+        Rgb::from_raw_linear_color(self)
+    }
+
+    /// Multiplies each channel by the corresponding channel in `rhs`.
+    #[must_use]
+    pub const fn component_mul(self, rhs: Self) -> Self {
+        Self::new(
+            self.red * rhs.red,
+            self.green * rhs.green,
+            self.blue * rhs.blue,
+        )
+    }
+}
+
+impl Add for LinearRgb {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(
+            self.red + rhs.red,
+            self.green + rhs.green,
+            self.blue + rhs.blue,
+        )
+    }
+}
+
+impl AddAssign for LinearRgb {
+    fn add_assign(&mut self, rhs: Self) {
+        self.red += rhs.red;
+        self.green += rhs.green;
+        self.blue += rhs.blue;
+    }
+}
+
+impl Mul<f64> for LinearRgb {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self::new(self.red * rhs, self.green * rhs, self.blue * rhs)
+    }
+}
+
+impl Mul<LinearRgb> for f64 {
+    type Output = LinearRgb;
+
+    fn mul(self, rhs: LinearRgb) -> Self::Output {
+        rhs * self
+    }
+}
+
+impl Div<f64> for LinearRgb {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        (1.0 / rhs) * self
+    }
+}
+
+impl Index<usize> for LinearRgb {
+    type Output = f64;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match index {
+            0 => &self.red,
+            1 => &self.green,
+            2 => &self.blue,
+            _ => panic!("linear RGB channel index out of bounds"),
+        }
+    }
+}
+
+impl IndexMut<usize> for LinearRgb {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match index {
+            0 => &mut self.red,
+            1 => &mut self.green,
+            2 => &mut self.blue,
+            _ => panic!("linear RGB channel index out of bounds"),
+        }
+    }
+}
+
+impl From<Vector> for LinearRgb {
+    fn from(color: Vector) -> Self {
+        Self::new(color.x(), color.y(), color.z())
+    }
+}
+
+impl From<LinearRgb> for Vector {
+    fn from(color: LinearRgb) -> Self {
+        Self::new(color.red, color.green, color.blue)
+    }
+}
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 #[repr(C)]
@@ -132,6 +292,39 @@ impl Rgb {
         [self.red, self.green, self.blue]
     }
 
+    /// Converts a linear color component to gamma space using gamma 2.
+    #[must_use]
+    pub fn linear_to_gamma_component(linear_component: f64) -> f64 {
+        if linear_component > 0.0 {
+            linear_component.sqrt()
+        } else {
+            0.0
+        }
+    }
+
+    /// Converts linear RGB components in `0.0..=1.0` to display RGB with gamma correction.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn from_linear_color(color: impl Into<LinearRgb>) -> Self {
+        let color = color.into();
+        let channel = |component: f64| {
+            (256.0 * Self::linear_to_gamma_component(component).clamp(0.0, 0.999)) as u8
+        };
+        Self::new(channel(color.x()), channel(color.y()), channel(color.z()))
+    }
+
+    /// Converts linear RGB components in `0.0..=1.0` to display RGB without gamma correction.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn from_raw_linear_color(color: impl Into<LinearRgb>) -> Self {
+        let color = color.into();
+        Self {
+            red: (255.999 * color[0].clamp(0.0, 1.0)) as u8,
+            green: (255.999 * color[1].clamp(0.0, 1.0)) as u8,
+            blue: (255.999 * color[2].clamp(0.0, 1.0)) as u8,
+        }
+    }
+
     pub(crate) fn name_to_const(color: &str) -> Option<Rgb> {
         match color {
             "black" => Some(Rgb::BLACK),
@@ -247,14 +440,15 @@ impl ColorRamp {
 
 impl ColorSpace for Rgb {}
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
-        Self {
-            red: (255.999 * color[0].clamp(0.0, 1.0)) as u8,
-            green: (255.999 * color[1].clamp(0.0, 1.0)) as u8,
-            blue: (255.999 * color[2].clamp(0.0, 1.0)) as u8,
-        }
+        Self::from_linear_color(color)
+    }
+}
+
+impl From<LinearRgb> for Rgb {
+    fn from(color: LinearRgb) -> Self {
+        Self::from_linear_color(color)
     }
 }
 
@@ -630,6 +824,23 @@ impl From<Rgb> for Cmyk {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn vector_to_rgb_applies_gamma_correction() {
+        assert_eq!(
+            Rgb::from(Vector::new(0.25, 0.0, 1.0)),
+            Rgb::new(128, 0, 255)
+        );
+    }
+
+    #[test]
+    fn raw_linear_color_conversion_skips_gamma_correction() {
+        assert_eq!(
+            Rgb::from_raw_linear_color(Vector::new(0.25, 0.0, 1.0)),
+            Rgb::new(63, 0, 255)
+        );
+    }
+
     #[test]
     fn hsl_rgb() {
         let hsl = Hsl::new(1, 100, 50);

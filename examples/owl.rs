@@ -1,9 +1,9 @@
 // extern crate rand;
 use gartus::prelude::{Canvas, FrameRecorder, Rgb};
-use rand::Rng;
+use rand::RngExt;
 
 fn owl() {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let mut owl = Canvas::new(500, 500, Rgb::new(255, 255, 255));
 
@@ -54,9 +54,9 @@ fn owl() {
     (0..corrs.len()).step_by(chunks).for_each(|i| {
         if i != corrs.len() - chunks {
             owl.set_line_rgb_values(
-                rng.gen_range(0..=255),
-                rng.gen_range(0..=255),
-                rng.gen_range(0..=255),
+                rng.random_range(0..=255),
+                rng.random_range(0..=255),
+                rng.random_range(0..=255),
             );
             owl.draw_line(
                 owl.line,

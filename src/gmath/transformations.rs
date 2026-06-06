@@ -1,4 +1,8 @@
-use super::matrix::Matrix;
+use super::{
+    geometry::CameraBasis,
+    matrix::Matrix,
+    vector::{Point, Vector},
+};
 #[allow(dead_code)]
 #[rustfmt::skip]
 impl Matrix {
@@ -440,31 +444,19 @@ impl Matrix {
     /// let camera_matrix = Matrix::look_at([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]);
     /// ```
     pub fn look_at(eye: [f64; 3], target: [f64; 3], up: [f64; 3]) -> Self {
-        const EPS: f64 = 1e-12;
-
-        let f = {
-            let forward = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
-            let length = (forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]).sqrt();
-            assert!(length > EPS, "look_at requires eye and target to differ");
-            [forward[0] / length, forward[1] / length, forward[2] / length]
-        };
-
-        let r = {
-            let right = [
-                f[1] * up[2] - f[2] * up[1],
-                f[2] * up[0] - f[0] * up[2],
-                f[0] * up[1] - f[1] * up[0],
-            ];
-            let length = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
-            assert!(length > EPS, "look_at up vector must not be parallel to view direction");
-            [right[0] / length, right[1] / length, right[2] / length]
-        };
-
-        let u = [
-            r[1] * f[2] - r[2] * f[1],
-            r[2] * f[0] - r[0] * f[2],
-            r[0] * f[1] - r[1] * f[0],
-        ];
+        let eye_point = Point::new(eye[0], eye[1], eye[2]);
+        let target_point = Point::new(target[0], target[1], target[2]);
+        let view_up = Vector::new(up[0], up[1], up[2]);
+        let view_delta = target_point - eye_point;
+        assert!(
+            view_delta.length_squared() > f64::EPSILON,
+            "look_at requires eye and target to differ"
+        );
+        let basis = CameraBasis::looking_at(eye_point, target_point, view_up)
+            .expect("look_at up vector must not be parallel to view direction");
+        let r = basis.right;
+        let u = basis.up;
+        let f = basis.forward;
 
         Matrix::new(
             4,

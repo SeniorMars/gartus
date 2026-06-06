@@ -1,5 +1,5 @@
 use gartus::prelude::*;
-use rand::Rng;
+use rand::RngExt;
 
 const GRID_SIZE: usize = 65; // 2^6 + 1
 
@@ -73,12 +73,12 @@ fn main() {
 /// Simple Diamond-Square implementation for terrain generation
 fn generate_terrain(size: usize, roughness: f64) -> Vec<Vec<f64>> {
     let mut map = vec![vec![0.0; size]; size];
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
-    map[0][0] = rng.gen_range(-1.0..1.0);
-    map[0][size - 1] = rng.gen_range(-1.0..1.0);
-    map[size - 1][0] = rng.gen_range(-1.0..1.0);
-    map[size - 1][size - 1] = rng.gen_range(-1.0..1.0);
+    map[0][0] = rng.random_range(-1.0..1.0);
+    map[0][size - 1] = rng.random_range(-1.0..1.0);
+    map[size - 1][0] = rng.random_range(-1.0..1.0);
+    map[size - 1][size - 1] = rng.random_range(-1.0..1.0);
 
     let mut step = size - 1;
     let mut r = roughness;
@@ -91,7 +91,7 @@ fn generate_terrain(size: usize, roughness: f64) -> Vec<Vec<f64>> {
                     + map[x - half][y + half]
                     + map[x + half][y + half])
                     / 4.0;
-                map[x][y] = avg + rng.gen_range(-r..r);
+                map[x][y] = avg + rng.random_range(-r..r);
             }
         }
         for x in (0..size).step_by(half) {
@@ -119,7 +119,7 @@ fn generate_terrain(size: usize, roughness: f64) -> Vec<Vec<f64>> {
                     sum += map[x][y + half];
                     count += 1.0;
                 }
-                map[x][y] = (sum / count) + rng.gen_range(-r..r);
+                map[x][y] = (sum / count) + rng.random_range(-r..r);
             }
         }
         step /= 2;

@@ -193,6 +193,21 @@ impl Canvas {
     ///
     /// Panics if `pixels.len()` is not `width * height`.
     pub fn from_pixels(width: u32, height: u32, pixels: Vec<Rgb>) -> Self {
+        Self::from_pixels_with_options(width, height, pixels, false, true)
+    }
+
+    /// Returns a new [`Canvas`] initialized with exact pixel data and coordinate options.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixels.len()` is not `width * height`.
+    pub fn from_pixels_with_options(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+        upper_left_origin: bool,
+        wrapped: bool,
+    ) -> Self {
         assert_eq!(
             pixels.len(),
             Self::pixel_count(width, height),
@@ -203,8 +218,8 @@ impl Canvas {
             height,
             pixels,
             zbuffer: vec![f64::NEG_INFINITY; Self::pixel_count(width, height)],
-            upper_left_origin: false,
-            wrapped: true,
+            upper_left_origin,
+            wrapped,
             line: Rgb::default(),
             line_width: 1.0,
             polygon_color_mode: PolygonColorMode::default(),
@@ -226,6 +241,63 @@ impl Canvas {
             }
         }
         Self::from_pixels(width, height, pixels)
+    }
+
+    /// Returns a new [`Canvas`] initialized by independently evaluating `pixel` for every
+    /// storage coordinate.
+    ///
+    /// When the `rayon` feature is enabled, pixels are evaluated in parallel. Use this for
+    /// renderers where each pixel is deterministic and does not depend on traversal order.
+    pub fn from_fn_independent<F>(width: u32, height: u32, pixel: F) -> Self
+    where
+        F: Fn(u32, u32) -> Rgb + Send + Sync,
+    {
+        Self::from_fn_independent_with_options(width, height, pixel, false, true)
+    }
+
+    /// Returns a new [`Canvas`] initialized by independently evaluating `pixel`, with explicit
+    /// coordinate origin and wrapping options.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the canvas dimensions exceed addressable `u32` pixel coordinates.
+    pub fn from_fn_independent_with_options<F>(
+        width: u32,
+        height: u32,
+        pixel: F,
+        upper_left_origin: bool,
+        wrapped: bool,
+    ) -> Self
+    where
+        F: Fn(u32, u32) -> Rgb + Send + Sync,
+    {
+        let pixel_count = Self::pixel_count(width, height);
+        let width_usize = width as usize;
+        let pixels = {
+            #[cfg(feature = "rayon")]
+            {
+                (0..pixel_count)
+                    .into_par_iter()
+                    .map(|idx| {
+                        let x = u32::try_from(idx % width_usize).expect("pixel x fits u32");
+                        let y = u32::try_from(idx / width_usize).expect("pixel y fits u32");
+                        pixel(x, y)
+                    })
+                    .collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            {
+                (0..pixel_count)
+                    .map(|idx| {
+                        let x = u32::try_from(idx % width_usize).expect("pixel x fits u32");
+                        let y = u32::try_from(idx / width_usize).expect("pixel y fits u32");
+                        pixel(x, y)
+                    })
+                    .collect()
+            }
+        };
+
+        Self::from_pixels_with_options(width, height, pixels, upper_left_origin, wrapped)
     }
 
     /// Returns a new [`Canvas`] by mapping each pixel into a 2D coordinate domain.

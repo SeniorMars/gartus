@@ -23,19 +23,15 @@ lto = "thin"
 codegen-units = 1
 
 [dependencies]
-num = "0.3.1"
+num = "0.4.3"
+rand = { version = "0.10.1" }
 rayon = { version = "1.10", optional = true }
 
-[dev-dependencies]
-rand = "0.8.5"
-num = "0.3.1"
-
 [features]
-default = ["external", "turtle", "filters", "fancy_math", "rayon"]
+default = ["external", "turtle", "filters", "rayon"]
 external = ["filters"]
 filters = []
 turtle = []
-fancy_math = []
 old_parser = []
 rayon = ["dep:rayon"]
 
@@ -88,7 +84,6 @@ required-features = ["old_parser"]
 
 [[example]]
 name = "raytracing_weekend"
-required-features = ["fancy_math"]
 
 # [[bench]]
 # name = "derp"

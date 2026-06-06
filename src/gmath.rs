@@ -15,10 +15,10 @@ pub mod parametric;
 /// Hosts the [`PolygonMatrix`] type — a dynamically-growing 4×N point list for polygon drawing.
 pub mod polygon_matrix;
 /// Hosts the [Quaternion] struct for ray tracing and 3D transformations
-#[cfg(feature = "fancy_math")]
 pub mod quaternion;
+/// Deterministic random sampling helpers.
+pub mod random;
 /// Hosts the [Ray] struct for path/ray tracing
-#[cfg(feature = "fancy_math")]
 pub mod ray;
 /// Hosts a coordinate-system stack for hierarchical 3D transforms.
 pub mod stack;

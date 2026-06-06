@@ -2,7 +2,7 @@ use gartus::{
     graphics::turtle::Turtle,
     prelude::{Canvas, Rgb},
 };
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 
 struct Maze {
     width: usize,
@@ -56,7 +56,7 @@ impl Maze {
         canvas: &mut Canvas,
     ) {
         let mut stack = Vec::new();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut x = start_x;
         let mut y = start_y;
@@ -66,7 +66,7 @@ impl Maze {
 
         while !stack.is_empty() {
             let neighbors = self.get_neighbors(x, y);
-            let neighbors = neighbors.choose_multiple(&mut rng, 4);
+            let neighbors = neighbors.sample(&mut rng, 4);
 
             let mut found = false;
 
