@@ -1,6 +1,10 @@
 //! Typed MDL command representation.
 
 use super::lexer::Span;
+use crate::graphics::{
+    colors::LinearRgb,
+    lighting::{DEFAULT_SPECULAR_EXPONENT, SurfaceMaterial},
+};
 use std::path::PathBuf;
 
 /// A parsed MDL program.
@@ -471,5 +475,16 @@ impl Material {
             kdb,
             ksb,
         }
+    }
+}
+
+impl From<Material> for SurfaceMaterial {
+    fn from(material: Material) -> Self {
+        Self::new(
+            LinearRgb::new(material.kar, material.kag, material.kab),
+            LinearRgb::new(material.kdr, material.kdg, material.kdb),
+            LinearRgb::new(material.ksr, material.ksg, material.ksb),
+            f64::from(DEFAULT_SPECULAR_EXPONENT),
+        )
     }
 }

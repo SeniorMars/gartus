@@ -154,15 +154,23 @@ impl TriangleGeometry {
     /// Returns the unit geometric normal from vertex winding.
     #[must_use]
     pub fn geometric_normal(self) -> Vector {
+        self.area_weighted_normal().normalized()
+    }
+
+    /// Returns the unnormalized normal from vertex winding.
+    ///
+    /// The vector length is twice the triangle area, so callers can use it for area-weighted
+    /// normal accumulation and winding tests without losing magnitude information.
+    #[must_use]
+    pub fn area_weighted_normal(self) -> Vector {
         let [p0, p1, p2] = self.vertices;
-        (p1 - p0).cross(p2 - p0).normalized()
+        (p1 - p0).cross(p2 - p0)
     }
 
     /// Returns four times the triangle area squared.
     #[must_use]
     pub fn area_squared(self) -> f64 {
-        let [p0, p1, p2] = self.vertices;
-        (p1 - p0).cross(p2 - p0).length_squared()
+        self.area_weighted_normal().length_squared()
     }
 
     /// Returns barycentric ray hit data for a two-sided Möller-Trumbore intersection.

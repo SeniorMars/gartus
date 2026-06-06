@@ -1,6 +1,10 @@
 use super::colors::{Hsl, Rgb};
 use crate::gmath::{
-    edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix, vector::Vector,
+    edge_matrix::EdgeMatrix,
+    geometry::TriangleGeometry,
+    matrix::Matrix,
+    polygon_matrix::PolygonMatrix,
+    vector::{Point, Vector},
 };
 use crate::graphics::{
     display::{Canvas, PolygonColorMode, ShadingMode, ZSpan},
@@ -1261,21 +1265,17 @@ pub(super) fn triangle_normal(
     p1: (f64, f64, f64),
     p2: (f64, f64, f64),
 ) -> Vector {
-    let a = Vector::new(p1.0 - p0.0, p1.1 - p0.1, p1.2 - p0.2);
-    let b = Vector::new(p2.0 - p0.0, p2.1 - p0.1, p2.2 - p0.2);
-    a.cross(b)
+    TriangleGeometry::from_tuples([p0, p1, p2]).area_weighted_normal()
 }
 
 fn triangle_centroid(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
-    Vector::new(
-        (p0.0 + p1.0 + p2.0) / 3.0,
-        (p0.1 + p1.1 + p2.1) / 3.0,
-        (p0.2 + p1.2 + p2.2) / 3.0,
-    )
+    let centroid = TriangleGeometry::from_tuples([p0, p1, p2]).centroid();
+    Vector::new(centroid.x(), centroid.y(), centroid.z())
 }
 
 fn tuple_to_vector(point: (f64, f64, f64)) -> Vector {
-    Vector::new(point.0, point.1, point.2)
+    let point = Point::new(point.0, point.1, point.2);
+    Vector::new(point.x(), point.y(), point.z())
 }
 
 fn triangle_points_are_finite(points: [(f64, f64, f64); 3]) -> bool {

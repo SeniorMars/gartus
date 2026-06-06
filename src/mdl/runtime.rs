@@ -12,7 +12,7 @@ use crate::{
     graphics::{
         colors::Rgb,
         display::{Canvas, PolygonColorMode, ShadingMode as CanvasShadingMode},
-        lighting::{Lighting, PointLight, ReflectionConstants},
+        lighting::{Lighting, PointLight, ReflectionConstants, SurfaceMaterial},
     },
 };
 use std::{
@@ -150,6 +150,15 @@ pub struct MaterialConstants {
     pub material: Material,
     /// Object color.
     pub color: Vec3,
+}
+
+impl From<MaterialConstants> for SurfaceMaterial {
+    fn from(constants: MaterialConstants) -> Self {
+        // MDL Phong shading takes its hue from the reflection coefficients. The object color is
+        // a flat/Gouraud fallback, so folding it into the diffuse albedo here would double-tint
+        // Phong-authored material constants.
+        constants.material.into()
+    }
 }
 
 /// A point light declared in MDL.

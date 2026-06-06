@@ -21,9 +21,13 @@ pub use crate::{
         draw::TexturedVertex,
         lighting::{
             LightAttenuation, Lighting, PhongMaterial, PointLight, ReflectionConstants,
-            RefractiveIndex, SurfaceMaterial,
+            RefractiveIndex,
         },
-        texture::{Texture, TextureFilter, TextureWrap},
+        material::SurfaceMaterial,
+        scene::{SurfaceMesh, SurfaceScene},
+        texture::{
+            SurfaceTexture, SurfaceTextureRef, Texture, TextureFilter, TextureSample, TextureWrap,
+        },
     },
     mdl::ast::VaryInterpolation,
 };
@@ -32,12 +36,11 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        Aabb, BvhNode, CheckerTexture, ConstantMedium, Dielectric, DiffuseLight, HitRecord,
-        Hittable, HittableList, INFINITY, ImageTexture, Intersect, Interval, Isotropic, Lambertian,
-        LinearColor, Material, MaterialId, MaterialRef, Metal, MovingSphere, NoiseTexture, PI,
-        PathTracer, Quad, RayGeometry, RayMaterial, RayPrimitive, RayScene, RayTexture, RotateY,
-        SHADOW_ACNE_EPSILON, ScatterRecord, SceneObject, SolidColor, Sphere, SphereList,
-        SurfaceHit, TextureRef, Translate, TriangleMesh, box_object,
+        CheckerTexture, ConstantMedium, Dielectric, DiffuseLight, HitRecord, Hittable,
+        ImageTexture, Isotropic, Lambertian, LinearColor, Material, MatrixInstance, Metal,
+        MovingSphere, NoiseTexture, PathTracer, Quad, RayGeometry, RayMaterial, RayScene,
+        RayTexture, RotateY, ScatterRecord, SceneObject, SolidColor, Sphere, TextureRef, Translate,
+        TriangleMesh, box_object,
     },
 };
 

@@ -5,9 +5,11 @@ use gartus::{
         colors::Rgb,
         display::Canvas,
         raytracing::{
-            LinearColor, PathTracer, WIDESCREEN_ASPECT_RATIO, dielectric_sphere_world,
-            final_scene_bvh_world, first_sphere_color, metal_sphere_world, normal_sphere_world,
-            wide_angle_sphere_world,
+            LinearColor, PathTracer, WIDESCREEN_ASPECT_RATIO,
+            scenes::{
+                dielectric_sphere_world, final_scene_bvh_world, first_sphere_color,
+                metal_sphere_world, normal_sphere_world, wide_angle_sphere_world,
+            },
         },
     },
 };

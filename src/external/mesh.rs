@@ -14,7 +14,7 @@ use crate::gmath::{
 use crate::graphics::{
     colors::{LinearRgb, Rgb},
     draw::VertexNormalPlan,
-    lighting::SurfaceMaterial,
+    lighting::{RefractiveIndex, SurfaceMaterial},
 };
 
 type MeshResult<T> = Result<T, MeshError>;
@@ -123,6 +123,14 @@ pub struct MeshMaterial {
     pub diffuse: Option<[f64; 3]>,
     /// Specular `Ks` coefficients.
     pub specular: Option<[f64; 3]>,
+    /// Specular exponent from `Ns`.
+    pub shininess: Option<f64>,
+    /// Optical density / index of refraction from `Ni`.
+    pub optical_density: Option<f64>,
+    /// Opacity from `d`, or `1 - Tr`.
+    pub alpha: Option<f64>,
+    /// Illumination model from `illum`.
+    pub illumination_model: Option<u32>,
     /// Diffuse texture map from `map_Kd`, resolved relative to the MTL file.
     pub diffuse_texture: Option<PathBuf>,
 }
@@ -145,8 +153,9 @@ impl From<MeshMaterial> for SurfaceMaterial {
             to_color(material.ambient, LinearRgb::new(0.0, 0.0, 0.0)),
             to_color(material.diffuse, LinearRgb::new(0.5, 0.5, 0.5)),
             to_color(material.specular, LinearRgb::new(0.0, 0.0, 0.0)),
-            1.0,
+            material.shininess.unwrap_or(1.0),
         );
+        surface.refractive_index = material.optical_density.and_then(RefractiveIndex::try_new);
         surface.diffuse_texture = material.diffuse_texture;
         surface
     }
@@ -660,65 +669,125 @@ fn load_mtl_materials(path: &Path) -> MeshResult<HashMap<String, MeshMaterial>> 
 fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String, MeshMaterial>> {
     let mut materials = HashMap::new();
     let mut current_material = None::<String>;
-
     for_each_text_line(reader, source, |line_num, line| {
         let line = strip_obj_comment(line).trim();
         if line.is_empty() {
             return Ok(());
         }
-
         let mut parts = line.split_whitespace();
         match parts.next() {
             Some("newmtl") => {
-                let name = parts.collect::<Vec<_>>().join(" ");
-                if name.is_empty() {
-                    return Err(MeshError::at_line(
-                        source,
-                        line_num,
-                        "missing MTL material name",
-                    ));
-                }
-                current_material = Some(name);
+                current_material = Some(parse_mtl_name(parts, source, line_num)?);
             }
             Some("Kd") => {
-                if let Some(name) = current_material.as_ref() {
-                    materials
-                        .entry(name.clone())
-                        .or_insert_with(empty_mesh_material)
-                        .diffuse = Some(parse_mtl_color(parts, source, line_num)?);
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.diffuse = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
             Some("Ka") => {
-                if let Some(name) = current_material.as_ref() {
-                    materials
-                        .entry(name.clone())
-                        .or_insert_with(empty_mesh_material)
-                        .ambient = Some(parse_mtl_color(parts, source, line_num)?);
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.ambient = Some(parse_mtl_color(parts, source, line_num)?);
                 }
             }
             Some("Ks") => {
-                if let Some(name) = current_material.as_ref() {
-                    materials
-                        .entry(name.clone())
-                        .or_insert_with(empty_mesh_material)
-                        .specular = Some(parse_mtl_color(parts, source, line_num)?);
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.specular = Some(parse_mtl_color(parts, source, line_num)?);
+                }
+            }
+            Some("Ns") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.shininess =
+                        Some(parse_f64_arg(parts.next(), source, line_num, "shininess")?);
+                }
+            }
+            Some("Ni") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.optical_density = Some(parse_f64_arg(
+                        parts.next(),
+                        source,
+                        line_num,
+                        "optical density",
+                    )?);
+                }
+            }
+            Some("d") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.alpha = Some(parse_mtl_alpha(parts, source, line_num)?);
+                }
+            }
+            Some("Tr") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    let transparency = parse_f64_arg(parts.next(), source, line_num, "alpha")?;
+                    material.alpha = Some((1.0 - transparency).clamp(0.0, 1.0));
+                }
+            }
+            Some("illum") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    material.illumination_model = Some(parse_u32_arg(
+                        parts.next(),
+                        source,
+                        line_num,
+                        "illumination model",
+                    )?);
                 }
             }
             Some("map_Kd") => {
-                if let Some(name) = current_material.as_ref() {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
                     let filename = parse_mtl_texture_filename(parts, source, line_num)?;
-                    materials
-                        .entry(name.clone())
-                        .or_insert_with(empty_mesh_material)
-                        .diffuse_texture = Some(resolve_sibling_path(source, &filename));
+                    material.diffuse_texture = Some(resolve_sibling_path(source, &filename));
                 }
             }
             _ => {}
         }
         Ok(())
     })?;
-
     Ok(materials)
+}
+
+fn parse_mtl_name<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<String> {
+    let name = parts.collect::<Vec<_>>().join(" ");
+    if name.is_empty() {
+        Err(MeshError::at_line(
+            source,
+            line_num,
+            "missing MTL material name",
+        ))
+    } else {
+        Ok(name)
+    }
+}
+
+fn current_mtl_material<'a>(
+    materials: &'a mut HashMap<String, MeshMaterial>,
+    current_material: Option<&String>,
+) -> Option<&'a mut MeshMaterial> {
+    current_material.map(|name| {
+        materials
+            .entry(name.clone())
+            .or_insert_with(empty_mesh_material)
+    })
 }
 
 fn parse_mtl_texture_filename<'a>(
@@ -809,8 +878,36 @@ fn empty_mesh_material() -> MeshMaterial {
         ambient: None,
         diffuse: None,
         specular: None,
+        shininess: None,
+        optical_density: None,
+        alpha: None,
+        illumination_model: None,
         diffuse_texture: None,
     }
+}
+
+fn parse_mtl_alpha<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    source: &Path,
+    line_num: usize,
+) -> MeshResult<f64> {
+    for part in parts {
+        if part == "-halo" {
+            continue;
+        }
+        return part.parse::<f64>().map_or_else(
+            |_| {
+                Err(MeshError::at_line(
+                    source,
+                    line_num,
+                    format!("invalid alpha value `{part}`"),
+                ))
+            },
+            |alpha| Ok(alpha.clamp(0.0, 1.0)),
+        );
+    }
+
+    Err(MeshError::at_line(source, line_num, "missing alpha value"))
 }
 
 fn parse_mtl_color<'a>(
@@ -1298,6 +1395,18 @@ fn parse_f64_arg(
     }
 }
 
+fn parse_u32_arg(
+    token: Option<&str>,
+    source: &Path,
+    line_num: usize,
+    name: &str,
+) -> MeshResult<u32> {
+    token
+        .ok_or_else(|| MeshError::at_line(source, line_num, format!("missing {name}")))?
+        .parse::<u32>()
+        .map_err(|_| MeshError::at_line(source, line_num, format!("invalid {name}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1558,7 +1667,7 @@ endsolid bad
 
         fs::write(
             &mtl_path,
-            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nmap_Kd textures/red.ppm\nnewmtl green\nKd 0 0.5 0\n",
+            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nNs 42\nNi 1.5\nd -halo 0.75\nillum 4\nmap_Kd textures/red.ppm\nnewmtl green\nKd 0 0.5 0\nTr 0.25\n",
         )
         .expect("write temp mtl");
         fs::write(
@@ -1597,6 +1706,10 @@ f 1/1 2/2 4/4 3/3
         assert_eq!(red_material.ambient, Some([0.1, 0.2, 0.3]));
         assert_eq!(red_material.diffuse, Some([1.0, 0.0, 0.0]));
         assert_eq!(red_material.specular, Some([0.4, 0.5, 0.6]));
+        assert_eq!(red_material.shininess, Some(42.0));
+        assert_eq!(red_material.optical_density, Some(1.5));
+        assert_eq!(red_material.alpha, Some(0.75));
+        assert_eq!(red_material.illumination_model, Some(4));
         assert_eq!(
             red_material.diffuse_texture,
             Some(
@@ -1610,6 +1723,10 @@ f 1/1 2/2 4/4 3/3
         assert!(mesh.has_textures());
         assert_eq!(mesh.groups[1].material_name.as_deref(), Some("green"));
         assert_eq!(mesh.groups[1].diffuse_color, Some(Rgb::new(0, 128, 0)));
+        assert_eq!(
+            mesh.groups[1].material.as_ref().and_then(|m| m.alpha),
+            Some(0.75)
+        );
         assert!(mesh.has_material_colors());
         let _ = fs::remove_file(obj_path);
         let _ = fs::remove_file(mtl_path);

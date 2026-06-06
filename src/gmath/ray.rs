@@ -30,8 +30,12 @@ impl Ray {
     }
 
     /// Returns a new ray with an explicit shutter time.
+    ///
+    /// # Panics
+    /// Panics if `time` is not finite.
     #[must_use]
     pub fn with_time(origin: Point, direction: Vector, time: f64) -> Self {
+        assert!(time.is_finite(), "ray time must be finite");
         Self {
             origin,
             direction,

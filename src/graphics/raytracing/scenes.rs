@@ -2,10 +2,12 @@
 
 use super::{
     BvhNode, ConstantMedium, Dielectric, DiffuseLight, Hittable, HittableList, INFINITY, Interval,
-    Lambertian, LinearColor, MaterialRef, Metal, MovingSphere, PI, PhongMaterial, Point, Quad, Ray,
-    RayMaterial, RayScene, RayTexture, ReflectionConstants, RefractiveIndex, RotateY, SampleRng,
-    Sphere, SphereList, Translate, Vector, box_object, component_mul, hit_sphere,
+    Lambertian, LinearColor, MaterialRef, Metal, MovingSphere, PI, Quad, RayMaterial, RayScene,
+    RayTexture, RotateY, SampleRng, Sphere, SphereList, Translate, box_object, component_mul,
+    hit_sphere,
 };
+use crate::gmath::{ray::Ray, vector::Point, vector::Vector};
+use crate::graphics::lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex};
 use std::sync::Arc;
 
 /// Computes the blue-to-white background gradient for a ray.
@@ -615,6 +617,7 @@ pub fn final_scene_ray_scene() -> RayScene {
         RayMaterial::metal(LinearColor::new(0.7, 0.6, 0.5), 0.0),
     );
 
+    world.build_bvh();
     world
 }
 
@@ -767,6 +770,7 @@ pub fn motion_blur_ray_scene() -> RayScene {
         RayMaterial::metal(LinearColor::new(0.7, 0.6, 0.5), 0.0),
     );
 
+    world.build_bvh();
     world
 }
 

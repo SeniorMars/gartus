@@ -8,7 +8,7 @@ use crate::gmath::{
 use crate::graphics::raytracing::{
     Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians,
 };
-use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, normal_scene_color};
+use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, scenes::normal_scene_color};
 use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
@@ -110,6 +110,18 @@ impl Camera3D {
             lookat: Point::new(0.0, 0.0, 0.0),
             vup: Vector::new(0.0, 1.0, 0.0),
         }
+    }
+
+    /// Returns the target canvas width.
+    #[must_use]
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Returns the target canvas height.
+    #[must_use]
+    pub const fn height(self) -> u32 {
+        self.height
     }
 
     /// Sets the distance added to incoming z values before projection.
@@ -1119,7 +1131,7 @@ mod tests {
 
     #[test]
     fn ray_camera_world_render_is_seeded_and_deterministic() {
-        let world = crate::graphics::raytracing::normal_sphere_world();
+        let world = crate::graphics::raytracing::scenes::normal_sphere_world();
         let camera = RayCamera::new(20, 16.0 / 9.0)
             .with_samples_per_pixel(4)
             .with_max_depth(3)
@@ -1132,7 +1144,7 @@ mod tests {
     }
     #[test]
     fn ray_camera_world_render_uses_image_coordinate_canvas() {
-        let world = crate::graphics::raytracing::normal_sphere_world();
+        let world = crate::graphics::raytracing::scenes::normal_sphere_world();
         let canvas = RayCamera::new(4, 1.0).render_world(&world);
 
         assert!(canvas.upper_left_origin);

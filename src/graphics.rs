@@ -16,10 +16,14 @@ pub mod draw;
 pub mod filters;
 /// Flat Phong reflection lighting helpers.
 pub mod lighting;
+/// Renderer-neutral material data.
+pub mod material;
 /// Small 2D primitives and bitmap text helpers.
 pub mod primitives;
 /// Minimal path/ray tracing helpers.
 pub mod raytracing;
+/// Renderer-neutral scene data.
+pub mod scene;
 #[cfg(test)]
 mod tests;
 /// 2D texture sampling helpers.

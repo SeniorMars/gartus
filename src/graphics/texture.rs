@@ -1,4 +1,10 @@
-use super::{colors::Rgb, display::Canvas};
+use std::{fmt, sync::Arc};
+
+use super::{
+    colors::{LinearRgb, Rgb},
+    display::Canvas,
+};
+use crate::gmath::vector::Point;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -21,6 +27,34 @@ pub enum TextureFilter {
     /// Bilinearly interpolate neighboring texels; mipmapped textures also blend adjacent levels.
     Linear,
 }
+
+/// Inputs for renderer-neutral surface texture sampling.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextureSample {
+    /// Horizontal surface texture coordinate.
+    pub u: f64,
+    /// Vertical surface texture coordinate.
+    pub v: f64,
+    /// Surface point in world or object space, depending on the texture.
+    pub point: Point,
+}
+
+impl TextureSample {
+    /// Creates a surface texture sample.
+    #[must_use]
+    pub const fn new(u: f64, v: f64, point: Point) -> Self {
+        Self { u, v, point }
+    }
+}
+
+/// Texture data that can be sampled as linear RGB by any renderer.
+pub trait SurfaceTexture: fmt::Debug + Send + Sync {
+    /// Returns the linear color for a surface sample.
+    fn sample_linear(&self, sample: TextureSample) -> LinearRgb;
+}
+
+/// Shared renderer-neutral surface texture handle.
+pub type SurfaceTextureRef = Arc<dyn SurfaceTexture>;
 
 /// A 2D RGB texture sampled with normalized `(s, t)` coordinates.
 #[derive(Clone, Debug)]
@@ -222,6 +256,12 @@ impl Texture {
                 max_level: self.mipmaps.len(),
             },
         }
+    }
+}
+
+impl SurfaceTexture for Texture {
+    fn sample_linear(&self, sample: TextureSample) -> LinearRgb {
+        LinearRgb::from_rgb_linear_units(self.sample(sample.u, sample.v))
     }
 }
 

@@ -5,9 +5,12 @@ use gartus::{
         colors::LinearRgb,
         display::Canvas,
         raytracing::{
-            ImageTexture, PathTracer, WIDESCREEN_ASPECT_RATIO, checkered_spheres_world,
-            cornell_box_world, cornell_smoke_world, motion_blur_bvh_world,
-            next_week_final_scene_world, perlin_spheres_world, quads_world, simple_light_world,
+            ImageTexture, PathTracer, WIDESCREEN_ASPECT_RATIO,
+            scenes::{
+                checkered_spheres_world, cornell_box_world, cornell_smoke_world,
+                motion_blur_bvh_world, next_week_final_scene_world, perlin_spheres_world,
+                quads_world, simple_light_world,
+            },
         },
     },
 };
@@ -23,26 +26,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     fs::create_dir_all("final/raytracing")?;
     let earth_texture = ImageTexture::from_file("examples/data/images/earthmap.jpg")?;
 
-    let renders = [
-        ("checkered_spheres", render_checkered_spheres()),
-        ("perlin_spheres", render_perlin_spheres()),
-        ("motion_blur_spheres", render_motion_blur_spheres()),
-        ("quads", render_quads()),
-        ("simple_light", render_simple_light()),
-        ("cornell_box", render_cornell_box()),
-        ("cornell_smoke", render_cornell_smoke()),
-        (
-            "next_week_final",
-            render_next_week_final_scene(earth_texture),
-        ),
-    ];
+    render_and_save("checkered_spheres", render_checkered_spheres)?;
+    render_and_save("perlin_spheres", render_perlin_spheres)?;
+    render_and_save("motion_blur_spheres", render_motion_blur_spheres)?;
+    render_and_save("quads", render_quads)?;
+    render_and_save("simple_light", render_simple_light)?;
+    render_and_save("cornell_box", render_cornell_box)?;
+    render_and_save("cornell_smoke", render_cornell_smoke)?;
+    render_and_save("next_week_final", || {
+        render_next_week_final_scene(earth_texture)
+    })?;
 
-    for (name, canvas) in renders {
-        let path = format!("final/raytracing/{name}.ppm");
-        canvas.save_binary(&path)?;
-        println!("saved {path}");
-    }
+    Ok(())
+}
 
+fn render_and_save(name: &str, render: impl FnOnce() -> Canvas) -> Result<(), Box<dyn Error>> {
+    let canvas = render();
+    let path = format!("final/raytracing/{name}.ppm");
+    canvas.save_binary(&path)?;
+    println!("saved {path}");
     Ok(())
 }
 

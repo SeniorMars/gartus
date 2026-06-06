@@ -33,7 +33,7 @@ use super::{
 #[cfg(feature = "external")]
 use crate::{
     external::{MaterialMeshGroup, MaterialMeshTriangle, MeshMaterial, TexturedMeshTriangle},
-    gmath::vector::Vector,
+    gmath::{geometry::TriangleGeometry, vector::Vector},
     graphics::draw::TexturedVertex,
 };
 #[cfg(feature = "rayon")]
@@ -1330,11 +1330,7 @@ fn textured_vertex_normals(
 
 #[cfg(feature = "external")]
 fn triangle_normal(p0: (f64, f64, f64), p1: (f64, f64, f64), p2: (f64, f64, f64)) -> Vector {
-    Vector::new(
-        (p1.1 - p0.1) * (p2.2 - p0.2) - (p1.2 - p0.2) * (p2.1 - p0.1),
-        (p1.2 - p0.2) * (p2.0 - p0.0) - (p1.0 - p0.0) * (p2.2 - p0.2),
-        (p1.0 - p0.0) * (p2.1 - p0.1) - (p1.1 - p0.1) * (p2.0 - p0.0),
-    )
+    TriangleGeometry::from_tuples([p0, p1, p2]).area_weighted_normal()
 }
 
 #[cfg(feature = "external")]
