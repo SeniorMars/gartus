@@ -84,6 +84,12 @@ required-features = ["old_parser"]
 
 [[example]]
 name = "raytracing_weekend"
+path = "examples/raytracing/weekend.rs"
+
+[[example]]
+name = "next_weekend"
+path = "examples/raytracing/next_weekend.rs"
+required-features = ["external"]
 
 # [[bench]]
 # name = "derp"

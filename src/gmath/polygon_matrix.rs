@@ -1,5 +1,9 @@
 use super::ray::Ray;
-use super::{geometry::SphereGeometry, matrix::Matrix, vector::Point};
+use super::{
+    geometry::SphereGeometry,
+    matrix::Matrix,
+    vector::{Point, Vector},
+};
 use std::f64::consts::PI;
 use std::fmt;
 
@@ -56,6 +60,23 @@ impl Bounds3 {
     #[must_use]
     pub fn union_point(self, point: Point) -> Self {
         self.union(Self::from_points(point, point))
+    }
+
+    /// Returns this bounding box translated by `offset`.
+    #[must_use]
+    pub fn translated(self, offset: Vector) -> Self {
+        Self::new(
+            (
+                self.min.0 + offset.x(),
+                self.min.1 + offset.y(),
+                self.min.2 + offset.z(),
+            ),
+            (
+                self.max.0 + offset.x(),
+                self.max.1 + offset.y(),
+                self.max.2 + offset.z(),
+            ),
+        )
     }
 
     /// Returns bounds expanded along any axis thinner than `epsilon`.

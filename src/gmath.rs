@@ -12,6 +12,8 @@ pub mod helpers;
 pub mod matrix;
 /// Hosts the [Parametric] struct
 pub mod parametric;
+/// Deterministic Perlin noise for procedural textures.
+pub mod perlin;
 /// Hosts the [`PolygonMatrix`] type — a dynamically-growing 4×N point list for polygon drawing.
 pub mod polygon_matrix;
 /// Hosts the [Quaternion] struct for ray tracing and 3D transformations

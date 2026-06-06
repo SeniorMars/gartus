@@ -2,8 +2,12 @@
 pub use crate::{
     gmath::{
         edge_matrix::EdgeMatrix,
-        geometry::{CameraBasis, CameraFrame, CameraPose, SphereGeometry, TriangleGeometry},
+        geometry::{
+            CameraBasis, CameraFrame, CameraPose, MovingSphereGeometry, QuadGeometry,
+            SphereGeometry, TriangleGeometry,
+        },
         matrix::Matrix,
+        perlin::{Perlin, scale_point},
         polygon_matrix::{Bounds3, HeightMapOptions, PolygonMatrix},
         random::SampleRng,
         stack::MatrixStack,
@@ -28,10 +32,12 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        Aabb, BvhNode, Dielectric, HitRecord, Hittable, HittableList, INFINITY, Intersect,
-        Interval, Lambertian, LinearColor, Material, MaterialId, MaterialRef, Metal, PI,
-        PathTracer, RayGeometry, RayMaterial, RayPrimitive, RayScene, SHADOW_ACNE_EPSILON,
-        ScatterRecord, SceneObject, Sphere, SphereList, SurfaceHit, TriangleMesh,
+        Aabb, BvhNode, CheckerTexture, ConstantMedium, Dielectric, DiffuseLight, HitRecord,
+        Hittable, HittableList, INFINITY, ImageTexture, Intersect, Interval, Isotropic, Lambertian,
+        LinearColor, Material, MaterialId, MaterialRef, Metal, MovingSphere, NoiseTexture, PI,
+        PathTracer, Quad, RayGeometry, RayMaterial, RayPrimitive, RayScene, RayTexture, RotateY,
+        SHADOW_ACNE_EPSILON, ScatterRecord, SceneObject, SolidColor, Sphere, SphereList,
+        SurfaceHit, TextureRef, Translate, TriangleMesh, box_object,
     },
 };
 

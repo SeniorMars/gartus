@@ -6,7 +6,7 @@ use crate::gmath::{
     vector::{Point, Vector},
 };
 use crate::graphics::raytracing::{
-    Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians, sky_gradient,
+    Hittable, INFINITY, Interval, LinearColor, component_mul, degrees_to_radians,
 };
 use crate::graphics::raytracing::{SHADOW_ACNE_EPSILON, normal_scene_color};
 use crate::{
@@ -66,6 +66,9 @@ pub struct RayCamera {
     view_up: Vector,
     defocus_angle: f64,
     focus_distance: f64,
+    shutter_start: f64,
+    shutter_end: f64,
+    background: LinearColor,
     camera_center: Point,
     pixel00_loc: Point,
     pixel_delta_u: Vector,
@@ -87,6 +90,9 @@ struct RayCameraParams {
     view_up: Vector,
     defocus_angle: f64,
     focus_distance: f64,
+    shutter_start: f64,
+    shutter_end: f64,
+    background: LinearColor,
 }
 
 impl Camera3D {
@@ -291,19 +297,15 @@ impl RayCamera {
             view_up: Vector::new(0.0, 1.0, 0.0),
             defocus_angle: 0.0,
             focus_distance: 1.0,
+            shutter_start: 0.0,
+            shutter_end: 1.0,
+            background: LinearColor::new(0.70, 0.80, 1.00),
         })
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn initialized(params: RayCameraParams) -> Self {
-        Self::validate_view(
-            params.vertical_fov,
-            params.lookfrom,
-            params.lookat,
-            params.view_up,
-            params.defocus_angle,
-            params.focus_distance,
-        );
+        Self::validate_view(&params);
 
         let image_height = ((f64::from(params.image_width) / params.aspect_ratio) as u32).max(1);
         let theta = degrees_to_radians(params.vertical_fov);
@@ -346,6 +348,9 @@ impl RayCamera {
             view_up: params.view_up,
             defocus_angle: params.defocus_angle,
             focus_distance: params.focus_distance,
+            shutter_start: params.shutter_start,
+            shutter_end: params.shutter_end,
+            background: params.background,
             camera_center,
             pixel00_loc,
             pixel_delta_u,
@@ -370,41 +375,53 @@ impl RayCamera {
             view_up: self.view_up,
             defocus_angle: self.defocus_angle,
             focus_distance: self.focus_distance,
+            shutter_start: self.shutter_start,
+            shutter_end: self.shutter_end,
+            background: self.background,
         })
     }
 
-    fn validate_view(
-        vertical_fov: f64,
-        lookfrom: Point,
-        lookat: Point,
-        view_up: Vector,
-        defocus_angle: f64,
-        focus_distance: f64,
-    ) {
+    fn validate_view(params: &RayCameraParams) {
         assert!(
-            vertical_fov.is_finite() && 0.0 < vertical_fov && vertical_fov < 180.0,
+            params.vertical_fov.is_finite()
+                && 0.0 < params.vertical_fov
+                && params.vertical_fov < 180.0,
             "vertical field of view must be finite and in 0..180 degrees"
         );
-        let w = lookfrom - lookat;
+        let w = params.lookfrom - params.lookat;
         assert!(
             w.length_squared() > f64::EPSILON,
             "lookfrom and lookat must be distinct"
         );
         assert!(
-            view_up.length_squared() > f64::EPSILON,
+            params.view_up.length_squared() > f64::EPSILON,
             "view-up vector must be nonzero"
         );
         assert!(
-            CameraPose::new(lookfrom, lookat, view_up).frame().is_some(),
+            CameraPose::new(params.lookfrom, params.lookat, params.view_up)
+                .frame()
+                .is_some(),
             "view-up vector must not be parallel to the viewing direction"
         );
         assert!(
-            defocus_angle.is_finite() && (0.0..180.0).contains(&defocus_angle),
+            params.defocus_angle.is_finite() && (0.0..180.0).contains(&params.defocus_angle),
             "defocus angle must be finite and in 0..180 degrees"
         );
         assert!(
-            focus_distance.is_finite() && focus_distance > 0.0,
+            params.focus_distance.is_finite() && params.focus_distance > 0.0,
             "focus distance must be positive and finite"
+        );
+        assert!(
+            params.shutter_start.is_finite()
+                && params.shutter_end.is_finite()
+                && params.shutter_start <= params.shutter_end,
+            "shutter interval must be finite and ordered"
+        );
+        assert!(
+            params.background.x().is_finite()
+                && params.background.y().is_finite()
+                && params.background.z().is_finite(),
+            "background color components must be finite"
         );
     }
 
@@ -515,6 +532,37 @@ impl RayCamera {
         self.initialize()
     }
 
+    /// Sets the camera shutter interval used for sampled rays.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either endpoint is non-finite, or if `start > end`.
+    #[must_use]
+    pub fn with_shutter_interval(mut self, start: f64, end: f64) -> Self {
+        assert!(
+            start.is_finite() && end.is_finite() && start <= end,
+            "shutter interval must be finite and ordered"
+        );
+        self.shutter_start = start;
+        self.shutter_end = end;
+        self.initialize()
+    }
+
+    /// Sets the color returned by world rendering when a ray misses all scene objects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any color component is non-finite.
+    #[must_use]
+    pub fn with_background(mut self, background: LinearColor) -> Self {
+        assert!(
+            background.x().is_finite() && background.y().is_finite() && background.z().is_finite(),
+            "background color components must be finite"
+        );
+        self.background = background;
+        self
+    }
+
     /// Returns the camera's ideal aspect ratio.
     #[must_use]
     pub fn aspect_ratio(self) -> f64 {
@@ -563,6 +611,18 @@ impl RayCamera {
         self.focus_distance
     }
 
+    /// Returns the camera shutter interval used for sampled rays.
+    #[must_use]
+    pub fn shutter_interval(self) -> (f64, f64) {
+        (self.shutter_start, self.shutter_end)
+    }
+
+    /// Returns the color used when world-rendered rays miss the scene.
+    #[must_use]
+    pub fn background(self) -> LinearColor {
+        self.background
+    }
+
     /// Returns the camera origin point.
     #[must_use]
     pub fn camera_center(self) -> Point {
@@ -597,7 +657,11 @@ impl RayCamera {
         let pixel_center = self.pixel00_loc
             + f64::from(x) * self.pixel_delta_u
             + f64::from(y) * self.pixel_delta_v;
-        Ray::new(self.camera_center, pixel_center - self.camera_center)
+        Ray::with_time(
+            self.camera_center,
+            pixel_center - self.camera_center,
+            self.shutter_start,
+        )
     }
 
     fn ray_for_pixel_sample(self, x: u32, y: u32, rng: &mut SampleRng) -> Ray {
@@ -610,7 +674,8 @@ impl RayCamera {
         } else {
             self.defocus_disk_sample(rng)
         };
-        Ray::new(ray_origin, pixel_sample - ray_origin)
+        let ray_time = rng.random_range(self.shutter_start, self.shutter_end);
+        Ray::with_time(ray_origin, pixel_sample - ray_origin, ray_time)
     }
 
     fn sample_square(rng: &mut SampleRng) -> Vector {
@@ -631,26 +696,38 @@ impl RayCamera {
         z ^ (z >> 31)
     }
 
-    fn ray_color(ray: &Ray, depth: u32, world: &dyn Hittable, rng: &mut SampleRng) -> LinearColor {
+    fn ray_color(
+        ray: &Ray,
+        depth: u32,
+        world: &dyn Hittable,
+        background: LinearColor,
+        rng: &mut SampleRng,
+    ) -> LinearColor {
         let mut current_ray = *ray;
         let mut attenuation = LinearColor::new(1.0, 1.0, 1.0);
+        let mut color = LinearColor::default();
 
         for _ in 0..depth {
-            let Some(record) =
-                world.hit(&current_ray, Interval::new(SHADOW_ACNE_EPSILON, INFINITY))
-            else {
-                return component_mul(attenuation, sky_gradient(&current_ray));
+            let Some(record) = world.hit_with_rng(
+                &current_ray,
+                Interval::new(SHADOW_ACNE_EPSILON, INFINITY),
+                rng,
+            ) else {
+                return color + component_mul(attenuation, background);
             };
 
+            let emitted = record.material.emitted(record.u, record.v, record.point);
+            color += component_mul(attenuation, emitted);
+
             let Some(scatter) = record.material.scatter(&current_ray, &record, rng) else {
-                return LinearColor::default();
+                return color;
             };
 
             attenuation = component_mul(attenuation, scatter.attenuation);
             current_ray = scatter.ray;
         }
 
-        LinearColor::default()
+        color
     }
 
     fn render_world_pixel(self, x: u32, y: u32, world: &dyn Hittable) -> Rgb {
@@ -658,7 +735,7 @@ impl RayCamera {
         let mut pixel_color = LinearColor::default();
         for _ in 0..self.samples_per_pixel {
             let ray = self.ray_for_pixel_sample(x, y, &mut rng);
-            pixel_color += Self::ray_color(&ray, self.max_depth, world, &mut rng);
+            pixel_color += Self::ray_color(&ray, self.max_depth, world, self.background, &mut rng);
         }
         Rgb::from_linear_color(pixel_color / f64::from(self.samples_per_pixel))
     }
@@ -977,6 +1054,19 @@ mod tests {
         assert_close(camera.defocus_angle(), 0.0);
         assert_close(camera.focus_distance(), 1.0);
     }
+
+    #[test]
+    fn ray_camera_tracks_background_color() {
+        let background = LinearColor::new(0.1, 0.2, 0.3);
+        let camera = RayCamera::new(20, 1.0).with_background(background);
+        let empty_world = crate::graphics::raytracing::HittableList::new();
+
+        let canvas = camera.render_world(&empty_world);
+
+        assert_eq!(camera.background(), background);
+        assert_eq!(canvas.pixels()[0], Rgb::from_linear_color(background));
+    }
+
     #[test]
     fn ray_camera_vertical_fov_controls_ray_spread() {
         let wide = RayCamera::new(101, 1.0).with_vertical_fov(90.0);
@@ -1014,6 +1104,19 @@ mod tests {
         assert_eq!(*pinhole_ray.origin(), pinhole.camera_center());
         assert_ne!(*defocused_ray.origin(), defocused.camera_center());
     }
+
+    #[test]
+    fn ray_camera_samples_shutter_interval() {
+        let mut rng = SampleRng::new(19);
+        let camera = RayCamera::new(101, 1.0).with_shutter_interval(0.25, 0.75);
+        let center_ray = camera.ray_for_pixel(50, 50);
+        let sampled_ray = camera.ray_for_pixel_sample(50, 50, &mut rng);
+
+        assert_close(center_ray.time(), 0.25);
+        assert!((0.25..0.75).contains(&sampled_ray.time()));
+        assert_eq!(camera.shutter_interval(), (0.25, 0.75));
+    }
+
     #[test]
     fn ray_camera_world_render_is_seeded_and_deterministic() {
         let world = crate::graphics::raytracing::normal_sphere_world();

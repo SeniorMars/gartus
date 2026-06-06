@@ -6,7 +6,9 @@ pub mod weekend;
 
 use crate::{
     gmath::{
-        geometry::{SphereGeometry, TriangleGeometry},
+        geometry::{MovingSphereGeometry, QuadGeometry, SphereGeometry, TriangleGeometry},
+        matrix::Matrix,
+        perlin::{Perlin, scale_point},
         polygon_matrix::{Bounds3, PolygonMatrix},
         ray::Ray,
         vector::{Point, Vector},
@@ -16,6 +18,7 @@ use crate::{
         colors::{LinearRgb, Rgb},
         display::Canvas,
         lighting::{PhongMaterial, ReflectionConstants, RefractiveIndex, SurfaceMaterial},
+        texture::Texture as BitmapTexture,
     },
 };
 pub use scenes::*;
@@ -115,27 +118,307 @@ pub struct ScatterRecord {
 
 /// A surface material that can scatter rays.
 pub trait Material: Send + Sync {
+    /// Returns emitted light for this material at a surface point.
+    fn emitted(&self, _u: f64, _v: f64, _point: Point) -> LinearColor {
+        LinearColor::default()
+    }
+
     /// Produces a scattered ray and attenuation for a surface hit.
     fn scatter(
         &self,
-        ray_in: &Ray,
-        hit: &HitRecord<'_>,
-        rng: &mut SampleRng,
-    ) -> Option<ScatterRecord>;
+        _ray_in: &Ray,
+        _hit: &HitRecord<'_>,
+        _rng: &mut SampleRng,
+    ) -> Option<ScatterRecord> {
+        None
+    }
+}
+
+/// Procedural or image-backed texture sampled by ray-tracing materials.
+pub trait RayTexture: fmt::Debug + Send + Sync {
+    /// Returns the linear color at texture coordinate `(u, v)` and surface point `point`.
+    fn value(&self, u: f64, v: f64, point: Point) -> LinearColor;
+}
+
+/// Shared ray-texture handle.
+pub type TextureRef = Arc<dyn RayTexture>;
+
+/// A texture that always returns one linear color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SolidColor {
+    /// Constant texture color.
+    pub color: LinearColor,
+}
+
+impl SolidColor {
+    /// Creates a constant linear-color texture.
+    #[must_use]
+    pub const fn new(color: LinearColor) -> Self {
+        Self { color }
+    }
+
+    /// Creates a constant texture from display RGB bytes treated as linear unit values.
+    #[must_use]
+    pub fn from_rgb(color: Rgb) -> Self {
+        Self::new(rgb_to_linear_color(color))
+    }
+}
+
+impl From<LinearColor> for SolidColor {
+    fn from(color: LinearColor) -> Self {
+        Self::new(color)
+    }
+}
+
+impl From<Rgb> for SolidColor {
+    fn from(color: Rgb) -> Self {
+        Self::from_rgb(color)
+    }
+}
+
+impl RayTexture for SolidColor {
+    fn value(&self, _u: f64, _v: f64, _point: Point) -> LinearColor {
+        self.color
+    }
+}
+
+/// A 3D checker texture that alternates between two child textures in world space.
+#[derive(Clone, Debug)]
+pub struct CheckerTexture {
+    inv_scale: f64,
+    even: TextureRef,
+    odd: TextureRef,
+}
+
+impl CheckerTexture {
+    /// Creates a checker texture from two child textures.
+    #[must_use]
+    pub fn new(scale: f64, even: TextureRef, odd: TextureRef) -> Self {
+        let inv_scale = if scale.is_finite() && scale.abs() > f64::EPSILON {
+            1.0 / scale.abs()
+        } else {
+            1.0
+        };
+        Self {
+            inv_scale,
+            even,
+            odd,
+        }
+    }
+
+    /// Creates a checker texture from two constant colors.
+    #[must_use]
+    pub fn from_colors(scale: f64, even: LinearColor, odd: LinearColor) -> Self {
+        Self::new(
+            scale,
+            Arc::new(SolidColor::new(even)),
+            Arc::new(SolidColor::new(odd)),
+        )
+    }
+}
+
+impl RayTexture for CheckerTexture {
+    #[allow(clippy::cast_possible_truncation)]
+    fn value(&self, texture_u: f64, texture_v: f64, point: Point) -> LinearColor {
+        let x_integer = (self.inv_scale * point.x()).floor() as i64;
+        let y_integer = (self.inv_scale * point.y()).floor() as i64;
+        let z_integer = (self.inv_scale * point.z()).floor() as i64;
+        if (x_integer + y_integer + z_integer) % 2 == 0 {
+            self.even.value(texture_u, texture_v, point)
+        } else {
+            self.odd.value(texture_u, texture_v, point)
+        }
+    }
+}
+
+/// A ray-tracing texture backed by the library's 2D bitmap texture sampler.
+#[derive(Clone, Debug)]
+pub struct ImageTexture {
+    texture: BitmapTexture,
+}
+
+impl ImageTexture {
+    /// Creates an image texture from an existing bitmap texture.
+    #[must_use]
+    pub const fn new(texture: BitmapTexture) -> Self {
+        Self { texture }
+    }
+
+    /// Creates an image texture from an existing canvas.
+    #[must_use]
+    pub const fn from_canvas(canvas: Canvas) -> Self {
+        Self::new(BitmapTexture::from_canvas(canvas))
+    }
+
+    /// Returns the underlying bitmap texture.
+    #[must_use]
+    pub const fn texture(&self) -> &BitmapTexture {
+        &self.texture
+    }
+
+    /// Loads an image file through the library's external image loader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image cannot be loaded or converted into a canvas.
+    #[cfg(feature = "external")]
+    pub fn from_file(path: impl AsRef<str>) -> Result<Self, Box<dyn std::error::Error>> {
+        let canvas = crate::external::ppmify(path.as_ref(), false)?;
+        Ok(Self::from_canvas(canvas))
+    }
+}
+
+impl RayTexture for ImageTexture {
+    fn value(&self, u: f64, v: f64, _point: Point) -> LinearColor {
+        if self.texture.image().is_empty() {
+            return rgb_to_linear_color(Rgb::CYAN);
+        }
+        rgb_to_linear_color(self.texture.sample(u, v))
+    }
+}
+
+/// Procedural Perlin-noise texture.
+#[derive(Clone, Debug)]
+pub struct NoiseTexture {
+    noise: Perlin,
+    scale: f64,
+    kind: NoiseTextureKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NoiseTextureKind {
+    Noise,
+    Turbulence { depth: usize },
+    Marble { depth: usize },
+}
+
+impl NoiseTexture {
+    /// Creates a shifted Perlin noise texture from `seed`.
+    #[must_use]
+    pub fn new(scale: f64, seed: u64) -> Self {
+        Self {
+            noise: Perlin::new(seed),
+            scale,
+            kind: NoiseTextureKind::Noise,
+        }
+    }
+
+    /// Creates a turbulence texture from `seed`.
+    #[must_use]
+    pub fn turbulence(scale: f64, depth: usize, seed: u64) -> Self {
+        Self {
+            noise: Perlin::new(seed),
+            scale,
+            kind: NoiseTextureKind::Turbulence { depth },
+        }
+    }
+
+    /// Creates a marble-like texture from `seed`.
+    #[must_use]
+    pub fn marble(scale: f64, depth: usize, seed: u64) -> Self {
+        Self {
+            noise: Perlin::new(seed),
+            scale,
+            kind: NoiseTextureKind::Marble { depth },
+        }
+    }
+
+    /// Returns the coordinate scale applied by this texture.
+    #[must_use]
+    pub const fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+
+impl Default for NoiseTexture {
+    fn default() -> Self {
+        Self::new(1.0, 1)
+    }
+}
+
+impl RayTexture for NoiseTexture {
+    fn value(&self, _u: f64, _v: f64, point: Point) -> LinearColor {
+        let intensity = match self.kind {
+            NoiseTextureKind::Noise => {
+                0.5 * (1.0 + self.noise.noise(scale_point(point, self.scale)))
+            }
+            NoiseTextureKind::Turbulence { depth } => {
+                self.noise.turbulence(scale_point(point, self.scale), depth)
+            }
+            NoiseTextureKind::Marble { depth } => {
+                0.5 * (1.0
+                    + (self.scale * point.z() + 10.0 * self.noise.turbulence(point, depth)).sin())
+            }
+        };
+        LinearColor::new(intensity, intensity, intensity)
+    }
 }
 
 /// Lambertian diffuse material.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Lambertian {
-    /// Diffuse reflectance.
+    /// Representative diffuse reflectance for constant-color compatibility.
     pub albedo: LinearColor,
+    texture: TextureRef,
+}
+
+impl fmt::Debug for Lambertian {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Lambertian")
+            .field("albedo", &self.albedo)
+            .field("texture", &self.texture)
+            .finish()
+    }
 }
 
 impl Lambertian {
     /// Creates a Lambertian material with the supplied albedo.
     #[must_use]
     pub fn new(albedo: LinearColor) -> Self {
-        Self { albedo }
+        Self {
+            albedo,
+            texture: Arc::new(SolidColor::new(albedo)),
+        }
+    }
+
+    /// Creates a Lambertian material from a shared texture.
+    #[must_use]
+    pub fn from_shared_texture(texture: TextureRef) -> Self {
+        Self {
+            albedo: LinearColor::new(0.5, 0.5, 0.5),
+            texture,
+        }
+    }
+
+    /// Creates a Lambertian material from a texture object.
+    #[must_use]
+    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+        Self::from_shared_texture(Arc::new(texture))
+    }
+
+    /// Creates a Lambertian material using a 3D checker texture.
+    #[must_use]
+    pub fn checker(scale: f64, even: LinearColor, odd: LinearColor) -> Self {
+        Self::from_texture(CheckerTexture::from_colors(scale, even, odd))
+    }
+
+    /// Creates a Lambertian material using a Perlin noise texture.
+    #[must_use]
+    pub fn noise(scale: f64, seed: u64) -> Self {
+        Self::from_texture(NoiseTexture::new(scale, seed))
+    }
+
+    /// Creates a Lambertian material using a marble-like Perlin texture.
+    #[must_use]
+    pub fn marble(scale: f64, seed: u64) -> Self {
+        Self::from_texture(NoiseTexture::marble(scale, 7, seed))
+    }
+
+    /// Returns the texture sampled for diffuse attenuation.
+    #[must_use]
+    pub fn texture(&self) -> &dyn RayTexture {
+        self.texture.as_ref()
     }
 
     /// Creates a Lambertian material from display RGB bytes.
@@ -188,7 +471,7 @@ impl From<SurfaceMaterial> for Lambertian {
 impl Material for Lambertian {
     fn scatter(
         &self,
-        _ray_in: &Ray,
+        ray_in: &Ray,
         hit: &HitRecord<'_>,
         rng: &mut SampleRng,
     ) -> Option<ScatterRecord> {
@@ -198,8 +481,92 @@ impl Material for Lambertian {
         }
 
         Some(ScatterRecord {
-            ray: Ray::new(hit.point, scatter_direction),
-            attenuation: self.albedo,
+            ray: Ray::with_time(hit.point, scatter_direction, ray_in.time()),
+            attenuation: self.texture.value(hit.u, hit.v, hit.point),
+        })
+    }
+}
+
+/// Diffuse light-emitting material.
+#[derive(Clone, Debug)]
+pub struct DiffuseLight {
+    texture: TextureRef,
+}
+
+impl DiffuseLight {
+    /// Creates a light material with a constant emitted color.
+    #[must_use]
+    pub fn new(emit: LinearColor) -> Self {
+        Self::from_texture(SolidColor::new(emit))
+    }
+
+    /// Creates a light material from a shared texture.
+    #[must_use]
+    pub fn from_shared_texture(texture: TextureRef) -> Self {
+        Self { texture }
+    }
+
+    /// Creates a light material from a texture object.
+    #[must_use]
+    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+        Self::from_shared_texture(Arc::new(texture))
+    }
+
+    /// Returns the texture sampled for emitted radiance.
+    #[must_use]
+    pub fn texture(&self) -> &dyn RayTexture {
+        self.texture.as_ref()
+    }
+}
+
+impl Material for DiffuseLight {
+    fn emitted(&self, u: f64, v: f64, point: Point) -> LinearColor {
+        self.texture.value(u, v, point)
+    }
+}
+
+/// Isotropic phase-function material for constant-density volumes.
+#[derive(Clone, Debug)]
+pub struct Isotropic {
+    texture: TextureRef,
+}
+
+impl Isotropic {
+    /// Creates an isotropic material with constant attenuation.
+    #[must_use]
+    pub fn new(albedo: LinearColor) -> Self {
+        Self::from_texture(SolidColor::new(albedo))
+    }
+
+    /// Creates an isotropic material from a shared texture.
+    #[must_use]
+    pub fn from_shared_texture(texture: TextureRef) -> Self {
+        Self { texture }
+    }
+
+    /// Creates an isotropic material from a texture object.
+    #[must_use]
+    pub fn from_texture(texture: impl RayTexture + 'static) -> Self {
+        Self::from_shared_texture(Arc::new(texture))
+    }
+
+    /// Returns the texture sampled for medium attenuation.
+    #[must_use]
+    pub fn texture(&self) -> &dyn RayTexture {
+        self.texture.as_ref()
+    }
+}
+
+impl Material for Isotropic {
+    fn scatter(
+        &self,
+        ray_in: &Ray,
+        hit: &HitRecord<'_>,
+        rng: &mut SampleRng,
+    ) -> Option<ScatterRecord> {
+        Some(ScatterRecord {
+            ray: Ray::with_time(hit.point, rng.random_unit_vector(), ray_in.time()),
+            attenuation: self.texture.value(hit.u, hit.v, hit.point),
         })
     }
 }
@@ -283,7 +650,7 @@ impl Material for Metal {
         }
 
         Some(ScatterRecord {
-            ray: Ray::new(hit.point, scattered_direction),
+            ray: Ray::with_time(hit.point, scattered_direction, ray_in.time()),
             attenuation: self.albedo,
         })
     }
@@ -382,17 +749,21 @@ impl Material for Dielectric {
         };
 
         Some(ScatterRecord {
-            ray: Ray::new(hit.point, direction),
+            ray: Ray::with_time(hit.point, direction, ray_in.time()),
             attenuation,
         })
     }
 }
 
 /// Material variants supported by the data-oriented ray scene.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum RayMaterial {
     /// Lambertian diffuse material.
     Lambertian(Lambertian),
+    /// Diffuse light-emitting material.
+    DiffuseLight(DiffuseLight),
+    /// Isotropic phase-function material.
+    Isotropic(Isotropic),
     /// Reflective metal material.
     Metal(Metal),
     /// Transparent dielectric material.
@@ -402,8 +773,38 @@ pub enum RayMaterial {
 impl RayMaterial {
     /// Creates a Lambertian material variant.
     #[must_use]
-    pub const fn lambertian(albedo: LinearColor) -> Self {
-        Self::Lambertian(Lambertian { albedo })
+    pub fn lambertian(albedo: LinearColor) -> Self {
+        Self::Lambertian(Lambertian::new(albedo))
+    }
+
+    /// Creates a textured Lambertian material variant.
+    #[must_use]
+    pub fn textured_lambertian(texture: impl RayTexture + 'static) -> Self {
+        Self::Lambertian(Lambertian::from_texture(texture))
+    }
+
+    /// Creates a diffuse light material variant.
+    #[must_use]
+    pub fn diffuse_light(emit: LinearColor) -> Self {
+        Self::DiffuseLight(DiffuseLight::new(emit))
+    }
+
+    /// Creates a textured diffuse light material variant.
+    #[must_use]
+    pub fn textured_diffuse_light(texture: impl RayTexture + 'static) -> Self {
+        Self::DiffuseLight(DiffuseLight::from_texture(texture))
+    }
+
+    /// Creates an isotropic phase-function material variant.
+    #[must_use]
+    pub fn isotropic(albedo: LinearColor) -> Self {
+        Self::Isotropic(Isotropic::new(albedo))
+    }
+
+    /// Creates a textured isotropic phase-function material variant.
+    #[must_use]
+    pub fn textured_isotropic(texture: impl RayTexture + 'static) -> Self {
+        Self::Isotropic(Isotropic::from_texture(texture))
     }
 
     /// Creates a metal material variant.
@@ -443,6 +844,18 @@ impl From<Lambertian> for RayMaterial {
     }
 }
 
+impl From<DiffuseLight> for RayMaterial {
+    fn from(material: DiffuseLight) -> Self {
+        Self::DiffuseLight(material)
+    }
+}
+
+impl From<Isotropic> for RayMaterial {
+    fn from(material: Isotropic) -> Self {
+        Self::Isotropic(material)
+    }
+}
+
 impl From<Metal> for RayMaterial {
     fn from(material: Metal) -> Self {
         Self::Metal(material)
@@ -456,6 +869,16 @@ impl From<Dielectric> for RayMaterial {
 }
 
 impl Material for RayMaterial {
+    fn emitted(&self, u: f64, v: f64, point: Point) -> LinearColor {
+        match self {
+            Self::Lambertian(material) => material.emitted(u, v, point),
+            Self::DiffuseLight(material) => material.emitted(u, v, point),
+            Self::Isotropic(material) => material.emitted(u, v, point),
+            Self::Metal(material) => material.emitted(u, v, point),
+            Self::Dielectric(material) => material.emitted(u, v, point),
+        }
+    }
+
     fn scatter(
         &self,
         ray_in: &Ray,
@@ -464,6 +887,8 @@ impl Material for RayMaterial {
     ) -> Option<ScatterRecord> {
         match self {
             Self::Lambertian(material) => material.scatter(ray_in, hit, rng),
+            Self::DiffuseLight(material) => material.scatter(ray_in, hit, rng),
+            Self::Isotropic(material) => material.scatter(ray_in, hit, rng),
             Self::Metal(material) => material.scatter(ray_in, hit, rng),
             Self::Dielectric(material) => material.scatter(ray_in, hit, rng),
         }
@@ -486,6 +911,10 @@ pub struct SurfaceHit {
     pub normal: Vector,
     /// Ray parameter at the hit point.
     pub t: f64,
+    /// Horizontal texture coordinate at the hit point.
+    pub u: f64,
+    /// Vertical texture coordinate at the hit point.
+    pub v: f64,
     /// True when the ray hit the outside face of the surface.
     pub front_face: bool,
 }
@@ -496,6 +925,21 @@ impl SurfaceHit {
     /// `outward_normal` is expected to have unit length.
     #[must_use]
     pub fn new(ray: &Ray, point: Point, outward_normal: Vector, t: f64) -> Self {
+        Self::with_uv(ray, point, outward_normal, t, 0.0, 0.0)
+    }
+
+    /// Creates a surface hit with texture coordinates and orients `outward_normal` against `ray`.
+    ///
+    /// `outward_normal` is expected to have unit length.
+    #[must_use]
+    pub fn with_uv(
+        ray: &Ray,
+        point: Point,
+        outward_normal: Vector,
+        t: f64,
+        u: f64,
+        v: f64,
+    ) -> Self {
         let front_face = ray.direction().dot(outward_normal) < 0.0;
         let normal = if front_face {
             outward_normal
@@ -506,6 +950,8 @@ impl SurfaceHit {
             point,
             normal,
             t,
+            u,
+            v,
             front_face,
         }
     }
@@ -527,11 +973,27 @@ impl Intersect for SphereGeometry {
         let root = hit_sphere_in_interval(self.center(), self.radius(), ray, ray_t)?;
         let point = ray.at(root);
         let outward_normal = self.outward_normal_at(point);
-        Some(SurfaceHit::new(ray, point, outward_normal, root))
+        let (u, v) = sphere_uv(outward_normal);
+        Some(SurfaceHit::with_uv(ray, point, outward_normal, root, u, v))
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
         Some(sphere_bounds(*self))
+    }
+}
+
+impl Intersect for MovingSphereGeometry {
+    fn intersect(&self, ray: &Ray, ray_t: Interval) -> Option<SurfaceHit> {
+        let center = self.center_at(ray.time());
+        let root = hit_sphere_in_interval(center, self.radius(), ray, ray_t)?;
+        let point = ray.at(root);
+        let outward_normal = self.outward_normal_at(point, ray.time());
+        let (u, v) = sphere_uv(outward_normal);
+        Some(SurfaceHit::with_uv(ray, point, outward_normal, root, u, v))
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        Some(moving_sphere_bounds(*self))
     }
 }
 
@@ -542,7 +1004,36 @@ impl Intersect for TriangleGeometry {
         if normal.length_squared() <= f64::EPSILON {
             return None;
         }
-        Some(SurfaceHit::new(ray, ray.at(hit.t), normal, hit.t))
+        Some(SurfaceHit::with_uv(
+            ray,
+            ray.at(hit.t),
+            normal,
+            hit.t,
+            hit.u,
+            hit.v,
+        ))
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        Some(self.bounds())
+    }
+}
+
+impl Intersect for QuadGeometry {
+    fn intersect(&self, ray: &Ray, ray_t: Interval) -> Option<SurfaceHit> {
+        let hit = self.hit_ray(ray, ray_t.min, ray_t.max)?;
+        let normal = self.geometric_normal();
+        if normal.length_squared() <= f64::EPSILON {
+            return None;
+        }
+        Some(SurfaceHit::with_uv(
+            ray,
+            ray.at(hit.t),
+            normal,
+            hit.t,
+            hit.u,
+            hit.v,
+        ))
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
@@ -569,8 +1060,12 @@ pub fn hit_triangle(
 pub enum RayGeometry {
     /// Analytic sphere geometry.
     Sphere(SphereGeometry),
+    /// Analytic moving sphere geometry.
+    MovingSphere(MovingSphereGeometry),
     /// Analytic triangle geometry.
     Triangle(TriangleGeometry),
+    /// Analytic parallelogram geometry.
+    Quad(QuadGeometry),
 }
 
 impl RayGeometry {
@@ -580,10 +1075,22 @@ impl RayGeometry {
         Self::Sphere(SphereGeometry::new(center, radius))
     }
 
+    /// Creates a moving sphere geometry variant.
+    #[must_use]
+    pub fn moving_sphere(center_start: Point, center_end: Point, radius: f64) -> Self {
+        Self::MovingSphere(MovingSphereGeometry::new(center_start, center_end, radius))
+    }
+
     /// Creates a triangle geometry variant.
     #[must_use]
     pub const fn triangle(p0: Point, p1: Point, p2: Point) -> Self {
         Self::Triangle(TriangleGeometry::new(p0, p1, p2))
+    }
+
+    /// Creates a quad geometry variant.
+    #[must_use]
+    pub fn quad(corner: Point, u: Vector, v: Vector) -> Self {
+        Self::Quad(QuadGeometry::new(corner, u, v))
     }
 }
 
@@ -593,9 +1100,21 @@ impl From<SphereGeometry> for RayGeometry {
     }
 }
 
+impl From<MovingSphereGeometry> for RayGeometry {
+    fn from(geometry: MovingSphereGeometry) -> Self {
+        Self::MovingSphere(geometry)
+    }
+}
+
 impl From<TriangleGeometry> for RayGeometry {
     fn from(geometry: TriangleGeometry) -> Self {
         Self::Triangle(geometry)
+    }
+}
+
+impl From<QuadGeometry> for RayGeometry {
+    fn from(geometry: QuadGeometry) -> Self {
+        Self::Quad(geometry)
     }
 }
 
@@ -603,14 +1122,18 @@ impl Intersect for RayGeometry {
     fn intersect(&self, ray: &Ray, ray_t: Interval) -> Option<SurfaceHit> {
         match self {
             Self::Sphere(geometry) => geometry.intersect(ray, ray_t),
+            Self::MovingSphere(geometry) => geometry.intersect(ray, ray_t),
             Self::Triangle(geometry) => geometry.intersect(ray, ray_t),
+            Self::Quad(geometry) => geometry.intersect(ray, ray_t),
         }
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
         match self {
             Self::Sphere(geometry) => geometry.bounding_box(),
+            Self::MovingSphere(geometry) => geometry.bounding_box(),
             Self::Triangle(geometry) => geometry.bounding_box(),
+            Self::Quad(geometry) => geometry.bounding_box(),
         }
     }
 }
@@ -624,6 +1147,10 @@ pub struct HitRecord<'a> {
     pub normal: Vector,
     /// Ray parameter at the hit point.
     pub t: f64,
+    /// Horizontal texture coordinate at the hit point.
+    pub u: f64,
+    /// Vertical texture coordinate at the hit point.
+    pub v: f64,
     /// True when the ray hit the outside face of the surface.
     pub front_face: bool,
     /// Material associated with the hit surface.
@@ -637,6 +1164,8 @@ impl fmt::Debug for HitRecord<'_> {
             .field("point", &self.point)
             .field("normal", &self.normal)
             .field("t", &self.t)
+            .field("u", &self.u)
+            .field("v", &self.v)
             .field("front_face", &self.front_face)
             .finish_non_exhaustive()
     }
@@ -659,6 +1188,8 @@ impl<'a> HitRecord<'a> {
                 point,
                 normal: outward_normal,
                 t,
+                u: 0.0,
+                v: 0.0,
                 front_face: false,
             },
             material,
@@ -674,6 +1205,8 @@ impl<'a> HitRecord<'a> {
             point: surface.point,
             normal: surface.normal,
             t: surface.t,
+            u: surface.u,
+            v: surface.v,
             front_face: surface.front_face,
             material,
         }
@@ -735,7 +1268,12 @@ impl<G: fmt::Debug> fmt::Debug for SceneObject<G> {
 }
 
 impl<G: Intersect> Hittable for SceneObject<G> {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
         let surface = self.geometry.intersect(ray, ray_t)?;
         Some(HitRecord::from_surface(surface, self.material()))
     }
@@ -748,7 +1286,18 @@ impl<G: Intersect> Hittable for SceneObject<G> {
 /// A scene object that can be intersected by a ray.
 pub trait Hittable: Send + Sync {
     /// Returns the closest hit inside `ray_t`, if any.
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>>;
+    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+        let mut rng = SampleRng::default();
+        self.hit_with_rng(ray, ray_t, &mut rng)
+    }
+
+    /// Returns the closest hit inside `ray_t`, using `rng` for probabilistic volumes.
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>>;
 
     /// Returns an axis-aligned bounding box for acceleration structures, if available.
     fn bounding_box(&self) -> Option<Aabb> {
@@ -832,7 +1381,12 @@ impl Sphere {
 }
 
 impl Hittable for Sphere {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
         let surface = self.geometry.intersect(ray, ray_t)?;
         Some(HitRecord::from_surface(surface, self.material()))
     }
@@ -842,10 +1396,722 @@ impl Hittable for Sphere {
     }
 }
 
+/// A linearly moving sphere hittable.
+#[derive(Clone)]
+pub struct MovingSphere {
+    geometry: MovingSphereGeometry,
+    material: MaterialRef,
+}
+
+impl fmt::Debug for MovingSphere {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MovingSphere")
+            .field("geometry", &self.geometry)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MovingSphere {
+    /// Creates a gray diffuse moving sphere.
+    #[must_use]
+    pub fn new(center_start: Point, center_end: Point, radius: f64) -> Self {
+        Self::with_shared_material(center_start, center_end, radius, default_material())
+    }
+
+    /// Creates a moving sphere with a concrete material.
+    #[must_use]
+    pub fn with_material(
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        material: impl Material + 'static,
+    ) -> Self {
+        Self::with_shared_material(center_start, center_end, radius, Arc::new(material))
+    }
+
+    /// Creates a moving sphere with a shared material handle.
+    #[must_use]
+    pub fn with_shared_material(
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        material: MaterialRef,
+    ) -> Self {
+        Self::from_shared_geometry(
+            MovingSphereGeometry::new(center_start, center_end, radius),
+            material,
+        )
+    }
+
+    /// Creates a moving sphere from shared analytic geometry and a concrete material.
+    #[must_use]
+    pub fn from_geometry(
+        geometry: MovingSphereGeometry,
+        material: impl Material + 'static,
+    ) -> Self {
+        Self::from_shared_geometry(geometry, Arc::new(material))
+    }
+
+    /// Creates a moving sphere from shared analytic geometry and a shared material handle.
+    #[must_use]
+    pub fn from_shared_geometry(geometry: MovingSphereGeometry, material: MaterialRef) -> Self {
+        Self { geometry, material }
+    }
+
+    /// Returns the shared analytic moving sphere geometry.
+    #[must_use]
+    pub const fn geometry(&self) -> MovingSphereGeometry {
+        self.geometry
+    }
+
+    /// Returns the material associated with this moving sphere.
+    #[must_use]
+    pub fn material(&self) -> &dyn Material {
+        self.material.as_ref()
+    }
+}
+
+impl Hittable for MovingSphere {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let surface = self.geometry.intersect(ray, ray_t)?;
+        Some(HitRecord::from_surface(surface, self.material()))
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.geometry.bounding_box()
+    }
+}
+
+/// A parallelogram hittable.
+#[derive(Clone)]
+pub struct Quad {
+    geometry: QuadGeometry,
+    material: MaterialRef,
+}
+
+impl fmt::Debug for Quad {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Quad")
+            .field("geometry", &self.geometry)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Quad {
+    /// Creates a gray diffuse quad from a corner and two side vectors.
+    #[must_use]
+    pub fn new(corner: Point, u: Vector, v: Vector) -> Self {
+        Self::with_shared_material(corner, u, v, default_material())
+    }
+
+    /// Creates a quad with a concrete material.
+    #[must_use]
+    pub fn with_material(
+        corner: Point,
+        u: Vector,
+        v: Vector,
+        material: impl Material + 'static,
+    ) -> Self {
+        Self::with_shared_material(corner, u, v, Arc::new(material))
+    }
+
+    /// Creates a quad with a shared material handle.
+    #[must_use]
+    pub fn with_shared_material(
+        corner: Point,
+        u: Vector,
+        v: Vector,
+        material: MaterialRef,
+    ) -> Self {
+        Self::from_shared_geometry(QuadGeometry::new(corner, u, v), material)
+    }
+
+    /// Creates a quad from shared analytic geometry and a concrete material.
+    #[must_use]
+    pub fn from_geometry(geometry: QuadGeometry, material: impl Material + 'static) -> Self {
+        Self::from_shared_geometry(geometry, Arc::new(material))
+    }
+
+    /// Creates a quad from shared analytic geometry and a shared material handle.
+    #[must_use]
+    pub fn from_shared_geometry(geometry: QuadGeometry, material: MaterialRef) -> Self {
+        Self { geometry, material }
+    }
+
+    /// Returns the shared analytic quad geometry.
+    #[must_use]
+    pub const fn geometry(&self) -> QuadGeometry {
+        self.geometry
+    }
+
+    /// Returns the material associated with this quad.
+    #[must_use]
+    pub fn material(&self) -> &dyn Material {
+        self.material.as_ref()
+    }
+}
+
+impl Hittable for Quad {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let surface = self.geometry.intersect(ray, ray_t)?;
+        Some(HitRecord::from_surface(surface, self.material()))
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.geometry.bounding_box()
+    }
+}
+
+/// Creates an axis-aligned box from six quad sides.
+#[must_use]
+pub fn box_object(a: Point, b: Point, material: MaterialRef) -> HittableList {
+    let min = Point::new(a.x().min(b.x()), a.y().min(b.y()), a.z().min(b.z()));
+    let max = Point::new(a.x().max(b.x()), a.y().max(b.y()), a.z().max(b.z()));
+
+    let dx = Vector::new(max.x() - min.x(), 0.0, 0.0);
+    let dy = Vector::new(0.0, max.y() - min.y(), 0.0);
+    let dz = Vector::new(0.0, 0.0, max.z() - min.z());
+
+    let mut sides = HittableList::with_capacity(6);
+    sides.add(Quad::with_shared_material(
+        Point::new(min.x(), min.y(), max.z()),
+        dx,
+        dy,
+        material.clone(),
+    ));
+    sides.add(Quad::with_shared_material(
+        Point::new(max.x(), min.y(), max.z()),
+        -dz,
+        dy,
+        material.clone(),
+    ));
+    sides.add(Quad::with_shared_material(
+        Point::new(max.x(), min.y(), min.z()),
+        -dx,
+        dy,
+        material.clone(),
+    ));
+    sides.add(Quad::with_shared_material(
+        Point::new(min.x(), min.y(), min.z()),
+        dz,
+        dy,
+        material.clone(),
+    ));
+    sides.add(Quad::with_shared_material(
+        Point::new(min.x(), max.y(), max.z()),
+        dx,
+        -dz,
+        material.clone(),
+    ));
+    sides.add(Quad::with_shared_material(
+        Point::new(min.x(), min.y(), min.z()),
+        dx,
+        dz,
+        material,
+    ));
+    sides
+}
+
+/// A translated instance of a hittable object.
+pub struct Translate {
+    object: Box<dyn Hittable>,
+    offset: Vector,
+    bounds: Option<Aabb>,
+}
+
+impl fmt::Debug for Translate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Translate")
+            .field("offset", &self.offset)
+            .field("bounds", &self.bounds)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Translate {
+    /// Creates a translated instance.
+    #[must_use]
+    pub fn new(object: impl Hittable + 'static, offset: Vector) -> Self {
+        let bounds = object
+            .bounding_box()
+            .map(|bounds| bounds.translated(offset));
+        Self {
+            object: Box::new(object),
+            offset,
+            bounds,
+        }
+    }
+
+    /// Creates a translated instance from a boxed hittable.
+    #[must_use]
+    pub fn from_box(object: Box<dyn Hittable>, offset: Vector) -> Self {
+        let bounds = object
+            .bounding_box()
+            .map(|bounds| bounds.translated(offset));
+        Self {
+            object,
+            offset,
+            bounds,
+        }
+    }
+
+    /// Returns the translation offset.
+    #[must_use]
+    pub const fn offset(&self) -> Vector {
+        self.offset
+    }
+}
+
+impl Hittable for Translate {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let offset_ray = Ray::with_time(*ray.origin() - self.offset, *ray.direction(), ray.time());
+        let mut record = self.object.hit_with_rng(&offset_ray, ray_t, rng)?;
+        record.point = record.point + self.offset;
+        Some(record)
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounds
+    }
+}
+
+/// A Y-axis rotated instance of a hittable object.
+pub struct RotateY {
+    object: Box<dyn Hittable>,
+    sin_theta: f64,
+    cos_theta: f64,
+    bounds: Option<Aabb>,
+}
+
+impl fmt::Debug for RotateY {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RotateY")
+            .field("sin_theta", &self.sin_theta)
+            .field("cos_theta", &self.cos_theta)
+            .field("bounds", &self.bounds)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RotateY {
+    /// Creates a Y-axis rotated instance.
+    #[must_use]
+    pub fn new(object: impl Hittable + 'static, angle_degrees: f64) -> Self {
+        Self::from_box(Box::new(object), angle_degrees)
+    }
+
+    /// Creates a Y-axis rotated instance from a boxed hittable.
+    #[must_use]
+    pub fn from_box(object: Box<dyn Hittable>, angle_degrees: f64) -> Self {
+        let radians = degrees_to_radians(angle_degrees);
+        let sin_theta = radians.sin();
+        let cos_theta = radians.cos();
+        let bounds = object
+            .bounding_box()
+            .map(|bounds| rotate_y_bounds(bounds, sin_theta, cos_theta));
+        Self {
+            object,
+            sin_theta,
+            cos_theta,
+            bounds,
+        }
+    }
+
+    /// Returns the sine of this instance rotation.
+    #[must_use]
+    pub const fn sin_theta(&self) -> f64 {
+        self.sin_theta
+    }
+
+    /// Returns the cosine of this instance rotation.
+    #[must_use]
+    pub const fn cos_theta(&self) -> f64 {
+        self.cos_theta
+    }
+}
+
+impl Hittable for RotateY {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let rotated_ray = Ray::with_time(
+            rotate_y_point_inverse(*ray.origin(), self.sin_theta, self.cos_theta),
+            rotate_y_vector_inverse(*ray.direction(), self.sin_theta, self.cos_theta),
+            ray.time(),
+        );
+        let mut record = self.object.hit_with_rng(&rotated_ray, ray_t, rng)?;
+        record.point = rotate_y_point(record.point, self.sin_theta, self.cos_theta);
+        record.normal = rotate_y_vector(record.normal, self.sin_theta, self.cos_theta);
+        Some(record)
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounds
+    }
+}
+
+/// A generic matrix-transformed instance of a hittable object.
+///
+/// The transform maps object space into world space. Rays are transformed by the cached inverse
+/// before hitting the child object, then hit points and normals are transformed back to world
+/// space. Normals use the inverse-transpose transform, which keeps them correct for non-uniform
+/// scales as well as rotations and translations.
+pub struct MatrixInstance {
+    object: Box<dyn Hittable>,
+    transform: Matrix,
+    inverse: Matrix,
+    normal_transform: Matrix,
+    bounds: Option<Aabb>,
+}
+
+impl fmt::Debug for MatrixInstance {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixInstance")
+            .field("bounds", &self.bounds)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MatrixInstance {
+    /// Creates a transformed instance.
+    ///
+    /// Returns `None` if `transform` is not an invertible 4x4 matrix.
+    #[must_use]
+    pub fn new(object: impl Hittable + 'static, transform: Matrix) -> Option<Self> {
+        Self::from_box(Box::new(object), transform)
+    }
+
+    /// Creates a transformed instance from a boxed hittable.
+    ///
+    /// Returns `None` if `transform` is not an invertible 4x4 matrix.
+    #[must_use]
+    pub fn from_box(object: Box<dyn Hittable>, transform: Matrix) -> Option<Self> {
+        if transform.rows() != 4 || transform.cols() != 4 {
+            return None;
+        }
+        let inverse = transform.inverse()?;
+        let normal_transform = inverse.transpose();
+        let bounds = object
+            .bounding_box()
+            .map(|bounds| transform_bounds(bounds, &transform));
+        Some(Self {
+            object,
+            transform,
+            inverse,
+            normal_transform,
+            bounds,
+        })
+    }
+
+    /// Returns the object-to-world transform.
+    pub const fn transform(&self) -> &Matrix {
+        &self.transform
+    }
+
+    /// Returns the world-to-object transform.
+    pub const fn inverse(&self) -> &Matrix {
+        &self.inverse
+    }
+}
+
+impl Hittable for MatrixInstance {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let object_ray = Ray::with_time(
+            transform_point(*ray.origin(), &self.inverse),
+            transform_vector(*ray.direction(), &self.inverse),
+            ray.time(),
+        );
+        let mut record = self.object.hit_with_rng(&object_ray, ray_t, rng)?;
+        let object_outward_normal = if record.front_face {
+            record.normal
+        } else {
+            -record.normal
+        };
+        record.point = transform_point(record.point, &self.transform);
+        let outward_normal =
+            transform_vector(object_outward_normal, &self.normal_transform).normalized();
+        record.set_face_normal(ray, outward_normal);
+        Some(record)
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounds
+    }
+}
+
+fn transform_bounds(bounds: Aabb, transform: &Matrix) -> Aabb {
+    let mut transformed_bounds = None;
+
+    for x in [bounds.min.0, bounds.max.0] {
+        for y in [bounds.min.1, bounds.max.1] {
+            for z in [bounds.min.2, bounds.max.2] {
+                let point = transform_point(Point::new(x, y, z), transform);
+                transformed_bounds = Some(transformed_bounds.map_or_else(
+                    || Aabb::from_points(point, point),
+                    |bounds: Aabb| bounds.union_point(point),
+                ));
+            }
+        }
+    }
+
+    transformed_bounds.expect("transforming finite bounds should produce bounds")
+}
+
+fn transform_point(point: Point, transform: &Matrix) -> Point {
+    let transformed =
+        transform.transform_homogeneous_point(&[point.x(), point.y(), point.z(), 1.0]);
+    let w = transformed[3];
+    if w.abs() > f64::EPSILON {
+        Point::new(transformed[0] / w, transformed[1] / w, transformed[2] / w)
+    } else {
+        Point::new(transformed[0], transformed[1], transformed[2])
+    }
+}
+
+fn transform_vector(vector: Vector, transform: &Matrix) -> Vector {
+    let transformed =
+        transform.transform_homogeneous_point(&[vector.x(), vector.y(), vector.z(), 0.0]);
+    Vector::new(transformed[0], transformed[1], transformed[2])
+}
+
+/// A constant-density participating medium bounded by another hittable object.
+pub struct ConstantMedium {
+    boundary: Box<dyn Hittable>,
+    neg_inv_density: f64,
+    phase_function: MaterialRef,
+    bounds: Option<Aabb>,
+}
+
+impl fmt::Debug for ConstantMedium {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConstantMedium")
+            .field("neg_inv_density", &self.neg_inv_density)
+            .field("bounds", &self.bounds)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConstantMedium {
+    /// Creates a constant-density medium with constant particle color.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `density` is not positive and finite.
+    #[must_use]
+    pub fn new(boundary: impl Hittable + 'static, density: f64, albedo: LinearColor) -> Self {
+        Self::with_phase_function(boundary, density, Arc::new(Isotropic::new(albedo)))
+    }
+
+    /// Creates a constant-density medium with a texture-backed phase function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `density` is not positive and finite.
+    #[must_use]
+    pub fn from_texture(
+        boundary: impl Hittable + 'static,
+        density: f64,
+        texture: impl RayTexture + 'static,
+    ) -> Self {
+        Self::with_phase_function(
+            boundary,
+            density,
+            Arc::new(Isotropic::from_texture(texture)),
+        )
+    }
+
+    /// Creates a constant-density medium from a boxed boundary and constant particle color.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `density` is not positive and finite.
+    #[must_use]
+    pub fn from_box(boundary: Box<dyn Hittable>, density: f64, albedo: LinearColor) -> Self {
+        Self::from_box_with_phase_function(boundary, density, Arc::new(Isotropic::new(albedo)))
+    }
+
+    /// Creates a constant-density medium with an explicit phase-function material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `density` is not positive and finite.
+    #[must_use]
+    pub fn with_phase_function(
+        boundary: impl Hittable + 'static,
+        density: f64,
+        phase_function: MaterialRef,
+    ) -> Self {
+        Self::from_box_with_phase_function(Box::new(boundary), density, phase_function)
+    }
+
+    /// Creates a constant-density medium from boxed parts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `density` is not positive and finite.
+    #[must_use]
+    pub fn from_box_with_phase_function(
+        boundary: Box<dyn Hittable>,
+        density: f64,
+        phase_function: MaterialRef,
+    ) -> Self {
+        assert!(
+            density.is_finite() && density > 0.0,
+            "medium density must be positive and finite"
+        );
+        let bounds = boundary.bounding_box();
+        Self {
+            boundary,
+            neg_inv_density: -1.0 / density,
+            phase_function,
+            bounds,
+        }
+    }
+
+    /// Returns the medium boundary bounds.
+    #[must_use]
+    pub const fn bounds(&self) -> Option<Aabb> {
+        self.bounds
+    }
+}
+
+impl Hittable for ConstantMedium {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let entry_t = self
+            .boundary
+            .hit_with_rng(ray, Interval::UNIVERSE, rng)?
+            .t
+            .max(ray_t.min);
+        let exit_t = self
+            .boundary
+            .hit_with_rng(ray, Interval::new(entry_t + 0.0001, INFINITY), rng)?
+            .t
+            .min(ray_t.max);
+
+        if entry_t >= exit_t {
+            return None;
+        }
+
+        let entry_t = entry_t.max(0.0);
+        let ray_length = ray.direction().length();
+        if ray_length <= f64::EPSILON {
+            return None;
+        }
+
+        let distance_inside_boundary = (exit_t - entry_t) * ray_length;
+        let sample = rng.random_double().max(f64::MIN_POSITIVE);
+        let hit_distance = self.neg_inv_density * sample.ln();
+        if hit_distance > distance_inside_boundary {
+            return None;
+        }
+
+        let t = entry_t + hit_distance / ray_length;
+        Some(HitRecord {
+            point: ray.at(t),
+            normal: Vector::new(1.0, 0.0, 0.0),
+            t,
+            u: 0.0,
+            v: 0.0,
+            front_face: true,
+            material: self.phase_function.as_ref(),
+        })
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounds
+    }
+}
+
+fn rotate_y_point(point: Point, sin_theta: f64, cos_theta: f64) -> Point {
+    Point::new(
+        cos_theta * point.x() + sin_theta * point.z(),
+        point.y(),
+        -sin_theta * point.x() + cos_theta * point.z(),
+    )
+}
+
+fn rotate_y_point_inverse(point: Point, sin_theta: f64, cos_theta: f64) -> Point {
+    Point::new(
+        cos_theta * point.x() - sin_theta * point.z(),
+        point.y(),
+        sin_theta * point.x() + cos_theta * point.z(),
+    )
+}
+
+fn rotate_y_vector(vector: Vector, sin_theta: f64, cos_theta: f64) -> Vector {
+    Vector::new(
+        cos_theta * vector.x() + sin_theta * vector.z(),
+        vector.y(),
+        -sin_theta * vector.x() + cos_theta * vector.z(),
+    )
+}
+
+fn rotate_y_vector_inverse(vector: Vector, sin_theta: f64, cos_theta: f64) -> Vector {
+    Vector::new(
+        cos_theta * vector.x() - sin_theta * vector.z(),
+        vector.y(),
+        sin_theta * vector.x() + cos_theta * vector.z(),
+    )
+}
+
+fn rotate_y_bounds(bounds: Aabb, sin_theta: f64, cos_theta: f64) -> Aabb {
+    let mut rotated_bounds = None;
+
+    for x in [bounds.min.0, bounds.max.0] {
+        for y in [bounds.min.1, bounds.max.1] {
+            for z in [bounds.min.2, bounds.max.2] {
+                let point = rotate_y_point(Point::new(x, y, z), sin_theta, cos_theta);
+                rotated_bounds = Some(rotated_bounds.map_or_else(
+                    || Aabb::from_points(point, point),
+                    |bounds: Aabb| bounds.union_point(point),
+                ));
+            }
+        }
+    }
+
+    rotated_bounds.expect("rotating finite bounds should produce bounds")
+}
+
 /// A collection of hittable scene objects.
 #[derive(Default)]
 pub struct HittableList {
     objects: Vec<Box<dyn Hittable>>,
+    bounds: Option<Aabb>,
+    has_unbounded: bool,
 }
 
 impl fmt::Debug for HittableList {
@@ -853,6 +2119,8 @@ impl fmt::Debug for HittableList {
         formatter
             .debug_struct("HittableList")
             .field("len", &self.objects.len())
+            .field("bounds", &self.bounds)
+            .field("has_unbounded", &self.has_unbounded)
             .finish()
     }
 }
@@ -869,6 +2137,8 @@ impl HittableList {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             objects: Vec::with_capacity(capacity),
+            bounds: None,
+            has_unbounded: false,
         }
     }
 
@@ -883,15 +2153,28 @@ impl HittableList {
     /// Removes all objects.
     pub fn clear(&mut self) {
         self.objects.clear();
+        self.bounds = None;
+        self.has_unbounded = false;
     }
 
     /// Adds an object to the scene.
     pub fn add(&mut self, object: impl Hittable + 'static) {
-        self.objects.push(Box::new(object));
+        self.add_box(Box::new(object));
     }
 
     /// Adds a boxed hittable object to the scene.
     pub fn add_box(&mut self, object: Box<dyn Hittable>) {
+        if !self.has_unbounded {
+            if let Some(object_bounds) = object.bounding_box() {
+                self.bounds = Some(
+                    self.bounds
+                        .map_or(object_bounds, |bounds| bounds.surrounding(object_bounds)),
+                );
+            } else {
+                self.bounds = None;
+                self.has_unbounded = true;
+            }
+        }
         self.objects.push(object);
     }
 
@@ -915,12 +2198,19 @@ impl HittableList {
 }
 
 impl Hittable for HittableList {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
         let mut closest_so_far = ray_t.max;
         let mut closest_hit = None;
 
         for object in &self.objects {
-            if let Some(record) = object.hit(ray, Interval::new(ray_t.min, closest_so_far)) {
+            if let Some(record) =
+                object.hit_with_rng(ray, Interval::new(ray_t.min, closest_so_far), rng)
+            {
                 closest_so_far = record.t;
                 closest_hit = Some(record);
             }
@@ -930,11 +2220,11 @@ impl Hittable for HittableList {
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
-        let mut objects = self.objects.iter();
-        let first = objects.next()?.bounding_box()?;
-        objects.try_fold(first, |bounds, object| {
-            object.bounding_box().map(|other| bounds.surrounding(other))
-        })
+        if self.has_unbounded {
+            None
+        } else {
+            self.bounds
+        }
     }
 }
 
@@ -960,9 +2250,6 @@ impl BvhNode {
     /// Builds a BVH from bounded hittable objects.
     #[must_use]
     pub fn from_hittables(objects: Vec<Box<dyn Hittable>>) -> Option<Self> {
-        if objects.is_empty() || objects.iter().any(|object| object.bounding_box().is_none()) {
-            return None;
-        }
         let bvh = ObjectBvh::build(&objects)?;
         let bounds = bvh.bounds();
         Some(Self {
@@ -975,13 +2262,19 @@ impl BvhNode {
     /// Brute-force hit path used as a correctness oracle for the object BVH.
     #[must_use]
     pub fn hit_bruteforce(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
-        hit_object_indices(&self.objects, 0..self.objects.len(), ray, ray_t)
+        let mut rng = SampleRng::default();
+        hit_object_indices(&self.objects, 0..self.objects.len(), ray, ray_t, &mut rng)
     }
 }
 
 impl Hittable for BvhNode {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
-        self.bvh.hit(&self.objects, ray, ray_t)
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        self.bvh.hit(&self.objects, ray, ray_t, rng)
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
@@ -1019,15 +2312,35 @@ impl ObjectBvh {
             .iter()
             .enumerate()
             .map(|(index, object)| {
-                let bounds = object.bounding_box().expect("bounded object");
-                BvhPrimitiveInfo::new(index, bounds)
+                object
+                    .bounding_box()
+                    .map(|bounds| BvhPrimitiveInfo::new(index, bounds))
             })
-            .collect::<Vec<_>>();
+            .collect::<Option<Vec<_>>>()?;
         let mut bvh = Self {
             nodes: Vec::with_capacity(objects.len().saturating_mul(2).saturating_sub(1)),
             indices: (0..objects.len()).collect(),
         };
         bvh.build_range(&primitive_info, 0, objects.len());
+        Some(bvh)
+    }
+
+    fn build_ray_primitives(primitives: &[RayPrimitive]) -> Option<Self> {
+        if primitives.is_empty() {
+            return None;
+        }
+
+        let primitive_info = primitives
+            .iter()
+            .map(|primitive| primitive.geometry.bounding_box())
+            .enumerate()
+            .map(|(index, bounds)| bounds.map(|bounds| BvhPrimitiveInfo::new(index, bounds)))
+            .collect::<Option<Vec<_>>>()?;
+        let mut bvh = Self {
+            nodes: Vec::with_capacity(primitives.len().saturating_mul(2).saturating_sub(1)),
+            indices: (0..primitives.len()).collect(),
+        };
+        bvh.build_range(&primitive_info, 0, primitives.len());
         Some(bvh)
     }
 
@@ -1071,8 +2384,9 @@ impl ObjectBvh {
         objects: &'a [Box<dyn Hittable>],
         ray: &Ray,
         ray_t: Interval,
+        rng: &mut SampleRng,
     ) -> Option<HitRecord<'a>> {
-        self.hit_node(0, objects, ray, ray_t)
+        self.hit_node(0, objects, ray, ray_t, rng)
     }
 
     fn hit_node<'a>(
@@ -1081,6 +2395,7 @@ impl ObjectBvh {
         objects: &'a [Box<dyn Hittable>],
         ray: &Ray,
         ray_t: Interval,
+        rng: &mut SampleRng,
     ) -> Option<HitRecord<'a>> {
         let node = self.nodes[node_index];
         if !node.bounds.hit_ray(ray, ray_t.min, ray_t.max) {
@@ -1093,12 +2408,59 @@ impl ObjectBvh {
                 self.indices[first..first + count].iter().copied(),
                 ray,
                 ray_t,
+                rng,
             ),
             ObjectBvhNodeKind::Internal { left, right } => {
-                let left_hit = self.hit_node(left, objects, ray, ray_t);
+                let left_hit = self.hit_node(left, objects, ray, ray_t, rng);
                 let closest = left_hit.as_ref().map_or(ray_t.max, |hit| hit.t);
                 let right_hit =
-                    self.hit_node(right, objects, ray, Interval::new(ray_t.min, closest));
+                    self.hit_node(right, objects, ray, Interval::new(ray_t.min, closest), rng);
+                right_hit.or(left_hit)
+            }
+        }
+    }
+
+    fn hit_ray_scene<'a>(
+        &'a self,
+        primitives: &'a [RayPrimitive],
+        materials: &'a [RayMaterial],
+        ray: &Ray,
+        ray_t: Interval,
+    ) -> Option<HitRecord<'a>> {
+        self.hit_ray_scene_node(0, primitives, materials, ray, ray_t)
+    }
+
+    fn hit_ray_scene_node<'a>(
+        &'a self,
+        node_index: usize,
+        primitives: &'a [RayPrimitive],
+        materials: &'a [RayMaterial],
+        ray: &Ray,
+        ray_t: Interval,
+    ) -> Option<HitRecord<'a>> {
+        let node = self.nodes[node_index];
+        if !node.bounds.hit_ray(ray, ray_t.min, ray_t.max) {
+            return None;
+        }
+
+        match node.kind {
+            ObjectBvhNodeKind::Leaf { first, count } => hit_ray_scene_indices(
+                primitives,
+                materials,
+                self.indices[first..first + count].iter().copied(),
+                ray,
+                ray_t,
+            ),
+            ObjectBvhNodeKind::Internal { left, right } => {
+                let left_hit = self.hit_ray_scene_node(left, primitives, materials, ray, ray_t);
+                let closest = left_hit.as_ref().map_or(ray_t.max, |hit| hit.t);
+                let right_hit = self.hit_ray_scene_node(
+                    right,
+                    primitives,
+                    materials,
+                    ray,
+                    Interval::new(ray_t.min, closest),
+                );
                 right_hit.or(left_hit)
             }
         }
@@ -1110,14 +2472,44 @@ fn hit_object_indices<'a>(
     indices: impl IntoIterator<Item = usize>,
     ray: &Ray,
     ray_t: Interval,
+    rng: &mut SampleRng,
 ) -> Option<HitRecord<'a>> {
     let mut closest_so_far = ray_t.max;
     let mut closest_hit = None;
 
     for index in indices {
-        if let Some(record) = objects[index].hit(ray, Interval::new(ray_t.min, closest_so_far)) {
+        if let Some(record) =
+            objects[index].hit_with_rng(ray, Interval::new(ray_t.min, closest_so_far), rng)
+        {
             closest_so_far = record.t;
             closest_hit = Some(record);
+        }
+    }
+
+    closest_hit
+}
+
+fn hit_ray_scene_indices<'a>(
+    primitives: &'a [RayPrimitive],
+    materials: &'a [RayMaterial],
+    indices: impl IntoIterator<Item = usize>,
+    ray: &Ray,
+    ray_t: Interval,
+) -> Option<HitRecord<'a>> {
+    let mut closest_so_far = ray_t.max;
+    let mut closest_hit = None;
+
+    for index in indices {
+        let primitive = primitives[index];
+        if let Some(surface) = primitive
+            .geometry
+            .intersect(ray, Interval::new(ray_t.min, closest_so_far))
+        {
+            closest_so_far = surface.t;
+            closest_hit = Some(HitRecord::from_surface(
+                surface,
+                &materials[primitive.material],
+            ));
         }
     }
 
@@ -1141,6 +2533,7 @@ pub struct RayPrimitive {
 pub struct RayScene {
     materials: Vec<RayMaterial>,
     primitives: Vec<RayPrimitive>,
+    bvh: Option<ObjectBvh>,
 }
 
 impl RayScene {
@@ -1156,6 +2549,7 @@ impl RayScene {
         Self {
             materials: Vec::with_capacity(materials),
             primitives: Vec::with_capacity(primitives),
+            bvh: None,
         }
     }
 
@@ -1180,6 +2574,7 @@ impl RayScene {
             geometry: geometry.into(),
             material,
         });
+        self.rebuild_bvh();
     }
 
     /// Adds a sphere using an existing material table index.
@@ -1191,6 +2586,33 @@ impl RayScene {
         self.add_primitive(RayGeometry::sphere(center, radius), material);
     }
 
+    /// Adds a moving sphere using an existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_moving_sphere(
+        &mut self,
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        material: MaterialId,
+    ) {
+        self.add_primitive(
+            RayGeometry::moving_sphere(center_start, center_end, radius),
+            material,
+        );
+    }
+
+    /// Adds a quad using an existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_quad(&mut self, corner: Point, u: Vector, v: Vector, material: MaterialId) {
+        self.add_primitive(RayGeometry::quad(corner, u, v), material);
+    }
+
     /// Adds a material and a sphere that references it.
     pub fn add_sphere_with_material(
         &mut self,
@@ -1200,6 +2622,32 @@ impl RayScene {
     ) -> MaterialId {
         let material = self.add_material(material);
         self.add_sphere(center, radius, material);
+        material
+    }
+
+    /// Adds a material and a moving sphere that references it.
+    pub fn add_moving_sphere_with_material(
+        &mut self,
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        material: impl Into<RayMaterial>,
+    ) -> MaterialId {
+        let material = self.add_material(material);
+        self.add_moving_sphere(center_start, center_end, radius, material);
+        material
+    }
+
+    /// Adds a material and a quad that references it.
+    pub fn add_quad_with_material(
+        &mut self,
+        corner: Point,
+        u: Vector,
+        v: Vector,
+        material: impl Into<RayMaterial>,
+    ) -> MaterialId {
+        let material = self.add_material(material);
+        self.add_quad(corner, u, v, material);
         material
     }
 
@@ -1221,6 +2669,12 @@ impl RayScene {
         &self.primitives
     }
 
+    /// Returns true when this scene has a built primitive BVH.
+    #[must_use]
+    pub fn has_bvh(&self) -> bool {
+        self.bvh.is_some()
+    }
+
     /// Returns the number of primitives in the scene.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -1238,27 +2692,31 @@ impl RayScene {
     pub fn material_count(&self) -> usize {
         self.materials.len()
     }
+
+    fn rebuild_bvh(&mut self) {
+        self.bvh = ObjectBvh::build_ray_primitives(&self.primitives);
+    }
 }
 
 impl Hittable for RayScene {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
-        let mut closest_so_far = ray_t.max;
-        let mut closest_hit = None;
-
-        for primitive in &self.primitives {
-            if let Some(surface) = primitive
-                .geometry
-                .intersect(ray, Interval::new(ray_t.min, closest_so_far))
-            {
-                closest_so_far = surface.t;
-                closest_hit = Some(HitRecord::from_surface(
-                    surface,
-                    &self.materials[primitive.material],
-                ));
-            }
-        }
-
-        closest_hit
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        self.bvh.as_ref().map_or_else(
+            || {
+                hit_ray_scene_indices(
+                    &self.primitives,
+                    &self.materials,
+                    0..self.primitives.len(),
+                    ray,
+                    ray_t,
+                )
+            },
+            |bvh| bvh.hit_ray_scene(&self.primitives, &self.materials, ray, ray_t),
+        )
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
@@ -1467,7 +2925,12 @@ fn default_material_for_mesh_group(group: &crate::external::MaterialMeshGroup) -
 }
 
 impl Hittable for TriangleMesh {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
         self.bvh.as_ref().map_or_else(
             || self.hit_bruteforce(ray, ray_t),
             |bvh| bvh.hit(&self.triangles, self.material(), ray, ray_t),
@@ -1847,7 +3310,12 @@ impl SphereList {
 }
 
 impl Hittable for SphereList {
-    fn hit(&self, ray: &Ray, ray_t: Interval) -> Option<HitRecord<'_>> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
         let mut closest_so_far = ray_t.max;
         let mut closest_hit = None;
 
@@ -1916,6 +3384,26 @@ fn sphere_bounds(geometry: SphereGeometry) -> Aabb {
     )
 }
 
+fn moving_sphere_bounds(geometry: MovingSphereGeometry) -> Aabb {
+    let radius = geometry.radius();
+    let radius_vector = Vector::new(radius, radius, radius);
+    let start = Aabb::from_points(
+        geometry.center_start() - radius_vector,
+        geometry.center_start() + radius_vector,
+    );
+    let end = Aabb::from_points(
+        geometry.center_end() - radius_vector,
+        geometry.center_end() + radius_vector,
+    );
+    start.union(end)
+}
+
+fn sphere_uv(point_on_unit_sphere: Vector) -> (f64, f64) {
+    let theta = (-point_on_unit_sphere.y()).acos();
+    let phi = (-point_on_unit_sphere.z()).atan2(point_on_unit_sphere.x()) + PI;
+    (phi / (2.0 * PI), theta / PI)
+}
+
 pub(crate) fn component_mul(lhs: LinearColor, rhs: LinearColor) -> LinearColor {
     lhs.component_mul(rhs)
 }
@@ -1954,7 +3442,13 @@ mod tests {
 
     #[test]
     fn unit_gradient_matches_first_ppm_image_corners() {
-        let canvas = render_unit_gradient(3, 3);
+        let canvas = Canvas::from_fn(3, 3, |x, y| {
+            Rgb::from_raw_linear_color(LinearColor::new(
+                f64::from(x) / 2.0,
+                f64::from(y) / 2.0,
+                0.0,
+            ))
+        });
         assert_eq!(canvas.pixels()[0], Rgb::BLACK);
         assert_eq!(canvas.pixels()[2], Rgb::new(255, 0, 0));
         assert_eq!(canvas.pixels()[8], Rgb::YELLOW);
@@ -1981,7 +3475,11 @@ mod tests {
 
     #[test]
     fn sky_gradient_blends_white_to_blue() {
-        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let ray = Ray::with_time(
+            Point::new(0.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, -1.0),
+            0.375,
+        );
         let color = sky_gradient(&ray);
 
         assert_close(color.x(), 0.75);
@@ -1991,7 +3489,7 @@ mod tests {
 
     #[test]
     fn first_sphere_render_has_red_center() {
-        let canvas = render_first_sphere(40);
+        let canvas = RayCamera::new(40, WIDESCREEN_ASPECT_RATIO).render(first_sphere_color);
         let center = canvas
             .get_pixel(20, 11)
             .expect("center pixel should be inside the canvas");
@@ -2081,6 +3579,145 @@ mod tests {
     }
 
     #[test]
+    fn solid_color_texture_ignores_coordinates() {
+        let texture = SolidColor::new(LinearColor::new(0.2, 0.4, 0.6));
+
+        assert_eq!(
+            texture.value(0.75, 0.25, Point::new(10.0, -4.0, 2.0)),
+            LinearColor::new(0.2, 0.4, 0.6)
+        );
+    }
+
+    #[test]
+    fn checker_texture_alternates_in_world_space() {
+        let texture = CheckerTexture::from_colors(
+            1.0,
+            LinearColor::new(0.1, 0.2, 0.3),
+            LinearColor::new(0.8, 0.7, 0.6),
+        );
+
+        assert_eq!(
+            texture.value(0.0, 0.0, Point::new(0.1, 0.1, 0.1)),
+            LinearColor::new(0.1, 0.2, 0.3)
+        );
+        assert_eq!(
+            texture.value(0.0, 0.0, Point::new(1.1, 0.1, 0.1)),
+            LinearColor::new(0.8, 0.7, 0.6)
+        );
+    }
+
+    #[test]
+    fn image_texture_samples_existing_texture_sampler() {
+        let texture =
+            ImageTexture::from_canvas(Canvas::from_pixels(2, 1, vec![Rgb::RED, Rgb::GREEN]));
+
+        assert_eq!(
+            texture.value(0.0, 0.5, Point::new(0.0, 0.0, 0.0)),
+            LinearColor::new(1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            texture.value(1.0, 0.5, Point::new(0.0, 0.0, 0.0)),
+            LinearColor::new(0.0, 1.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn lambertian_scatter_samples_texture_for_attenuation() {
+        let material = Lambertian::checker(
+            1.0,
+            LinearColor::new(0.1, 0.2, 0.3),
+            LinearColor::new(0.8, 0.7, 0.6),
+        );
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let hit = HitRecord {
+            point: Point::new(1.1, 0.1, 0.1),
+            normal: Vector::new(0.0, 1.0, 0.0),
+            t: 1.0,
+            u: 0.0,
+            v: 0.0,
+            front_face: true,
+            material: &material,
+        };
+        let mut rng = SampleRng::new(19);
+
+        let scatter = material
+            .scatter(&ray, &hit, &mut rng)
+            .expect("lambertian should scatter");
+
+        assert_eq!(scatter.attenuation, LinearColor::new(0.8, 0.7, 0.6));
+    }
+
+    #[test]
+    fn diffuse_light_emits_and_does_not_scatter() {
+        let material = DiffuseLight::new(LinearColor::new(4.0, 3.0, 2.0));
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let hit = HitRecord {
+            point: Point::new(0.0, 0.0, -1.0),
+            normal: Vector::new(0.0, 0.0, 1.0),
+            t: 1.0,
+            u: 0.25,
+            v: 0.75,
+            front_face: true,
+            material: &material,
+        };
+        let mut rng = SampleRng::new(41);
+
+        assert_eq!(
+            material.emitted(hit.u, hit.v, hit.point),
+            LinearColor::new(4.0, 3.0, 2.0)
+        );
+        assert!(material.scatter(&ray, &hit, &mut rng).is_none());
+    }
+
+    #[test]
+    fn isotropic_scatter_uses_random_direction_and_texture_attenuation() {
+        let material = Isotropic::new(LinearColor::new(0.25, 0.5, 0.75));
+        let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.5);
+        let hit = HitRecord {
+            point: Point::new(0.0, 0.0, -1.0),
+            normal: Vector::new(1.0, 0.0, 0.0),
+            t: 1.0,
+            u: 0.0,
+            v: 0.0,
+            front_face: true,
+            material: &material,
+        };
+        let mut rng = SampleRng::new(43);
+
+        let scatter = material
+            .scatter(&ray, &hit, &mut rng)
+            .expect("isotropic medium should scatter");
+
+        assert_eq!(scatter.ray.origin(), &hit.point);
+        assert_close(scatter.ray.direction().length(), 1.0);
+        assert_close(scatter.ray.time(), ray.time());
+        assert_eq!(scatter.attenuation, LinearColor::new(0.25, 0.5, 0.75));
+    }
+
+    #[test]
+    fn sphere_uv_matches_book_reference_points() {
+        let left = sphere_uv(Vector::new(-1.0, 0.0, 0.0));
+        let right = sphere_uv(Vector::new(1.0, 0.0, 0.0));
+        let up = sphere_uv(Vector::new(0.0, 1.0, 0.0));
+        let down = sphere_uv(Vector::new(0.0, -1.0, 0.0));
+        let front = sphere_uv(Vector::new(0.0, 0.0, 1.0));
+        let back = sphere_uv(Vector::new(0.0, 0.0, -1.0));
+
+        assert_close(left.0, 0.0);
+        assert_close(left.1, 0.5);
+        assert_close(right.0, 0.5);
+        assert_close(right.1, 0.5);
+        assert_close(up.0, 0.5);
+        assert_close(up.1, 1.0);
+        assert_close(down.0, 0.5);
+        assert_close(down.1, 0.0);
+        assert_close(front.0, 0.25);
+        assert_close(front.1, 0.5);
+        assert_close(back.0, 0.75);
+        assert_close(back.1, 0.5);
+    }
+
+    #[test]
     fn metal_reuses_existing_material_types_and_clamps_fuzz() {
         let silver = Metal::from(PhongMaterial::SILVER);
         assert_eq!(
@@ -2100,7 +3737,7 @@ mod tests {
     #[test]
     fn sphere_hit_records_front_face_and_unit_normal() {
         let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
-        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.5);
 
         let record = sphere
             .hit(&ray, Interval::new(0.0, INFINITY))
@@ -2139,7 +3776,158 @@ mod tests {
             .expect("lambertian should scatter");
 
         assert_eq!(scatter.ray.origin(), &hit.point);
+        assert_close(scatter.ray.time(), ray.time());
         assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+    }
+
+    #[test]
+    fn moving_sphere_uses_ray_time_for_hits() {
+        let sphere = MovingSphere::with_material(
+            Point::new(0.0, 0.0, -1.0),
+            Point::new(0.0, 1.0, -1.0),
+            0.5,
+            Lambertian::new(LinearColor::new(0.2, 0.2, 0.2)),
+        );
+        let early = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.0);
+        let late = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 1.0, -1.0), 1.0);
+
+        let early_hit = sphere
+            .hit(&early, Interval::new(0.0, INFINITY))
+            .expect("early ray should hit start position");
+        let late_hit = sphere
+            .hit(&late, Interval::new(0.0, INFINITY))
+            .expect("late ray should hit end position");
+
+        assert_close(early_hit.t, 0.5);
+        assert!(late_hit.point.y() > early_hit.point.y());
+        assert!(sphere.bounding_box().is_some());
+    }
+
+    #[test]
+    fn quad_hit_records_texture_coordinates_and_material() {
+        let quad = Quad::with_material(
+            Point::new(-2.0, -2.0, -1.0),
+            Vector::new(4.0, 0.0, 0.0),
+            Vector::new(0.0, 4.0, 0.0),
+            Lambertian::new(LinearColor::new(0.2, 0.4, 0.6)),
+        );
+        let ray = Ray::new(Point::new(0.0, 1.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let mut rng = SampleRng::new(37);
+
+        let record = quad
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("quad should be hit");
+        let scatter = record
+            .material
+            .scatter(&ray, &record, &mut rng)
+            .expect("quad material should scatter");
+
+        assert!(record.front_face);
+        assert_close(record.t, 1.0);
+        assert_close(record.u, 0.5);
+        assert_close(record.v, 0.75);
+        assert_eq!(record.normal, Vector::new(0.0, 0.0, 1.0));
+        assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+        assert!(quad.bounding_box().is_some());
+    }
+
+    #[test]
+    fn box_object_builds_six_bounded_quad_sides() {
+        let material: MaterialRef = Arc::new(Lambertian::new(LinearColor::new(0.5, 0.5, 0.5)));
+        let object = box_object(
+            Point::new(1.0, 2.0, 3.0),
+            Point::new(-1.0, -2.0, -3.0),
+            material,
+        );
+        let bounds = object.bounding_box().expect("box should be bounded");
+
+        assert_eq!(object.len(), 6);
+        assert!(bounds.min.0 <= -1.0);
+        assert!(bounds.min.1 <= -2.0);
+        assert!(bounds.min.2 <= -3.0);
+        assert!(bounds.max.0 >= 1.0);
+        assert!(bounds.max.1 >= 2.0);
+        assert!(bounds.max.2 >= 3.0);
+    }
+
+    #[test]
+    fn translated_instance_moves_ray_hits_and_bounds() {
+        let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let translated = Translate::new(sphere, Vector::new(2.0, 0.0, 0.0));
+        let ray = Ray::new(Point::new(2.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let record = translated
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("translated sphere should be hit");
+        let bounds = translated
+            .bounding_box()
+            .expect("translated sphere should be bounded");
+
+        assert_close(record.t, 0.5);
+        assert_close(record.point.x(), 2.0);
+        assert_close(bounds.min.0, 1.5);
+        assert_close(bounds.max.0, 2.5);
+    }
+
+    #[test]
+    fn rotate_y_instance_rotates_ray_hits_normals_and_bounds() {
+        let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let rotated = RotateY::new(sphere, 90.0);
+        let ray = Ray::new(Point::new(-1.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0));
+
+        let record = rotated
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("rotated sphere should be hit");
+        let bounds = rotated
+            .bounding_box()
+            .expect("rotated sphere should be bounded");
+
+        assert_close(record.t, 1.5);
+        assert_close(record.point.x(), -1.0);
+        assert_close(record.point.z(), -0.5);
+        assert_close(record.normal.z(), -1.0);
+        assert!(bounds.min.0 < -1.4);
+        assert!(bounds.max.0 < -0.4);
+    }
+
+    #[test]
+    fn matrix_instance_transforms_ray_hits_normals_and_bounds() {
+        let sphere = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let transform = Matrix::translate(2.0, 0.0, 0.0) * Matrix::scale(2.0, 1.0, 1.0);
+        let instance = MatrixInstance::new(sphere, transform).expect("transform should invert");
+        let ray = Ray::new(Point::new(2.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let record = instance
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("matrix instance should be hit");
+        let bounds = instance
+            .bounding_box()
+            .expect("matrix instance should be bounded");
+
+        assert_close(record.t, 0.5);
+        assert_close(record.point.x(), 2.0);
+        assert_close(record.point.z(), -0.5);
+        assert_close(record.normal.z(), 1.0);
+        assert_close(bounds.min.0, 1.0);
+        assert_close(bounds.max.0, 3.0);
+    }
+
+    #[test]
+    fn constant_medium_samples_hit_inside_boundary() {
+        let boundary = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
+        let medium = ConstantMedium::new(boundary, 1.0e9, LinearColor::new(1.0, 1.0, 1.0));
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let mut rng = SampleRng::new(47);
+
+        let record = medium
+            .hit_with_rng(&ray, Interval::new(0.0, INFINITY), &mut rng)
+            .expect("dense medium should scatter inside boundary");
+
+        assert!(record.t > 0.5);
+        assert!(record.t < 1.5);
+        assert_eq!(record.normal, Vector::new(1.0, 0.0, 0.0));
+        assert!(record.front_face);
+        assert!(medium.bounding_box().is_some());
     }
 
     #[test]
@@ -2159,6 +3947,7 @@ mod tests {
 
         assert_eq!(scatter.ray.origin(), &hit.point);
         assert_eq!(scatter.ray.direction(), &Vector::new(0.0, 0.0, 1.0));
+        assert_close(scatter.ray.time(), ray.time());
         assert_eq!(scatter.attenuation, LinearColor::new(0.8, 0.8, 0.8));
     }
 
@@ -2166,7 +3955,11 @@ mod tests {
     fn dielectric_scatter_refracts_perpendicular_ray() {
         let material = Dielectric::new(RefractiveIndex::GLASS);
         let sphere = Sphere::with_material(Point::new(0.0, 0.0, -1.0), 0.5, material);
-        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let ray = Ray::with_time(
+            Point::new(0.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, -1.0),
+            0.625,
+        );
         let hit = sphere
             .hit(&ray, Interval::new(0.0, INFINITY))
             .expect("sphere should be hit");
@@ -2179,6 +3972,7 @@ mod tests {
 
         assert_eq!(scatter.ray.origin(), &hit.point);
         assert_eq!(scatter.ray.direction(), &Vector::new(0.0, 0.0, -1.0));
+        assert_close(scatter.ray.time(), ray.time());
         assert_eq!(scatter.attenuation, LinearColor::new(1.0, 1.0, 1.0));
     }
 
@@ -2212,10 +4006,53 @@ mod tests {
     }
 
     #[test]
+    fn quads_scene_contains_five_bounded_objects() {
+        let world = quads_world();
+
+        assert_eq!(world.len(), 5);
+        assert!(world.bounding_box().is_some());
+    }
+
+    #[test]
+    fn light_scenes_are_bounded() {
+        let simple = simple_light_world();
+        let cornell = cornell_box_world();
+
+        assert_eq!(simple.len(), 4);
+        assert_eq!(cornell.len(), 8);
+        assert!(simple.bounding_box().is_some());
+        assert!(cornell.bounding_box().is_some());
+        assert_eq!(cornell_smoke_world().len(), 8);
+        assert!(cornell_smoke_world().bounding_box().is_some());
+    }
+
+    #[test]
+    fn next_week_final_scene_is_bounded() {
+        let world = next_week_final_scene_world(SolidColor::new(LinearColor::new(0.1, 0.2, 0.3)));
+
+        assert_eq!(world.len(), 11);
+        assert!(world.bounding_box().is_some());
+    }
+
+    #[test]
     fn final_scene_world_contains_many_random_spheres() {
         let world = final_scene_world();
 
         assert!(world.len() > 470);
+        assert!(world.bounding_box().is_some());
+        assert!(final_scene_bvh_world().bounding_box().is_some());
+    }
+
+    #[test]
+    fn motion_blur_scene_contains_many_random_spheres() {
+        let world = motion_blur_scene_world();
+        let ray_scene = motion_blur_ray_scene();
+
+        assert!(world.len() > 470);
+        assert_eq!(ray_scene.len(), world.len());
+        assert!(world.bounding_box().is_some());
+        assert!(ray_scene.bounding_box().is_some());
+        assert!(motion_blur_bvh_world().bounding_box().is_some());
     }
 
     #[test]
@@ -2236,7 +4073,74 @@ mod tests {
 
         assert_eq!(scene.len(), 1);
         assert_eq!(scene.material_count(), 1);
+        assert!(scene.has_bvh());
         assert_eq!(scatter.attenuation, LinearColor::new(0.2, 0.4, 0.6));
+    }
+
+    #[test]
+    fn ray_scene_bvh_matches_linear_hit_path() {
+        let mut scene = RayScene::new();
+        let red = scene.add_material(RayMaterial::lambertian(LinearColor::new(1.0, 0.0, 0.0)));
+        let green = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.0, 1.0, 0.0)));
+        scene.add_sphere(Point::new(0.0, 0.0, -3.0), 0.5, red);
+        scene.add_sphere(Point::new(0.0, 0.0, -1.0), 0.5, green);
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let bvh_hit = scene
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("BVH path should hit");
+        let linear_hit = hit_ray_scene_indices(
+            scene.primitives(),
+            scene.materials(),
+            0..scene.len(),
+            &ray,
+            Interval::new(0.0, INFINITY),
+        )
+        .expect("linear path should hit");
+
+        assert!(scene.has_bvh());
+        assert_close(bvh_hit.t, linear_hit.t);
+        assert_eq!(bvh_hit.point, linear_hit.point);
+    }
+
+    #[test]
+    fn ray_scene_supports_moving_spheres() {
+        let mut scene = RayScene::new();
+        let material = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.2, 0.4, 0.6)));
+        scene.add_moving_sphere(
+            Point::new(0.0, 0.0, -1.0),
+            Point::new(0.0, 1.0, -1.0),
+            0.5,
+            material,
+        );
+        let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 1.0, -1.0), 1.0);
+
+        let hit = scene
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("moving sphere should be hit at end position");
+
+        assert!(hit.point.y() > 0.0);
+        assert!(scene.bounding_box().is_some());
+    }
+
+    #[test]
+    fn ray_scene_supports_quads() {
+        let mut scene = RayScene::new();
+        scene.add_quad_with_material(
+            Point::new(-1.0, -1.0, -1.0),
+            Vector::new(2.0, 0.0, 0.0),
+            Vector::new(0.0, 2.0, 0.0),
+            RayMaterial::lambertian(LinearColor::new(0.7, 0.2, 0.1)),
+        );
+        let ray = Ray::new(Point::new(0.5, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let hit = scene
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("quad should be hit");
+
+        assert_close(hit.t, 1.0);
+        assert_close(hit.u, 0.75);
+        assert_close(hit.v, 0.5);
+        assert!(scene.bounding_box().is_some());
     }
 
     #[test]
@@ -2250,8 +4154,39 @@ mod tests {
     }
 
     #[test]
-    fn final_scene_render_accepts_custom_sample_count() {
-        let canvas = render_final_scene_with_samples(1, 1);
+    fn final_scene_can_render_through_path_tracer() {
+        let world = final_scene_bvh_world();
+        let canvas = PathTracer::new(
+            RayCamera::new(1, WIDESCREEN_ASPECT_RATIO)
+                .with_samples_per_pixel(1)
+                .with_max_depth(50)
+                .with_vertical_fov(20.0)
+                .with_look_at(Point::new(13.0, 2.0, 3.0), Point::new(0.0, 0.0, 0.0))
+                .with_view_up(Vector::new(0.0, 1.0, 0.0))
+                .with_defocus_angle(0.6)
+                .with_focus_distance(10.0),
+        )
+        .render(&world);
+
+        assert_eq!(canvas.width(), 1);
+        assert_eq!(canvas.height(), 1);
+    }
+
+    #[test]
+    fn motion_blur_scene_can_render_through_path_tracer() {
+        let world = motion_blur_bvh_world();
+        let canvas = PathTracer::new(
+            RayCamera::new(1, WIDESCREEN_ASPECT_RATIO)
+                .with_samples_per_pixel(1)
+                .with_max_depth(50)
+                .with_vertical_fov(20.0)
+                .with_look_at(Point::new(13.0, 2.0, 3.0), Point::new(0.0, 0.0, 0.0))
+                .with_view_up(Vector::new(0.0, 1.0, 0.0))
+                .with_defocus_angle(0.6)
+                .with_focus_distance(10.0)
+                .with_shutter_interval(0.0, 1.0),
+        )
+        .render(&world);
 
         assert_eq!(canvas.width(), 1);
         assert_eq!(canvas.height(), 1);
@@ -2409,6 +4344,27 @@ mod tests {
     }
 
     #[test]
+    fn hittable_list_caches_bounds_as_objects_are_added() {
+        let mut world = HittableList::new();
+        assert!(world.bounding_box().is_none());
+
+        world.add(Sphere::new(Point::new(0.0, 0.0, -2.0), 0.5));
+        assert_eq!(
+            world.bounding_box(),
+            Some(Aabb::new((-0.5, -0.5, -2.5), (0.5, 0.5, -1.5)))
+        );
+
+        world.add(Sphere::new(Point::new(2.0, 1.0, -1.0), 0.25));
+        assert_eq!(
+            world.bounding_box(),
+            Some(Aabb::new((-0.5, -0.5, -2.5), (2.25, 1.25, -0.75)))
+        );
+
+        world.clear();
+        assert!(world.bounding_box().is_none());
+    }
+
+    #[test]
     fn object_bvh_returns_closest_hit() {
         let mut world = HittableList::new();
         world.add(Sphere::new(Point::new(0.0, 0.0, -2.0), 0.5));
@@ -2446,7 +4402,10 @@ mod tests {
 
     #[test]
     fn normal_scene_render_colors_sphere_by_normal() {
-        let canvas = render_normal_sphere_scene(40);
+        let world = normal_sphere_world();
+        let canvas = RayCamera::new(40, WIDESCREEN_ASPECT_RATIO)
+            .with_samples_per_pixel(100)
+            .render_world_normals(&world);
         let center = canvas
             .get_pixel(20, 11)
             .expect("center pixel should be inside the canvas");
@@ -2457,7 +4416,11 @@ mod tests {
 
     #[test]
     fn diffuse_scene_render_is_gamma_corrected() {
-        let canvas = render_diffuse_sphere_scene(20);
+        let world = normal_sphere_world();
+        let canvas = RayCamera::new(20, WIDESCREEN_ASPECT_RATIO)
+            .with_samples_per_pixel(100)
+            .with_max_depth(50)
+            .render_world(&world);
         let center = canvas
             .get_pixel(10, 5)
             .expect("center pixel should be inside the canvas");

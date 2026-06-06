@@ -5,6 +5,7 @@ use super::vector::{Point, Vector};
 pub struct Ray {
     origin: Point,
     direction: Vector,
+    time: f64,
 }
 
 impl Ray {
@@ -25,7 +26,17 @@ impl Ray {
     /// ```
     #[must_use]
     pub fn new(origin: Point, direction: Vector) -> Self {
-        Self { origin, direction }
+        Self::with_time(origin, direction, 0.0)
+    }
+
+    /// Returns a new ray with an explicit shutter time.
+    #[must_use]
+    pub fn with_time(origin: Point, direction: Vector, time: f64) -> Self {
+        Self {
+            origin,
+            direction,
+            time,
+        }
     }
 
     /// Get a reference to the ray's direction.
@@ -38,6 +49,12 @@ impl Ray {
     #[must_use]
     pub fn origin(&self) -> &Point {
         &self.origin
+    }
+
+    /// Returns the shutter time carried by this ray.
+    #[must_use]
+    pub fn time(&self) -> f64 {
+        self.time
     }
 
     /// Get a reference to the ray's origin.
@@ -65,5 +82,19 @@ impl Ray {
     #[must_use]
     pub fn at(&self, t: f64) -> Point {
         self.origin + t * self.direction
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ray_defaults_to_zero_time_and_can_store_time() {
+        let origin = Point::new(0.0, 0.0, 0.0);
+        let direction = Vector::new(1.0, 0.0, 0.0);
+
+        assert!((Ray::new(origin, direction).time() - 0.0).abs() < 1e-10);
+        assert!((Ray::with_time(origin, direction, 0.375).time() - 0.375).abs() < 1e-10);
     }
 }
