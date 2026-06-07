@@ -696,17 +696,23 @@ impl Parser {
 
     fn save(&mut self, line: (usize, &str)) -> Result<(), ParserError> {
         let (line_num, file_name) = line;
-        let extension = Path::new(file_name)
+        let path = Path::new(file_name);
+        let extension = path
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_ascii_lowercase);
 
         match extension.as_deref() {
-            Some("ppm") => self.canvas.save_binary(file_name).map_err(ParserError::Io),
-            Some("png" | "jpg" | "jpeg") => self
-                .canvas
-                .save_extension(file_name)
-                .map_err(ParserError::Io),
+            Some("ppm") => {
+                create_save_parent_dir(path)?;
+                self.canvas.save_binary(file_name).map_err(ParserError::Io)
+            }
+            Some("png" | "jpg" | "jpeg") => {
+                create_save_parent_dir(path)?;
+                self.canvas
+                    .save_extension(file_name)
+                    .map_err(ParserError::Io)
+            }
             _ => Err(ParserError::ArgumentError(line_num, file_name.to_string())),
         }
     }
@@ -966,6 +972,16 @@ impl Parser {
     }
 }
 
+fn create_save_parent_dir(path: &Path) -> Result<(), ParserError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(ParserError::Io)?;
+    }
+    Ok(())
+}
+
 #[test]
 fn parser_test() {
     let mut test = Parser::new("inline", 20, 20, &Rgb::new(0, 255, 0));
@@ -1003,6 +1019,21 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("gartus-parser-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn save_creates_parent_directories() {
+        let dir = temp_dir("save-parent").join("nested");
+        let output = dir.join("out.ppm");
+        let _ = fs::remove_dir_all(dir.parent().expect("temp parent"));
+
+        let mut parser = Parser::new("test", 10, 10, &Rgb::GREEN);
+        parser
+            .parse_string(&format!("save\n{}", output.display()))
+            .expect("save should create parent directory");
+
+        assert!(output.exists(), "save should create nested output file");
+        let _ = fs::remove_dir_all(dir.parent().expect("temp parent"));
     }
 
     #[test]
