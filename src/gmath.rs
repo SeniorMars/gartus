@@ -16,6 +16,8 @@ pub mod parametric;
 pub mod perlin;
 /// Hosts the [`polygon_matrix::PolygonMatrix`] type — a dynamically-growing 4×N point list for polygon drawing.
 pub mod polygon_matrix;
+/// Deterministic helper functions for procedural scenes.
+pub mod procedural;
 /// Hosts the [`quaternion::Quaternion`] struct for ray tracing and 3D transformations.
 pub mod quaternion;
 /// Deterministic random sampling helpers.

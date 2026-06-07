@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
         ],
     };
 
-    FrameRecorder::render_gif(
+    FrameRecorder::render_gif_auto(
         AnimationRenderOptions::new(
             "anim",
             "transformation-matrices-",

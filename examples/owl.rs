@@ -1,4 +1,3 @@
-// extern crate rand;
 use gartus::prelude::{Canvas, FrameRecorder, Rgb};
 use rand::RngExt;
 

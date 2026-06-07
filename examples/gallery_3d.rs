@@ -25,19 +25,12 @@ fn render() -> Result<(), Box<dyn Error>> {
     fs::create_dir_all("final")?;
 
     let objects = build_scene();
-    let mut recorder = FrameRecorder::new("anim", "gallery-3d-").with_delay(3);
-    let mut preview = Canvas::new_with_bg(WIDTH, HEIGHT, background());
-
-    for frame in 0..FRAMES {
-        let canvas = render_frame(frame, &objects);
-        if frame == 22 {
-            preview = canvas.clone();
-        }
-        recorder.capture(&canvas)?;
-    }
-
-    preview.save_extension("final/gallery_3d.png")?;
-    recorder.encode_gif("final/gallery_3d.gif")?;
+    let options =
+        AnimationRenderOptions::new("anim", "gallery-3d-", FRAMES, "final/gallery_3d.gif")
+            .delay_cs(3)
+            .preview(22, "final/gallery_3d.png")
+            .unique_frame_dir(true);
+    FrameRecorder::render_gif_auto(options, |frame| Ok(render_frame(frame, &objects)))?;
 
     println!("Saved final/gallery_3d.png and final/gallery_3d.gif");
     Ok(())
@@ -112,7 +105,7 @@ fn make_towers() -> Vec<MeshObject> {
         let width = 34.0 + (i % 3) as f64 * 8.0;
 
         let mut tower = PolygonMatrix::new();
-        tower.add_box((-width / 2.0, height, width / 2.0), width, height, width);
+        tower.add_centered_box((0.0, height * 0.5, 0.0), width, height, width);
         if i % 2 == 0 {
             tower.add_pyramid((-width / 2.0, height + 74.0, width / 2.0), width, 74.0);
         } else {
@@ -137,7 +130,7 @@ fn make_orbiting_crystals() -> Vec<MeshObject> {
     for i in 0..8 {
         let angle = i as f64 / 8.0 * PI * 2.0;
         let mut crystal = PolygonMatrix::new();
-        add_crystal(&mut crystal, 38.0, 72.0);
+        crystal.add_crystal((0.0, 0.0, 0.0), 4, 38.0, 72.0);
         objects.push(MeshObject {
             mesh: crystal,
             base: Matrix::translate(
@@ -149,24 +142,6 @@ fn make_orbiting_crystals() -> Vec<MeshObject> {
         });
     }
     objects
-}
-
-fn add_crystal(mesh: &mut PolygonMatrix, radius: f64, height: f64) {
-    let top = (0.0, height * 0.5, 0.0);
-    let bottom = (0.0, -height * 0.5, 0.0);
-    let points = [
-        (radius, 0.0, 0.0),
-        (0.0, 0.0, radius),
-        (-radius, 0.0, 0.0),
-        (0.0, 0.0, -radius),
-    ];
-
-    for i in 0..4 {
-        let curr = points[i];
-        let next = points[(i + 1) % 4];
-        mesh.add_polygon(top, curr, next);
-        mesh.add_polygon(bottom, next, curr);
-    }
 }
 
 fn render_frame(frame: usize, objects: &[MeshObject]) -> Canvas {

@@ -1,6 +1,6 @@
 //! Final Cornell-box render using *The Rest of Your Life* importance sampling.
 //!
-//! The world remains a book-style `HittableList`, while `SamplingTargetList` contains only the
+//! The world remains a book-style `HittableList`, while `WeightedSamplingTargetList` contains only the
 //! ceiling light and glass sphere used for explicit importance sampling. Use
 //! `cargo run --profile render --example life` for full renders.
 
@@ -13,7 +13,7 @@ use gartus::{
         lighting::RefractiveIndex,
         raytracing::{
             Dielectric, DiffuseLight, HittableList, Lambertian, MaterialRef, PathTracer, Quad,
-            RotateY, SamplingTargetList, Sphere, Translate, box_object,
+            RotateY, Sphere, Translate, WeightedSamplingTargetList, box_object,
         },
     },
 };
@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn life_final_scene() -> (HittableList, SamplingTargetList) {
+fn life_final_scene() -> (HittableList, WeightedSamplingTargetList) {
     let red = Lambertian::new(LinearRgb::new(0.65, 0.05, 0.05));
     let white = Lambertian::new(LinearRgb::new(0.73, 0.73, 0.73));
     let white_shared: MaterialRef = Arc::new(white.clone());
@@ -99,20 +99,21 @@ fn life_final_scene() -> (HittableList, SamplingTargetList) {
         glass,
     ));
 
-    let mut sampling_targets = SamplingTargetList::with_capacity(2);
-    sampling_targets.add_quad(
+    let mut sampling_targets = WeightedSamplingTargetList::with_capacity(2);
+    sampling_targets.add_quad_weighted(
         Point::new(343.0, 554.0, 332.0),
         Vector::new(-130.0, 0.0, 0.0),
         Vector::new(0.0, 0.0, -105.0),
+        12.0,
     );
-    sampling_targets.add_sphere(Point::new(190.0, 90.0, 190.0), 90.0);
+    sampling_targets.add_sphere_weighted(Point::new(190.0, 90.0, 190.0), 90.0, 1.0);
 
     (world, sampling_targets)
 }
 
 fn render_scene(
     world: &dyn gartus::graphics::raytracing::Hittable,
-    lights: &SamplingTargetList,
+    lights: &dyn gartus::graphics::raytracing::Hittable,
 ) -> Canvas {
     PathTracer::new(
         RayCamera::new(IMAGE_WIDTH, 1.0)

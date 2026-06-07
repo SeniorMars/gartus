@@ -67,14 +67,8 @@ fn render() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[cfg(feature = "rayon")]
 fn render_animation(options: AnimationRenderOptions, scene: &Scene) -> std::io::Result<()> {
-    FrameRecorder::render_gif_parallel(options, |frame| Ok(render_frame(frame, scene)))
-}
-
-#[cfg(not(feature = "rayon"))]
-fn render_animation(options: AnimationRenderOptions, scene: &Scene) -> std::io::Result<()> {
-    FrameRecorder::render_gif(options, |frame| Ok(render_frame(frame, scene)))
+    FrameRecorder::render_gif_auto(options, |frame| Ok(render_frame(frame, scene)))
 }
 
 fn load_mesh_textures(mesh: &MaterialMesh) -> HashMap<PathBuf, Texture> {

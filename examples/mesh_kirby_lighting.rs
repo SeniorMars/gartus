@@ -69,7 +69,7 @@ fn render() -> Result<(), Box<dyn Error>> {
     .preview(FRAMES / 4, OUTPUT_PREVIEW)
     .unique_frame_dir(true);
 
-    FrameRecorder::render_gif(options, |frame| Ok(render_frame(&scene, frame)))?;
+    FrameRecorder::render_gif_auto(options, |frame| Ok(render_frame(&scene, frame)))?;
 
     println!("Loaded {triangle_count} triangles.");
     println!("Saved preview to {OUTPUT_PREVIEW}");

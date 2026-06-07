@@ -5,6 +5,7 @@
 //! - [`SurfaceScene`]: renderer-neutral mesh/material data shared by raster and ray renderers.
 //! - [`RayScene`]: compiled, data-oriented path-tracing scene with a cached BVH.
 //! - [`HittableList`]: book-style boxed hittable collection for custom objects and examples.
+//! - [`HittableLayers`]: borrowed scene layers for composing cached static and dynamic worlds.
 //! - [`SamplingTargetList`]: importance-sampling targets such as lights, windows, or caustic
 //!   objects.
 
@@ -164,6 +165,132 @@ impl Hittable for HittableList {
     }
 }
 
+/// Borrowed hittable layers for composing prebuilt scene pieces.
+///
+/// This is useful for animated path-traced scenes where a large static BVH can be built once and a
+/// smaller dynamic BVH can be rebuilt per frame. The layer container itself owns no geometry; it
+/// only forwards hit and sampling queries to borrowed layers while preserving closest-hit pruning.
+#[derive(Default)]
+pub struct HittableLayers<'a> {
+    layers: Vec<&'a dyn Hittable>,
+    bounds: Option<Aabb>,
+    has_unbounded: bool,
+}
+
+impl fmt::Debug for HittableLayers<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HittableLayers")
+            .field("len", &self.layers.len())
+            .field("bounds", &self.bounds)
+            .field("has_unbounded", &self.has_unbounded)
+            .finish()
+    }
+}
+
+impl<'a> HittableLayers<'a> {
+    /// Creates an empty layer set.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty layer set with space for at least `capacity` layers.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            layers: Vec::with_capacity(capacity),
+            bounds: None,
+            has_unbounded: false,
+        }
+    }
+
+    /// Adds a borrowed hittable layer.
+    pub fn add(&mut self, layer: &'a dyn Hittable) {
+        if !self.has_unbounded {
+            if let Some(layer_bounds) = layer.bounding_box() {
+                self.bounds = Some(
+                    self.bounds
+                        .map_or(layer_bounds, |bounds| bounds.surrounding(layer_bounds)),
+                );
+            } else {
+                self.bounds = None;
+                self.has_unbounded = true;
+            }
+        }
+        self.layers.push(layer);
+    }
+
+    /// Removes all borrowed layers.
+    pub fn clear(&mut self) {
+        self.layers.clear();
+        self.bounds = None;
+        self.has_unbounded = false;
+    }
+
+    /// Returns the number of layers.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Returns true when there are no layers.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+}
+
+impl Hittable for HittableLayers<'_> {
+    fn hit_with_rng(
+        &self,
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        let mut closest_so_far = ray_t.max;
+        let mut closest_hit = None;
+
+        for layer in &self.layers {
+            if let Some(record) =
+                layer.hit_with_rng(ray, Interval::new(ray_t.min, closest_so_far), rng)
+            {
+                closest_so_far = record.t;
+                closest_hit = Some(record);
+            }
+        }
+
+        closest_hit
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        if self.has_unbounded {
+            None
+        } else {
+            self.bounds
+        }
+    }
+
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        if self.layers.is_empty() {
+            return 0.0;
+        }
+
+        let weight = reciprocal_count(self.layers.len());
+        self.layers
+            .iter()
+            .map(|layer| weight * layer.pdf_value(context, direction))
+            .sum()
+    }
+
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        rng.random_index(self.layers.len()).map_or_else(
+            || Vector::new(1.0, 0.0, 0.0),
+            |index| self.layers[index].random_direction(context, rng),
+        )
+    }
+}
+
 /// Dedicated importance-sampling target list.
 ///
 /// This is meant for lights, glass caustic targets, windows, or other geometry that should drive
@@ -274,6 +401,160 @@ impl Hittable for SamplingTargetList {
             || Vector::new(1.0, 0.0, 0.0),
             |index| self.objects[index].random_direction(context, rng),
         )
+    }
+}
+
+/// Importance-sampling target list with per-target selection weights.
+///
+/// This is useful when a scene mixes large area lights with many tiny lights. Each selected
+/// target still evaluates its own geometric PDF; the list only changes how often each target is
+/// chosen.
+#[derive(Default)]
+pub struct WeightedSamplingTargetList {
+    objects: Vec<WeightedSamplingTarget>,
+    total_weight: f64,
+}
+
+struct WeightedSamplingTarget {
+    object: Box<dyn Hittable>,
+    weight: f64,
+}
+
+impl fmt::Debug for WeightedSamplingTargetList {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WeightedSamplingTargetList")
+            .field("len", &self.objects.len())
+            .field("total_weight", &self.total_weight)
+            .finish()
+    }
+}
+
+impl WeightedSamplingTargetList {
+    /// Creates an empty weighted sampling target list.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty weighted sampling target list with reserved capacity.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            objects: Vec::with_capacity(capacity),
+            total_weight: 0.0,
+        }
+    }
+
+    /// Adds a sphere sampling target with a selection weight.
+    ///
+    /// # Panics
+    /// Panics if `weight` is not finite and positive.
+    pub fn add_sphere_weighted(&mut self, center: Point, radius: f64, weight: f64) {
+        self.add_target_weighted(Sphere::new(center, radius), weight);
+    }
+
+    /// Adds a moving sphere sampling target with a selection weight.
+    ///
+    /// # Panics
+    /// Panics if `weight` is not finite and positive.
+    pub fn add_moving_sphere_weighted(
+        &mut self,
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        weight: f64,
+    ) {
+        self.add_target_weighted(MovingSphere::new(center_start, center_end, radius), weight);
+    }
+
+    /// Adds a quad sampling target with a selection weight.
+    ///
+    /// # Panics
+    /// Panics if `weight` is not finite and positive.
+    pub fn add_quad_weighted(&mut self, corner: Point, u: Vector, v: Vector, weight: f64) {
+        self.add_target_weighted(Quad::new(corner, u, v), weight);
+    }
+
+    /// Adds a custom sampling target with a selection weight.
+    ///
+    /// # Panics
+    /// Panics if `weight` is not finite and positive.
+    pub fn add_target_weighted(&mut self, object: impl Hittable + 'static, weight: f64) {
+        assert!(
+            weight.is_finite() && weight > 0.0,
+            "sampling target weight must be finite and positive"
+        );
+        self.total_weight += weight;
+        self.objects.push(WeightedSamplingTarget {
+            object: Box::new(object),
+            weight,
+        });
+    }
+
+    /// Removes all weighted sampling targets.
+    pub fn clear(&mut self) {
+        self.objects.clear();
+        self.total_weight = 0.0;
+    }
+
+    /// Returns the number of weighted sampling targets.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Returns true when there are no weighted sampling targets.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// Returns the sum of all target weights.
+    #[must_use]
+    pub const fn total_weight(&self) -> f64 {
+        self.total_weight
+    }
+}
+
+impl Hittable for WeightedSamplingTargetList {
+    fn hit_with_rng(
+        &self,
+        _ray: &Ray,
+        _ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        None
+    }
+
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        if self.objects.is_empty() || self.total_weight <= 0.0 {
+            return 0.0;
+        }
+
+        self.objects
+            .iter()
+            .map(|target| {
+                target.weight / self.total_weight * target.object.pdf_value(context, direction)
+            })
+            .sum()
+    }
+
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        if self.objects.is_empty() || self.total_weight <= 0.0 {
+            return Vector::new(1.0, 0.0, 0.0);
+        }
+
+        let mut pick = rng.random_range(0.0, self.total_weight);
+        for target in &self.objects {
+            pick -= target.weight;
+            if pick <= 0.0 {
+                return target.object.random_direction(context, rng);
+            }
+        }
+        self.objects[self.objects.len() - 1]
+            .object
+            .random_direction(context, rng)
     }
 }
 
@@ -940,4 +1221,33 @@ impl Hittable for SphereList {
 
 fn reciprocal_count(count: usize) -> f64 {
     1.0 / f64::from(u32::try_from(count).expect("scene object count should fit in u32"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gmath::ray::Ray;
+
+    #[test]
+    fn hittable_layers_return_nearest_hit_across_prebuilt_bvhs() {
+        let mut far = HittableList::new();
+        far.add(Sphere::new(Point::new(0.0, 0.0, -5.0), 0.5));
+        let far = far.into_bvh().expect("far sphere should be bounded");
+
+        let mut near = HittableList::new();
+        near.add(Sphere::new(Point::new(0.0, 0.0, -2.0), 0.5));
+        let near = near.into_bvh().expect("near sphere should be bounded");
+
+        let mut layers = HittableLayers::with_capacity(2);
+        layers.add(&far);
+        layers.add(&near);
+
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        let hit = layers
+            .hit(&ray, Interval::new(0.001, f64::INFINITY))
+            .expect("ray should hit a layer");
+
+        assert!((hit.t - 1.5).abs() < 1.0e-10);
+        assert!(layers.bounding_box().is_some());
+    }
 }

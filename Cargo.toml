@@ -60,10 +60,6 @@ name = "mesh_spot_dragon"
 required-features = ["external"]
 
 [[example]]
-name = "cstack_model_theater"
-required-features = ["external"]
-
-[[example]]
 name = "walle_mdl"
 required-features = ["external"]
 

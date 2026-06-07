@@ -14,6 +14,7 @@ pub use crate::{
         matrix::Matrix,
         perlin::{Perlin, scale_point},
         polygon_matrix::{Bounds3, HeightMapOptions, PolygonMatrix},
+        procedural::{TAU, hash01, hash01_2d, lerp, smootherstep, smoothstep},
         random::SampleRng,
         stack::MatrixStack,
         vector::{Point, Vector},
@@ -44,8 +45,12 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        Dielectric, DiffuseLight, Lambertian, LinearColor, Metal, PathTracer, Quad, RayGeometry,
-        RayMaterial, RayScene, SamplingTargetList, Sphere,
+        BvhNode, ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, Dielectric,
+        DiffuseLight, DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField, Hittable,
+        HittableLayers, HittableList, Lambertian, LinearColor, MaterialRef, MatrixInstance, Metal,
+        NonUniformMedium, PathTracer, Quad, RayGeometry, RayMaterial, RayScene, RotateY,
+        SamplingTargetList, SdfObject, Sphere, Translate, TriangleMesh, WeightedSamplingTargetList,
+        box_object,
     },
 };
 

@@ -597,6 +597,118 @@ impl PolygonMatrix {
         self.append_homogeneous_points(&data);
     }
 
+    /// Adds a box centered at `(cx, cy, cz)`.
+    ///
+    /// This is a convenience wrapper around [`Self::add_box`].
+    pub fn add_centered_box(
+        &mut self,
+        (cx, cy, cz): (f64, f64, f64),
+        width: f64,
+        height: f64,
+        depth: f64,
+    ) {
+        self.add_box(
+            (cx - width * 0.5, cy + height * 0.5, cz + depth * 0.5),
+            width,
+            height,
+            depth,
+        );
+    }
+
+    /// Adds a regular prism centered at `(cx, cy, cz)` and extruded along the y axis.
+    ///
+    /// `sides` must be at least 3. `yaw` rotates the prism around the y axis in radians.
+    ///
+    /// # Panics
+    /// Panics if `sides < 3`.
+    #[allow(clippy::cast_precision_loss)]
+    pub fn add_prism_with_yaw(
+        &mut self,
+        (cx, cy, cz): (f64, f64, f64),
+        sides: usize,
+        radius: f64,
+        height: f64,
+        yaw: f64,
+    ) {
+        assert!(sides >= 3, "prism sides must be at least 3");
+
+        let mut top = Vec::with_capacity(sides);
+        let mut bottom = Vec::with_capacity(sides);
+        for i in 0..sides {
+            let angle = yaw + i as f64 / sides as f64 * 2.0 * PI;
+            let x = cx + angle.cos() * radius;
+            let z = cz + angle.sin() * radius;
+            top.push((x, cy + height * 0.5, z));
+            bottom.push((x, cy - height * 0.5, z));
+        }
+
+        let mut data = Vec::with_capacity(sides * 36);
+        for i in 1..sides - 1 {
+            Self::extend_polygon_data(&mut data, top[0], top[i], top[i + 1]);
+            Self::extend_polygon_data(&mut data, bottom[0], bottom[i + 1], bottom[i]);
+        }
+        for i in 0..sides {
+            let next = (i + 1) % sides;
+            Self::extend_polygon_data(&mut data, bottom[i], bottom[next], top[next]);
+            Self::extend_polygon_data(&mut data, bottom[i], top[next], top[i]);
+        }
+        self.append_homogeneous_points(&data);
+    }
+
+    /// Adds a regular prism centered at `(cx, cy, cz)` and extruded along the y axis.
+    ///
+    /// `sides` must be at least 3.
+    ///
+    /// # Panics
+    /// Panics if `sides < 3`.
+    pub fn add_prism(&mut self, center: (f64, f64, f64), sides: usize, radius: f64, height: f64) {
+        self.add_prism_with_yaw(center, sides, radius, height, 0.0);
+    }
+
+    /// Adds a double-pyramid crystal centered at `(cx, cy, cz)` and aligned to the y axis.
+    ///
+    /// `sides` must be at least 3. `yaw` rotates the crystal around the y axis in radians.
+    ///
+    /// # Panics
+    /// Panics if `sides < 3`.
+    #[allow(clippy::cast_precision_loss)]
+    pub fn add_crystal_with_yaw(
+        &mut self,
+        (cx, cy, cz): (f64, f64, f64),
+        sides: usize,
+        radius: f64,
+        height: f64,
+        yaw: f64,
+    ) {
+        assert!(sides >= 3, "crystal sides must be at least 3");
+
+        let top = (cx, cy + height * 0.5, cz);
+        let bottom = (cx, cy - height * 0.5, cz);
+        let mut ring = Vec::with_capacity(sides);
+        for i in 0..sides {
+            let angle = yaw + i as f64 / sides as f64 * 2.0 * PI;
+            ring.push((cx + angle.cos() * radius, cy, cz + angle.sin() * radius));
+        }
+
+        let mut data = Vec::with_capacity(sides * 24);
+        for i in 0..sides {
+            let next = (i + 1) % sides;
+            Self::extend_polygon_data(&mut data, top, ring[i], ring[next]);
+            Self::extend_polygon_data(&mut data, bottom, ring[next], ring[i]);
+        }
+        self.append_homogeneous_points(&data);
+    }
+
+    /// Adds a double-pyramid crystal centered at `(cx, cy, cz)` and aligned to the y axis.
+    ///
+    /// `sides` must be at least 3.
+    ///
+    /// # Panics
+    /// Panics if `sides < 3`.
+    pub fn add_crystal(&mut self, center: (f64, f64, f64), sides: usize, radius: f64, height: f64) {
+        self.add_crystal_with_yaw(center, sides, radius, height, 0.0);
+    }
+
     /// Adds a sphere centered at `(cx, cy, cz)` with given `radius` and `steps` precision.
     ///
     /// Implemented as triangles with outward-facing normals for backface culling.

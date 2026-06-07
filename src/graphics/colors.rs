@@ -61,6 +61,22 @@ impl LinearRgb {
         Self::new(decode(rgb.red), decode(rgb.green), decode(rgb.blue))
     }
 
+    /// Builds a linear color from display-space HSL values.
+    ///
+    /// Hue is in degrees; saturation and lightness are unit values in `0..=1`.
+    #[must_use]
+    pub fn from_hsl_f64(hue: f64, saturation: f64, lightness: f64) -> Self {
+        Self::from_rgb_srgb(Rgb::from_hsl_f64(hue, saturation, lightness))
+    }
+
+    /// Builds a linear color from display-space HSV values.
+    ///
+    /// Hue is in degrees; saturation and value are unit values in `0..=1`.
+    #[must_use]
+    pub fn from_hsv_f64(hue: f64, saturation: f64, value: f64) -> Self {
+        Self::from_rgb_srgb(Rgb::from_hsv_f64(hue, saturation, value))
+    }
+
     /// Encodes this linear color to display RGB using gamma correction.
     #[must_use]
     pub fn gamma_encode(self) -> Rgb {
@@ -185,6 +201,29 @@ impl From<Vector> for LinearRgb {
 impl From<LinearRgb> for Vector {
     fn from(color: LinearRgb) -> Self {
         Self::new(color.red, color.green, color.blue)
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn unit_to_byte(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.999) as u8
+}
+
+fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        p + (q - p) * 6.0 * t
+    } else if t < 1.0 / 2.0 {
+        q
+    } else if t < 2.0 / 3.0 {
+        p + (q - p) * (2.0 / 3.0 - t) * 6.0
+    } else {
+        p
     }
 }
 
@@ -352,6 +391,70 @@ impl Rgb {
             green: (255.999 * sanitize(color[1]).clamp(0.0, 1.0)) as u8,
             blue: (255.999 * sanitize(color[2]).clamp(0.0, 1.0)) as u8,
         }
+    }
+
+    /// Creates an RGB color from HSL values expressed as floats.
+    ///
+    /// Hue is in degrees and wraps around 360. Saturation and lightness are clamped to `0..=1`.
+    #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::many_single_char_names
+    )]
+    pub fn from_hsl_f64(hue: f64, saturation: f64, lightness: f64) -> Self {
+        let h = hue.rem_euclid(360.0) / 360.0;
+        let s = saturation.clamp(0.0, 1.0);
+        let l = lightness.clamp(0.0, 1.0);
+
+        let (r, g, b) = if s <= f64::EPSILON {
+            (l, l, l)
+        } else {
+            let q = if l < 0.5 {
+                l * (1.0 + s)
+            } else {
+                l + s - l * s
+            };
+            let p = 2.0 * l - q;
+            (
+                hue_to_rgb(p, q, h + 1.0 / 3.0),
+                hue_to_rgb(p, q, h),
+                hue_to_rgb(p, q, h - 1.0 / 3.0),
+            )
+        };
+
+        Self::new(unit_to_byte(r), unit_to_byte(g), unit_to_byte(b))
+    }
+
+    /// Creates an RGB color from HSV values expressed as floats.
+    ///
+    /// Hue is in degrees and wraps around 360. Saturation and value are clamped to `0..=1`.
+    #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::many_single_char_names
+    )]
+    pub fn from_hsv_f64(hue: f64, saturation: f64, value: f64) -> Self {
+        let h = hue.rem_euclid(360.0) / 60.0;
+        let s = saturation.clamp(0.0, 1.0);
+        let v = value.clamp(0.0, 1.0);
+        let i = h.floor();
+        let f = h - i;
+        let p = v * (1.0 - s);
+        let q = v * (1.0 - f * s);
+        let t = v * (1.0 - (1.0 - f) * s);
+
+        let (r, g, b) = match i as i32 % 6 {
+            0 => (v, t, p),
+            1 => (q, v, p),
+            2 => (p, v, t),
+            3 => (p, q, v),
+            4 => (t, p, v),
+            _ => (v, p, q),
+        };
+
+        Self::new(unit_to_byte(r), unit_to_byte(g), unit_to_byte(b))
     }
 
     pub(crate) fn name_to_const(color: &str) -> Option<Rgb> {

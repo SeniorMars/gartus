@@ -26,6 +26,7 @@ pub mod pdf;
 pub mod renderer;
 pub mod scene;
 pub mod scenes;
+pub mod sdf;
 pub mod texture;
 pub mod volume;
 pub mod weekend;
@@ -47,16 +48,25 @@ pub use object::{
 pub use pdf::{CosinePdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf};
 pub use renderer::PathTracer;
 pub use scene::{
-    BvhNode, HittableList, MaterialId, RayPrimitive, RayScene, SamplingTargetList, SphereList,
+    BvhNode, HittableLayers, HittableList, MaterialId, RayPrimitive, RayScene, SamplingTargetList,
+    SphereList, WeightedSamplingTargetList,
 };
+pub use sdf::{DistanceField, DistanceFieldRef, FnDistanceField, SdfObject};
 pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, SolidColor, TextureRef};
-pub use volume::ConstantMedium;
+pub use volume::{
+    ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, FnDensityField,
+    NonUniformMedium,
+};
 
 /// Common ray-tracing types for `use gartus::graphics::raytracing::prelude::*`.
 pub mod prelude {
     pub use super::{
-        Dielectric, DiffuseLight, Lambertian, LinearColor, MaterialId, Metal, PathTracer, Quad,
-        RayGeometry, RayMaterial, RayPrimitive, RayScene, SamplingTargetList, Sphere,
+        BvhNode, ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, Dielectric,
+        DiffuseLight, DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField, Hittable,
+        HittableLayers, HittableList, Lambertian, LinearColor, MaterialId, MaterialRef,
+        MatrixInstance, Metal, NonUniformMedium, PathTracer, Quad, RayGeometry, RayMaterial,
+        RayPrimitive, RayScene, RotateY, SamplingTargetList, SdfObject, Sphere, Translate,
+        TriangleMesh, WeightedSamplingTargetList, box_object,
     };
     pub use crate::graphics::camera::{AdaptiveSampling, RayCamera};
 }

@@ -12,6 +12,8 @@ use std::{
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
+#[cfg(feature = "rayon")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Explicit frame recorder for animations.
 #[derive(Debug)]
@@ -56,6 +58,7 @@ impl<E: Error + 'static> Error for AnimationError<E> {
 
 /// Options for rendering a whole GIF through [`FrameRecorder::render_gif`].
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AnimationRenderOptions {
     dir: PathBuf,
     prefix: String,
@@ -66,6 +69,7 @@ pub struct AnimationRenderOptions {
     cleanup_frames: bool,
     clear_existing_frames: bool,
     unique_frame_dir: bool,
+    show_progress: bool,
 }
 
 impl AnimationRenderOptions {
@@ -87,6 +91,7 @@ impl AnimationRenderOptions {
             cleanup_frames: true,
             clear_existing_frames: true,
             unique_frame_dir: false,
+            show_progress: false,
         }
     }
 
@@ -122,6 +127,13 @@ impl AnimationRenderOptions {
     #[must_use]
     pub fn unique_frame_dir(mut self, unique_frame_dir: bool) -> Self {
         self.unique_frame_dir = unique_frame_dir;
+        self
+    }
+
+    /// Sets whether whole-animation render progress is written to stderr.
+    #[must_use]
+    pub fn show_progress(mut self, show_progress: bool) -> Self {
+        self.show_progress = show_progress;
         self
     }
 
@@ -315,6 +327,34 @@ impl FrameRecorder {
         .map_err(animation_error_into_io)
     }
 
+    /// Renders a GIF, using the parallel renderer when the `rayon` feature is enabled.
+    ///
+    /// This is the preferred high-level animation entry point for examples whose frames are
+    /// independent. With `rayon`, rendered canvases are stored until every frame has completed;
+    /// without `rayon`, frames are rendered and written sequentially.
+    ///
+    /// # Errors
+    /// Returns `Err` if frame rendering, frame capture, preview saving, GIF encoding, or cleanup fails.
+    #[cfg(feature = "rayon")]
+    pub fn render_gif_auto<F>(options: AnimationRenderOptions, render: F) -> io::Result<()>
+    where
+        F: Fn(usize) -> io::Result<Canvas> + Sync,
+    {
+        Self::render_gif_parallel(options, render)
+    }
+
+    /// Renders a GIF sequentially when the `rayon` feature is not enabled.
+    ///
+    /// # Errors
+    /// Returns `Err` if frame rendering, frame capture, preview saving, GIF encoding, or cleanup fails.
+    #[cfg(not(feature = "rayon"))]
+    pub fn render_gif_auto<F>(options: AnimationRenderOptions, render: F) -> io::Result<()>
+    where
+        F: FnMut(usize) -> io::Result<Canvas>,
+    {
+        Self::render_gif(options, render)
+    }
+
     /// Renders frames in parallel, then writes and encodes them in frame order.
     ///
     /// Enable the `rayon` feature to use this helper. This is best for frame renderers where each
@@ -328,9 +368,23 @@ impl FrameRecorder {
         F: Fn(usize) -> io::Result<Canvas> + Sync,
     {
         let frames = options.frames();
+        let show_progress = options.show_progress;
+        let completed_frames = AtomicUsize::new(0);
+
+        if show_progress {
+            eprintln!("Rendering {frames} animation frames in parallel...");
+        }
+
         let rendered = (0..frames)
             .into_par_iter()
-            .map(|frame| render(frame).map(|canvas| (frame, canvas)))
+            .map(|frame| {
+                let canvas = render(frame)?;
+                if show_progress {
+                    let completed = completed_frames.fetch_add(1, Ordering::Relaxed) + 1;
+                    eprintln!("Rendered frame {completed}/{frames}");
+                }
+                Ok::<(usize, Canvas), io::Error>((frame, canvas))
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut rendered = rendered;
@@ -371,6 +425,7 @@ impl FrameRecorder {
             cleanup_frames,
             clear_existing_frames,
             unique_frame_dir,
+            show_progress,
         } = options;
 
         if frames == 0 {
@@ -416,11 +471,20 @@ impl FrameRecorder {
         }
 
         let result = (|| {
+            if show_progress {
+                eprintln!("Writing {frames} animation frames...");
+            }
             for frame in 0..frames {
                 let preview_output = preview.as_ref().and_then(|(preview_frame, output)| {
                     (*preview_frame == frame).then_some(output.as_path())
                 });
                 render(frame, preview_output, &mut recorder)?;
+                if show_progress {
+                    eprintln!("Wrote frame {}/{}", frame + 1, frames);
+                }
+            }
+            if show_progress {
+                eprintln!("Encoding GIF...");
             }
             recorder.encode_gif(&output).map_err(AnimationError::Io)
         })();
@@ -439,6 +503,10 @@ impl FrameRecorder {
             if result.is_ok() {
                 cleanup_result?;
             }
+        }
+
+        if show_progress && result.is_ok() {
+            eprintln!("Animation complete: {}", output.display());
         }
 
         result

@@ -1,7 +1,4 @@
-use gartus::{
-    graphics::colors::Hsl,
-    prelude::{Canvas, Domain2D, Rgb},
-};
+use gartus::prelude::{Canvas, Domain2D, Rgb};
 use num::complex::Complex;
 use std::{error::Error, f32::consts::PI, fs};
 
@@ -258,9 +255,9 @@ fn domain_palette(z: Complex<f32>) -> Rgb {
 }
 
 fn hsl(hue: u16, saturation: u16, light: u16) -> Rgb {
-    Rgb::from(Hsl {
-        hue: hue % 360,
-        saturation,
-        light: light.min(90),
-    })
+    Rgb::from_hsl_f64(
+        f64::from(hue),
+        f64::from(saturation) / 100.0,
+        f64::from(light.min(90)) / 100.0,
+    )
 }
