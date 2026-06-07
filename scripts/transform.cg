@@ -58,7 +58,7 @@
 #apply
 #display
 #save
-#pic.png
+#pics/transformed_cube.png
 line
 100 300 0 150 325 0
 line
@@ -94,4 +94,4 @@ x 10
 apply
 display
 save
-pic.png
+pics/transformed_cube.png
