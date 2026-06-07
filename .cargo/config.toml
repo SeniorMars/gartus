@@ -1,2 +1,10 @@
+[alias]
+ci-fmt = "fmt --all -- --check"
+ci-clippy = "clippy --all-targets --all-features -- -D warnings"
+ci-test = "test"
+ci-test-all = "test --all-features"
+ci-test-no-default = "test --no-default-features"
+ci-test-old-parser = "test --features old_parser"
+
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-fuse-ld=zld"]

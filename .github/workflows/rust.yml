@@ -24,20 +24,33 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          if ! command -v magick >/dev/null 2>&1; then
+            sudo tee /usr/local/bin/magick >/dev/null <<'EOF'
+          #!/usr/bin/env sh
+          exec convert "$@"
+          EOF
+            sudo chmod +x /usr/local/bin/magick
+          fi
+          magick -version
+
       - name: Format
-        run: cargo fmt --all -- --check
+        run: cargo ci-fmt
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo ci-clippy
 
       - name: Test Default Features
-        run: cargo test
+        run: cargo ci-test
 
       - name: Test All Features
-        run: cargo test --all-features
+        run: cargo ci-test-all
 
       - name: Test No Default Features
-        run: cargo test --no-default-features
+        run: cargo ci-test-no-default
 
       - name: Test Old Parser Feature
-        run: cargo test --features old_parser
+        run: cargo ci-test-old-parser
