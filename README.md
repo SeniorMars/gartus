@@ -7,7 +7,29 @@ and path tracing.
 
 ## Gallery
 
+Here are a few examples of what `gartus` can do. See the `examples/` directory for more.
 
+![Solar System](final/solarsystem.gif)
+
+![Quantum Portal](final/quantum_portal.gif)
+
+![Cosmic Loom](final/cosmic_loom.gif)
+
+
+![mesh kirby lighting](final/mesh_kirby_lighting.gif)
+
+
+![Texture & joltik](final/mesh_joltik.gif)
+
+
+![Celestial Dragon](final/celestial_dragon.gif)
+
+
+![It takes two](final/it_takes_two.png)
+
+![Mandelbulb](final/raytracing/mandelbulb_reliquary.png)
+
+![Prism Rain](final/raytracing/prism_rain_conservatory.gif)
 
 ## Overview
 

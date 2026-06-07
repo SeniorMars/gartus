@@ -27,8 +27,8 @@ fn render() -> Result<(), Box<dyn Error>> {
     draw_heart(&mut canvas, 450.0, 436.0);
     draw_caption(&mut canvas);
 
-    canvas.save_extension("pics/it_takes_two.png")?;
-    println!("saved pics/it_takes_two.png");
+    canvas.save_extension("final/it_takes_two.png")?;
+    println!("saved final/it_takes_two.png");
     Ok(())
 }
 
