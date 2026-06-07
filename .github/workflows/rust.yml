@@ -1,0 +1,43 @@
+name: Rust
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  feature-matrix:
+    name: Feature Matrix
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test Default Features
+        run: cargo test
+
+      - name: Test All Features
+        run: cargo test --all-features
+
+      - name: Test No Default Features
+        run: cargo test --no-default-features
+
+      - name: Test Old Parser Feature
+        run: cargo test --features old_parser

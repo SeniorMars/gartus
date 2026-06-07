@@ -35,9 +35,11 @@
 //!
 //! # Path Tracing
 //!
-//! Start with [`PathTracer`] and [`RayCamera`]. For renderer-neutral mesh content, pass a
-//! [`SurfaceScene`] to [`PathTracer::render_scene`]. For ray-specific materials, emissive geometry,
-//! or procedural scenes, build a [`RayScene`] directly so its cached BVH can accelerate traversal.
+//! Start with [`PathTracer`] and [`RayCamera`]. For one-shot renderer-neutral mesh renders, pass a
+//! [`SurfaceScene`] to [`PathTracer::render_scene`]. For repeated renders of the same surface
+//! content, compile once with [`SurfaceScene::to_ray_scene`] and render the resulting
+//! [`RayScene`] directly so its cached BVH can accelerate traversal. For ray-specific materials,
+//! emissive geometry, textured ray materials, or procedural scenes, build a `RayScene` directly.
 //!
 //! Indoor scenes with small emitters usually converge faster when you pass a dedicated
 //! [`SamplingTargetList`] to [`PathTracer::render_with_lights`] instead of using the whole world as
@@ -49,8 +51,9 @@
 //! let camera = RayCamera::new(200, 1.0)
 //!     .with_samples_per_pixel(8)
 //!     .with_max_depth(8);
-//! let scene = RayScene::new();
-//! let image = PathTracer::new(camera).render(&scene);
+//! let surface_scene = SurfaceScene::new();
+//! let ray_scene = surface_scene.to_ray_scene();
+//! let image = PathTracer::new(camera).render(&ray_scene);
 //! assert_eq!(image.width(), 200);
 //! ```
 //!
@@ -58,6 +61,7 @@
 //! [`RayCamera`]: crate::graphics::camera::RayCamera
 //! [`RayScene`]: crate::graphics::raytracing::RayScene
 //! [`SamplingTargetList`]: crate::graphics::raytracing::SamplingTargetList
+//! [`SurfaceScene::to_ray_scene`]: crate::graphics::scene::SurfaceScene::to_ray_scene
 //! [`PathTracer::render_scene`]: crate::graphics::raytracing::PathTracer::render_scene
 //! [`PathTracer::render_with_lights`]: crate::graphics::raytracing::PathTracer::render_with_lights
 //!
@@ -79,12 +83,11 @@
 //! distributions.
 
 #[cfg(feature = "external")]
-/// A module that includes method to read external PPM and allows them to be used with this system.
+/// External asset loaders, including PPM and mesh import helpers.
 pub mod external;
 /// This module hosts all the math needed for computer graphics
 pub mod gmath;
-/// This module hosts all the needed struts to playing
-/// around with computer graphics.
+/// Renderer-facing structures for drawing, rasterization, animation, and path tracing.
 pub mod graphics;
 /// This module hosts the Motion Description Language compiler front end.
 pub mod mdl;
@@ -102,6 +105,6 @@ pub mod parser {
 /// prelude
 pub mod prelude;
 /// This module provides utilities that might be needed to use more
-/// advance features that are not fully integrated into parser
+/// advanced features that are not fully integrated into parser
 /// or graphics modules.
 pub mod utils;

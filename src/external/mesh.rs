@@ -189,6 +189,8 @@ impl MeshUpAxis {
 /// This leaves [`meshify`] raw and predictable while giving examples and callers
 /// one place to handle common OBJ/STL up-axis differences.
 ///
+/// Use [`try_normalize_mesh_transform`] when an empty mesh should be handled without panicking.
+///
 /// # Panics
 /// Panics if `mesh` is empty.
 pub fn normalize_mesh_transform(
@@ -196,11 +198,27 @@ pub fn normalize_mesh_transform(
     target_size: f64,
     source_up_axis: MeshUpAxis,
 ) -> Matrix {
-    let bounds = mesh.bounds().expect("mesh should have bounds");
-    normalize_bounds_transform(bounds, target_size, source_up_axis)
+    try_normalize_mesh_transform(mesh, target_size, source_up_axis)
+        .expect("mesh should have bounds")
+}
+
+/// Builds a transform that centers, orients, and uniformly scales a non-empty imported mesh.
+///
+/// Returns `None` when `mesh` has no triangles and therefore no bounds.
+#[must_use]
+pub fn try_normalize_mesh_transform(
+    mesh: &PolygonMatrix,
+    target_size: f64,
+    source_up_axis: MeshUpAxis,
+) -> Option<Matrix> {
+    mesh.bounds()
+        .map(|bounds| normalize_bounds_transform(bounds, target_size, source_up_axis))
 }
 
 /// Builds a transform that centers, orients, and uniformly scales a material-grouped mesh.
+///
+/// Use [`try_normalize_material_mesh_transform`] when an empty mesh should be handled without
+/// panicking.
 ///
 /// # Panics
 /// Panics if `mesh` is empty.
@@ -209,8 +227,21 @@ pub fn normalize_material_mesh_transform(
     target_size: f64,
     source_up_axis: MeshUpAxis,
 ) -> Matrix {
-    let bounds = mesh.bounds.expect("mesh should have bounds");
-    normalize_bounds_transform(bounds, target_size, source_up_axis)
+    try_normalize_material_mesh_transform(mesh, target_size, source_up_axis)
+        .expect("mesh should have bounds")
+}
+
+/// Builds a transform that centers, orients, and uniformly scales a non-empty material mesh.
+///
+/// Returns `None` when `mesh` has no triangles and therefore no bounds.
+#[must_use]
+pub fn try_normalize_material_mesh_transform(
+    mesh: &MaterialMesh,
+    target_size: f64,
+    source_up_axis: MeshUpAxis,
+) -> Option<Matrix> {
+    mesh.bounds
+        .map(|bounds| normalize_bounds_transform(bounds, target_size, source_up_axis))
 }
 
 fn normalize_bounds_transform(
@@ -1410,8 +1441,9 @@ fn parse_u32_arg(
 #[cfg(test)]
 mod tests {
     use super::{
-        MeshUpAxis, add_mesh, meshify, meshify_with_materials, normalize_mesh_transform, parse_obj,
-        parse_stl,
+        MaterialMesh, MeshUpAxis, add_mesh, meshify, meshify_with_materials,
+        normalize_mesh_transform, parse_obj, parse_stl, try_normalize_material_mesh_transform,
+        try_normalize_mesh_transform,
     };
     use crate::gmath::polygon_matrix::{Bounds3, PolygonMatrix};
     use crate::graphics::colors::Rgb;
@@ -1873,6 +1905,29 @@ f 1/1 2/2 3/3
         assert!((bounds.max.0 - 100.0).abs() < 1e-9);
         assert!((bounds.min.1 + 50.0).abs() < 1e-9);
         assert!((bounds.max.1 - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn try_normalize_mesh_transform_returns_none_for_empty_mesh() {
+        let polygons = PolygonMatrix::new();
+
+        assert_eq!(
+            try_normalize_mesh_transform(&polygons, 200.0, MeshUpAxis::Y),
+            None
+        );
+    }
+
+    #[test]
+    fn try_normalize_material_mesh_transform_returns_none_for_empty_mesh() {
+        let mesh = MaterialMesh {
+            groups: Vec::new(),
+            bounds: None,
+        };
+
+        assert_eq!(
+            try_normalize_material_mesh_transform(&mesh, 200.0, MeshUpAxis::Y),
+            None
+        );
     }
 
     #[test]

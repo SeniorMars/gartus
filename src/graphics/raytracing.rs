@@ -6,11 +6,13 @@
 //!
 //! Start with [`PathTracer`](crate::graphics::raytracing::PathTracer) and
 //! [`RayCamera`](crate::graphics::camera::RayCamera) for rendering. For application-owned mesh
-//! scenes, prefer [`crate::graphics::scene::SurfaceScene`] and
-//! [`PathTracer::render_scene`](crate::graphics::raytracing::PathTracer::render_scene) so raster and
-//! ray paths share the same material data. Use [`RayScene`](crate::graphics::raytracing::RayScene)
-//! directly for path-tracing-specific primitives, emissive geometry, and scenes that need the
-//! cached BVH. Use
+//! scenes, use [`PathTracer::render_scene`](crate::graphics::raytracing::PathTracer::render_scene)
+//! as a one-shot convenience. For repeated renders, compile a
+//! [`crate::graphics::scene::SurfaceScene`] once with
+//! [`SurfaceScene::to_ray_scene`](crate::graphics::scene::SurfaceScene::to_ray_scene) and
+//! render the resulting [`RayScene`](crate::graphics::raytracing::RayScene) directly so the cached
+//! BVH is reused. Use `RayScene` directly for path-tracing-specific primitives, emissive geometry,
+//! and textured ray materials. Use
 //! [`SamplingTargetList`](crate::graphics::raytracing::SamplingTargetList) with
 //! [`PathTracer::render_with_lights`](crate::graphics::raytracing::PathTracer::render_with_lights)
 //! to importance-sample real emitters or other important geometry without mixing those targets into
@@ -46,10 +48,13 @@ pub use object::{
     SceneObject, Sphere, SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
 };
 pub use pdf::{CosinePdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf};
-pub use renderer::PathTracer;
+pub use renderer::{PathTracer, RenderOptions};
+#[doc(hidden)]
+pub use scene::SphereList;
 pub use scene::{
-    BvhNode, HittableLayers, HittableList, MaterialId, RayPrimitive, RayScene, SamplingTargetList,
-    SphereList, WeightedSamplingTargetList,
+    BvhNode, HittableLayers, HittableList, MaterialId, RayPrimitive, RayScene, RaySceneBuilder,
+    SamplingTargetList, SurfaceRayMaterialMapper, SurfaceRayMaterialMode,
+    WeightedSamplingTargetList,
 };
 pub use sdf::{DistanceField, DistanceFieldRef, FnDistanceField, SdfObject};
 pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, SolidColor, TextureRef};
@@ -65,7 +70,8 @@ pub mod prelude {
         DiffuseLight, DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField, Hittable,
         HittableLayers, HittableList, Lambertian, LinearColor, MaterialId, MaterialRef,
         MatrixInstance, Metal, NonUniformMedium, PathTracer, Quad, RayGeometry, RayMaterial,
-        RayPrimitive, RayScene, RotateY, SamplingTargetList, SdfObject, Sphere, Translate,
+        RayPrimitive, RayScene, RaySceneBuilder, RenderOptions, RotateY, SamplingTargetList,
+        SdfObject, Sphere, SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate,
         TriangleMesh, WeightedSamplingTargetList, box_object,
     };
     pub use crate::graphics::camera::{AdaptiveSampling, RayCamera};
@@ -146,6 +152,119 @@ mod tests {
         assert!((actual - expected).abs() < 1e-10);
     }
 
+    fn assert_point_close(actual: Point, expected: Point) {
+        assert_close(actual.x(), expected.x());
+        assert_close(actual.y(), expected.y());
+        assert_close(actual.z(), expected.z());
+    }
+
+    fn assert_vector_close(actual: Vector, expected: Vector) {
+        assert_close(actual.x(), expected.x());
+        assert_close(actual.y(), expected.y());
+        assert_close(actual.z(), expected.z());
+    }
+
+    fn assert_hit_records_equivalent(
+        seed: u64,
+        ray_index: usize,
+        bvh_hit: Option<HitRecord<'_>>,
+        brute_hit: Option<HitRecord<'_>>,
+    ) {
+        match (bvh_hit, brute_hit) {
+            (None, None) => {}
+            (Some(bvh_hit), Some(brute_hit)) => {
+                assert_close(bvh_hit.t, brute_hit.t);
+                assert_point_close(bvh_hit.point, brute_hit.point);
+                assert_vector_close(bvh_hit.normal, brute_hit.normal);
+                assert_vector_close(bvh_hit.geometric_normal, brute_hit.geometric_normal);
+                assert_vector_close(bvh_hit.shading_normal, brute_hit.shading_normal);
+                assert_eq!(bvh_hit.front_face, brute_hit.front_face);
+            }
+            (left, right) => panic!(
+                "BVH and brute-force hit mismatch for seed {seed}, ray {ray_index}: {left:?} vs {right:?}"
+            ),
+        }
+    }
+
+    fn randomized_ray_scene(seed: u64) -> RayScene {
+        let mut rng = SampleRng::new(seed);
+        let mut scene = RayScene::with_capacity(1, 16);
+        let material = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.4, 0.5, 0.6)));
+
+        for _ in 0..8 {
+            let center = Point::new(
+                rng.random_range(-3.0, 3.0),
+                rng.random_range(-2.0, 2.0),
+                rng.random_range(-8.0, -1.0),
+            );
+            let radius = rng.random_range(0.1, 0.45);
+            scene.add_sphere(center, radius, material);
+        }
+
+        for _ in 0..4 {
+            let center = Point::new(
+                rng.random_range(-3.0, 3.0),
+                rng.random_range(-2.0, 2.0),
+                rng.random_range(-8.0, -1.0),
+            );
+            let half = rng.random_range(0.15, 0.5);
+            scene.add_quad(
+                center + Vector::new(-half, -half, 0.0),
+                Vector::new(2.0 * half, 0.0, 0.0),
+                Vector::new(0.0, 2.0 * half, 0.0),
+                material,
+            );
+        }
+
+        for _ in 0..4 {
+            let center = Point::new(
+                rng.random_range(-3.0, 3.0),
+                rng.random_range(-2.0, 2.0),
+                rng.random_range(-8.0, -1.0),
+            );
+            let scale = rng.random_range(0.2, 0.7);
+            scene.add_triangle(
+                center + Vector::new(-scale, -scale, 0.0),
+                center + Vector::new(scale, -scale, 0.0),
+                center + Vector::new(0.0, scale, rng.random_range(-0.2, 0.2)),
+                material,
+            );
+        }
+
+        scene.build_bvh();
+        scene
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct FixedDirectionTarget {
+        direction: Vector,
+    }
+
+    impl FixedDirectionTarget {
+        const fn new(direction: Vector) -> Self {
+            Self { direction }
+        }
+    }
+
+    impl Hittable for FixedDirectionTarget {
+        fn hit_with_rng(
+            &self,
+            _ray: &Ray,
+            _ray_t: Interval,
+            _rng: &mut SampleRng,
+        ) -> Option<HitRecord<'_>> {
+            None
+        }
+
+        fn pdf_value(&self, _context: PdfContext, _direction: Vector) -> f64 {
+            1.0
+        }
+
+        fn random_direction(&self, _context: PdfContext, _rng: &mut SampleRng) -> Vector {
+            self.direction
+        }
+    }
+
     #[test]
     fn unit_gradient_matches_first_ppm_image_corners() {
         let canvas = Canvas::from_fn(3, 3, |x, y| {
@@ -214,6 +333,80 @@ mod tests {
 
     #[test]
     fn surface_scene_converts_to_lambertian_ray_scene() {
+        let mut first_mesh = PolygonMatrix::new();
+        first_mesh.add_polygon((0.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 1.0, -1.0));
+        first_mesh.add_polygon((1.0, 0.0, -1.0), (1.0, 1.0, -1.0), (0.0, 1.0, -1.0));
+        let mut second_mesh = PolygonMatrix::new();
+        second_mesh.add_polygon((2.0, 0.0, -2.0), (3.0, 0.0, -2.0), (2.0, 1.0, -2.0));
+        let material = SurfaceMaterial::new(
+            LinearColor::new(0.1, 0.2, 0.3),
+            LinearColor::new(0.4, 0.5, 0.6),
+            LinearColor::new(0.7, 0.8, 0.9),
+            16.0,
+        )
+        .with_refractive_index(RefractiveIndex::GLASS)
+        .with_diffuse_texture("ignored.ppm");
+        let second_material = SurfaceMaterial::new(
+            LinearColor::new(0.2, 0.1, 0.0),
+            LinearColor::new(0.8, 0.6, 0.4),
+            LinearColor::new(0.0, 0.1, 0.2),
+            4.0,
+        );
+        let mut scene = SurfaceScene::new();
+
+        scene.add_mesh(first_mesh, material);
+        scene.add_mesh(second_mesh, second_material);
+        let ray_scene = scene.to_ray_scene();
+
+        assert_eq!(scene.len(), 2);
+        assert_eq!(ray_scene.len(), 3);
+        assert_eq!(ray_scene.material_count(), 2);
+        assert!(ray_scene.has_bvh());
+        assert_eq!(
+            ray_scene.primitives(),
+            &[
+                RayPrimitive {
+                    geometry: RayGeometry::triangle(
+                        Point::new(0.0, 0.0, -1.0),
+                        Point::new(1.0, 0.0, -1.0),
+                        Point::new(0.0, 1.0, -1.0),
+                    ),
+                    material: 0,
+                },
+                RayPrimitive {
+                    geometry: RayGeometry::triangle(
+                        Point::new(1.0, 0.0, -1.0),
+                        Point::new(1.0, 1.0, -1.0),
+                        Point::new(0.0, 1.0, -1.0),
+                    ),
+                    material: 0,
+                },
+                RayPrimitive {
+                    geometry: RayGeometry::triangle(
+                        Point::new(2.0, 0.0, -2.0),
+                        Point::new(3.0, 0.0, -2.0),
+                        Point::new(2.0, 1.0, -2.0),
+                    ),
+                    material: 1,
+                },
+            ]
+        );
+        match ray_scene.material(0) {
+            Some(RayMaterial::Lambertian(material)) => {
+                assert_eq!(material.albedo, LinearColor::new(0.4, 0.5, 0.6));
+            }
+            other => panic!("default conversion should use Lambertian base color, got {other:?}"),
+        }
+        match ray_scene.material(1) {
+            Some(RayMaterial::Lambertian(material)) => {
+                assert_eq!(material.albedo, LinearColor::new(0.8, 0.6, 0.4));
+            }
+            other => panic!("default conversion should use Lambertian base color, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn surface_scene_conversion_can_prefer_ray_material_hints() {
         let mut polygons = PolygonMatrix::new();
         polygons.add_polygon((0.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 1.0, -1.0));
         let material = SurfaceMaterial::new(
@@ -221,17 +414,31 @@ mod tests {
             LinearColor::new(0.4, 0.5, 0.6),
             LinearColor::new(0.7, 0.8, 0.9),
             16.0,
-        );
+        )
+        .with_refractive_index(RefractiveIndex::GLASS);
         let mut scene = SurfaceScene::new();
 
         scene.add_mesh(polygons, material);
-        let ray_scene = scene.to_ray_scene();
+        let dielectric_scene =
+            scene.to_ray_scene_with_material_mode(SurfaceRayMaterialMode::PreferDielectric);
+        let metal_scene = scene
+            .to_ray_scene_with_material_mode(SurfaceRayMaterialMode::PreferMetal { fuzz: 0.25 });
+        let custom_scene =
+            scene.to_ray_scene_with_material_mode(SurfaceRayMaterialMode::Custom(Box::new(|_| {
+                RayMaterial::diffuse_light(LinearColor::new(2.0, 1.0, 0.5))
+            })));
 
-        assert_eq!(ray_scene.len(), 1);
-        assert_eq!(ray_scene.material_count(), 1);
         assert!(matches!(
-            ray_scene.material(0),
-            Some(RayMaterial::Lambertian(_))
+            dielectric_scene.material(0),
+            Some(RayMaterial::Dielectric(_))
+        ));
+        assert!(matches!(
+            metal_scene.material(0),
+            Some(RayMaterial::Metal(_))
+        ));
+        assert!(matches!(
+            custom_scene.material(0),
+            Some(RayMaterial::DiffuseLight(_))
         ));
     }
 
@@ -968,6 +1175,61 @@ mod tests {
     }
 
     #[test]
+    fn ray_scene_bulk_geometry_helpers_add_renderable_primitives() {
+        let mut scene = RayScene::with_capacity(1, 3);
+        let material = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.2, 0.4, 0.6)));
+        scene.add_geometries(
+            material,
+            [
+                SphereGeometry::new(Point::new(-1.0, 0.0, -2.0), 0.5),
+                SphereGeometry::new(Point::new(1.0, 0.0, -2.0), 0.5),
+            ],
+        );
+        scene.add_triangles(
+            material,
+            [TriangleGeometry::new(
+                Point::new(-0.5, -0.5, -1.0),
+                Point::new(0.5, -0.5, -1.0),
+                Point::new(0.0, 0.5, -1.0),
+            )],
+        );
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        assert_eq!(scene.len(), 3);
+        assert!(!scene.has_bvh());
+        let hit = scene
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("bulk-added triangle should be hit");
+        assert!(scene.has_bvh());
+        assert_close(hit.t, 1.0);
+    }
+
+    #[test]
+    fn ray_scene_builder_resolves_named_materials() {
+        let scene = RayScene::builder()
+            .material(
+                "red",
+                RayMaterial::lambertian(LinearColor::new(0.8, 0.1, 0.1)),
+            )
+            .sphere(Point::new(-1.0, 0.0, -2.0), 0.5, "red")
+            .triangles(
+                [TriangleGeometry::new(
+                    Point::new(-0.5, -0.5, -1.0),
+                    Point::new(0.5, -0.5, -1.0),
+                    Point::new(0.0, 0.5, -1.0),
+                )],
+                "red",
+            )
+            .build_bvh();
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        assert_eq!(scene.len(), 2);
+        assert_eq!(scene.material_count(), 1);
+        assert!(scene.has_bvh());
+        assert!(scene.hit(&ray, Interval::new(0.0, INFINITY)).is_some());
+    }
+
+    #[test]
     fn ray_scene_bvh_matches_linear_hit_path() {
         let mut scene = RayScene::new();
         let red = scene.add_material(RayMaterial::lambertian(LinearColor::new(1.0, 0.0, 0.0)));
@@ -985,6 +1247,68 @@ mod tests {
         assert!(scene.has_bvh());
         assert_close(bvh_hit.t, linear_hit.t);
         assert_eq!(bvh_hit.point, linear_hit.point);
+    }
+
+    #[test]
+    fn randomized_ray_scene_bvh_matches_bruteforce_hits() {
+        for seed in 1_u64..=16 {
+            let scene = randomized_ray_scene(seed);
+            assert!(scene.has_bvh());
+            let mut ray_rng = SampleRng::new(seed ^ 0x9e37_79b9_7f4a_7c15);
+
+            for ray_index in 0..64 {
+                let origin = Point::new(
+                    ray_rng.random_range(-4.0, 4.0),
+                    ray_rng.random_range(-3.0, 3.0),
+                    ray_rng.random_range(0.0, 3.0),
+                );
+                let target = Point::new(
+                    ray_rng.random_range(-3.0, 3.0),
+                    ray_rng.random_range(-2.0, 2.0),
+                    ray_rng.random_range(-8.0, -1.0),
+                );
+                let ray = Ray::new(origin, target - origin);
+                let interval = Interval::new(0.001, INFINITY);
+                let mut bvh_rng = SampleRng::new(seed + 101);
+
+                assert_hit_records_equivalent(
+                    seed,
+                    ray_index,
+                    scene.hit_with_rng(&ray, interval, &mut bvh_rng),
+                    scene.hit_bruteforce(&ray, interval),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ray_scene_mutations_invalidate_stale_bvh() {
+        let mut scene = RayScene::new();
+        let material = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.2, 0.4, 0.6)));
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
+        scene.add_sphere(Point::new(4.0, 0.0, -2.0), 0.5, material);
+        scene.build_bvh();
+        assert!(scene.has_bvh());
+        assert!(scene.hit(&ray, Interval::new(0.001, INFINITY)).is_none());
+
+        scene.add_sphere(Point::new(0.0, 0.0, -1.0), 0.5, material);
+        assert!(!scene.has_bvh());
+        let hit = scene
+            .hit(&ray, Interval::new(0.001, INFINITY))
+            .expect("new primitive should be visible after BVH invalidation");
+        assert_close(hit.t, 0.5);
+        assert!(scene.has_bvh());
+
+        scene.add_primitives([RayPrimitive {
+            geometry: RayGeometry::sphere(Point::new(0.0, 0.0, -0.35), 0.1),
+            material,
+        }]);
+        assert!(!scene.has_bvh());
+        let hit = scene
+            .hit(&ray, Interval::new(0.001, INFINITY))
+            .expect("bulk-added primitive should be visible after BVH invalidation");
+        assert_close(hit.t, 0.25);
+        assert!(scene.has_bvh());
     }
 
     #[test]
@@ -1086,7 +1410,20 @@ mod tests {
 
         assert_eq!(tracer.camera().image_width(), 4);
         assert_eq!(canvas.width(), 4);
-        assert!(canvas.upper_left_origin);
+        assert!(canvas.upper_left_origin());
+    }
+
+    #[test]
+    fn path_tracer_render_options_can_select_tile_size() {
+        let world = normal_sphere_world();
+        let tracer = PathTracer::new(RayCamera::new(4, 1.0).with_samples_per_pixel(1))
+            .with_options(RenderOptions::new().tile_size(2));
+
+        let canvas = tracer.render(&world);
+
+        assert_eq!(tracer.options().tile_size_override(), Some(2));
+        assert_eq!(canvas.width(), 4);
+        assert!(canvas.upper_left_origin());
     }
 
     #[test]
@@ -1117,6 +1454,52 @@ mod tests {
         );
         let context = PdfContext::new(Point::new(0.0, 0.0, 0.0), 0.0);
         let mut rng = SampleRng::new(113);
+
+        assert_eq!(targets.len(), 1);
+        assert_close(
+            targets.pdf_value(context, Vector::new(0.0, 0.0, -1.0)),
+            0.25,
+        );
+        assert!(targets.random_direction(context, &mut rng).z() < 0.0);
+    }
+
+    #[test]
+    fn weighted_sampling_target_selection_matches_approximate_weights() {
+        let mut targets = WeightedSamplingTargetList::new();
+        targets.add_target_weighted(FixedDirectionTarget::new(Vector::new(1.0, 0.0, 0.0)), 1.0);
+        targets.add_target_weighted(FixedDirectionTarget::new(Vector::new(0.0, 1.0, 0.0)), 3.0);
+        let context = PdfContext::new(Point::default(), 0.0);
+        let mut rng = SampleRng::new(149);
+        let samples = 10_000_u32;
+        let mut second_target_count = 0;
+
+        for _ in 0..samples {
+            let direction = targets.random_direction(context, &mut rng);
+            second_target_count += u32::from(direction.y() > 0.5);
+        }
+
+        let observed = f64::from(second_target_count) / f64::from(samples);
+        assert!(
+            (observed - 0.75).abs() < 0.025,
+            "observed weighted target ratio {observed}"
+        );
+    }
+
+    #[test]
+    fn ray_scene_emissive_targets_include_only_light_materials() {
+        let mut scene = RayScene::new();
+        let diffuse = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.2, 0.4, 0.6)));
+        let light = scene.add_material(RayMaterial::diffuse_light(LinearColor::new(4.0, 4.0, 4.0)));
+        scene.add_sphere(Point::new(0.0, 0.0, -1.0), 0.5, diffuse);
+        scene.add_quad(
+            Point::new(-1.0, -1.0, -1.0),
+            Vector::new(2.0, 0.0, 0.0),
+            Vector::new(0.0, 2.0, 0.0),
+            light,
+        );
+        let targets = scene.emissive_targets();
+        let context = PdfContext::new(Point::new(0.0, 0.0, 0.0), 0.0);
+        let mut rng = SampleRng::new(131);
 
         assert_eq!(targets.len(), 1);
         assert_close(

@@ -49,8 +49,8 @@ fn map_pixels_preserves_canvas_metadata() {
     );
     assert_eq!(mapped.shading_mode(), ShadingMode::Gouraud);
     assert_eq!(mapped.lighting().specular_exponent, 8);
-    assert!(mapped.upper_left_origin);
-    assert!(!mapped.wrapped);
+    assert!(mapped.upper_left_origin());
+    assert!(!mapped.wrapped());
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn empty_canvas_coordinates_are_clipped_without_panic() {
 #[test]
 fn plot_z_only_replaces_farther_pixels() {
     let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
 
     canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
     canvas.plot_z(&Rgb::BLUE, 0, 0, 4.0);
@@ -97,8 +97,8 @@ fn plot_z_only_replaces_farther_pixels() {
 #[test]
 fn clear_canvas_resets_zbuffer() {
     let mut canvas = Canvas::new_with_bg(1, 1, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
 
     canvas.plot_z(&Rgb::RED, 0, 0, 5.0);
     canvas.clear_canvas();
@@ -109,8 +109,8 @@ fn clear_canvas_resets_zbuffer() {
 
 fn line_points(x0: f64, y0: f64, x1: f64, y1: f64) -> BTreeSet<(i64, i64)> {
     let mut canvas = Canvas::new_with_bg(8, 8, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.draw_line(Rgb::BLACK, x0, y0, x1, y1);
     black_points(&canvas)
 }
@@ -199,8 +199,8 @@ fn draw_line_reverse_directions_match_forward_lines() {
 #[test]
 fn draw_line_uses_odd_width_radius() {
     let mut canvas = Canvas::new_with_bg(5, 5, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.set_line_width(2.0);
     canvas.draw_line(Rgb::BLACK, 2.0, 2.0, 2.0, 2.0);
 
@@ -210,8 +210,8 @@ fn draw_line_uses_odd_width_radius() {
 #[test]
 fn draw_line_z_interpolates_depth_along_driving_axis() {
     let mut canvas = Canvas::new_with_bg(5, 1, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
 
     canvas.draw_line_z(Rgb::BLACK, (0.0, 0.0, 0.0), (4.0, 0.0, 8.0));
 
@@ -223,8 +223,8 @@ fn draw_line_z_interpolates_depth_along_driving_axis() {
 #[test]
 fn thick_steep_lines_use_horizontal_brush() {
     let mut canvas = Canvas::new_with_bg(5, 5, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.set_line_width(3.0);
     canvas.draw_line(Rgb::BLACK, 2.0, 1.0, 2.0, 3.0);
 
@@ -247,15 +247,15 @@ fn thick_steep_lines_use_horizontal_brush() {
 #[test]
 fn fill_uses_clipped_coordinates_even_when_canvas_wraps() {
     let mut canvas = Canvas::new_with_bg(3, 1, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = true;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(true);
     canvas.plot(&Rgb::BLACK, 1, 0);
     canvas.fill(2, 0, Rgb::new(255, 0, 0), Rgb::BLACK);
 
     assert_eq!(canvas.get_pixel(0, 0), Some(&Rgb::WHITE));
     assert_eq!(canvas.get_pixel(1, 0), Some(&Rgb::BLACK));
     assert_eq!(canvas.get_pixel(2, 0), Some(&Rgb::new(255, 0, 0)));
-    assert!(canvas.wrapped);
+    assert!(canvas.wrapped());
 }
 
 #[test]
@@ -273,8 +273,8 @@ fn draw_transformed_applies_matrix_before_drawing() {
     edges.push_edge(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
 
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.draw_transformed(&edges, &Matrix::translate(1.0, 2.0, 0.0));
 
     assert_eq!(black_points(&canvas), points([(1, 2), (2, 2)]));
@@ -286,9 +286,9 @@ fn draw_polygons_scanline_fills_flat_bottom_triangle() {
     polygons.add_polygon((1.0, 1.0, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
-    canvas.line = Rgb::BLACK;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
+    canvas.set_line_color(Rgb::BLACK);
     canvas.draw_polygons(&polygons);
 
     assert_eq!(
@@ -319,9 +319,9 @@ fn draw_polygons_scanline_fills_flat_top_triangle() {
     polygons.add_polygon((3.0, 1.0, 0.0), (5.0, 5.0, 0.0), (1.0, 5.0, 0.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
-    canvas.line = Rgb::BLACK;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
+    canvas.set_line_color(Rgb::BLACK);
     canvas.draw_polygons(&polygons);
 
     assert_eq!(
@@ -352,9 +352,9 @@ fn draw_polygons_scanline_keeps_backface_culling() {
     polygons.add_polygon((1.0, 1.0, 0.0), (3.0, 5.0, 0.0), (5.0, 1.0, 0.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
-    canvas.line = Rgb::BLACK;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
+    canvas.set_line_color(Rgb::BLACK);
     canvas.draw_polygons(&polygons);
 
     assert!(black_points(&canvas).is_empty());
@@ -368,12 +368,12 @@ fn draw_polygons_uses_zbuffer_for_overlapping_triangles() {
     far.add_polygon((1.0, 1.0, 1.0), (5.0, 1.0, 1.0), (3.0, 5.0, 1.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
 
-    canvas.line = Rgb::BLUE;
+    canvas.set_line_color(Rgb::BLUE);
     canvas.draw_polygons(&near);
-    canvas.line = Rgb::RED;
+    canvas.set_line_color(Rgb::RED);
     canvas.draw_polygons(&far);
 
     assert_eq!(canvas.get_pixel(3, 3), Some(&Rgb::BLUE));
@@ -386,8 +386,8 @@ fn draw_polygons_can_flat_shade_with_phong_reflection() {
     polygons.add_polygon((1.0, 1.0, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
     canvas.draw_polygons(&polygons);
 
@@ -416,8 +416,8 @@ fn vertex_normals_average_shared_surface_normals() {
 #[test]
 fn draw_polygons_can_gouraud_shade_from_vertex_normals() {
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.set_shading_mode(ShadingMode::Gouraud);
     canvas.draw_polygons(&smooth_test_polygons());
 
@@ -428,8 +428,8 @@ fn draw_polygons_can_gouraud_shade_from_vertex_normals() {
 #[test]
 fn draw_polygons_can_phong_shade_from_interpolated_normals() {
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
     canvas.set_shading_mode(ShadingMode::Phong);
     canvas.draw_polygons(&smooth_test_polygons());
 
@@ -440,14 +440,14 @@ fn draw_polygons_can_phong_shade_from_interpolated_normals() {
 #[test]
 fn draw_polygons_can_toon_shade_with_banded_lighting() {
     let mut phong = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    phong.upper_left_origin = true;
-    phong.wrapped = false;
+    phong.set_upper_left_origin(true);
+    phong.set_wrapped(false);
     phong.set_shading_mode(ShadingMode::Phong);
     phong.draw_polygons(&smooth_test_polygons());
 
     let mut toon = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    toon.upper_left_origin = true;
-    toon.wrapped = false;
+    toon.set_upper_left_origin(true);
+    toon.set_wrapped(false);
     toon.set_shading_mode(ShadingMode::Toon);
     toon.draw_polygons(&smooth_test_polygons());
 
@@ -463,8 +463,8 @@ fn draw_polygons_rejects_non_finite_y_before_smooth_scan_conversion() {
             polygons.add_polygon((1.0, invalid_y, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
 
             let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-            canvas.upper_left_origin = true;
-            canvas.wrapped = false;
+            canvas.set_upper_left_origin(true);
+            canvas.set_wrapped(false);
             canvas.set_shading_mode(shading_mode);
             canvas.draw_polygons(&polygons);
 
@@ -482,9 +482,9 @@ fn draw_polygons_can_render_wireframe_edges() {
     polygons.add_polygon((1.0, 1.0, 0.0), (5.0, 1.0, 0.0), (3.0, 5.0, 0.0));
 
     let mut canvas = Canvas::new_with_bg(7, 7, Rgb::WHITE);
-    canvas.upper_left_origin = true;
-    canvas.wrapped = false;
-    canvas.line = Rgb::BLACK;
+    canvas.set_upper_left_origin(true);
+    canvas.set_wrapped(false);
+    canvas.set_line_color(Rgb::BLACK);
     canvas.set_shading_mode(ShadingMode::Wireframe);
     canvas.draw_polygons(&polygons);
 
@@ -527,7 +527,7 @@ fn draw_lines_no_longer_saves_animation_frames() {
     edges.push_edge(1.0, 1.0, 0.0, 2.0, 2.0, 0.0);
 
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::WHITE);
-    canvas.try_draw_lines(&edges);
+    canvas.draw_lines_checked(&edges);
 
     assert!(!std::path::Path::new(&format!("anim/{prefix}00000000.ppm")).exists());
 }
@@ -540,7 +540,7 @@ fn draw_textured_quad_samples_texture_colors() {
         vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
     ));
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
 
     canvas.draw_textured_quad(
         &texture,
@@ -594,7 +594,7 @@ fn draw_textured_triangle_unculled_draws_reversed_winding() {
 fn draw_textured_triangle_modulates_sampled_color() {
     let texture = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::new(200, 100, 50)]));
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
 
     canvas.draw_textured_triangle_modulated(
         &texture,
@@ -612,15 +612,29 @@ fn draw_textured_triangle_modulates_sampled_color() {
 #[test]
 fn direct_triangle_apis_draw_without_polygon_matrix() {
     let mut flat = Canvas::new_with_bg(6, 6, Rgb::BLACK);
-    flat.wrapped = false;
-    flat.draw_triangle(Rgb::RED, (0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
+    flat.set_wrapped(false);
+    flat.draw_triangle_raw(Rgb::RED, (0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
 
     let mut lit = Canvas::new_with_bg(6, 6, Rgb::BLACK);
-    lit.wrapped = false;
-    lit.draw_lit_triangle((0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
+    lit.set_wrapped(false);
+    lit.draw_lit_triangle_culled((0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0));
 
     assert!(flat.pixels().contains(&Rgb::RED));
     assert!(lit.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+}
+
+#[test]
+fn raw_and_culled_triangle_apis_make_winding_behavior_explicit() {
+    let mut raw = Canvas::new_with_bg(6, 6, Rgb::BLACK);
+    raw.set_wrapped(false);
+    raw.draw_triangle_raw(Rgb::RED, (0.0, 0.0, 0.0), (0.0, 5.0, 0.0), (5.0, 0.0, 0.0));
+
+    let mut culled = Canvas::new_with_bg(6, 6, Rgb::BLACK);
+    culled.set_wrapped(false);
+    culled.draw_triangle_culled(Rgb::RED, (0.0, 0.0, 0.0), (0.0, 5.0, 0.0), (5.0, 0.0, 0.0));
+
+    assert!(raw.pixels().contains(&Rgb::RED));
+    assert!(culled.pixels().iter().all(|pixel| *pixel == Rgb::BLACK));
 }
 
 #[test]
@@ -628,7 +642,7 @@ fn overlapping_textured_triangles_respect_z_buffer_order() {
     let red = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::RED]));
     let blue = Texture::from_canvas(Canvas::from_pixels(1, 1, vec![Rgb::BLUE]));
     let mut canvas = Canvas::new_with_bg(4, 4, Rgb::BLACK);
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
 
     let triangle = |z| {
         [
@@ -651,9 +665,9 @@ fn textured_triangle_uses_explicit_inv_w_for_perspective_coordinates() {
         vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
     ));
     let mut affine = Canvas::new_with_bg(8, 8, Rgb::BLACK);
-    affine.wrapped = false;
+    affine.set_wrapped(false);
     let mut perspective = Canvas::new_with_bg(8, 8, Rgb::BLACK);
-    perspective.wrapped = false;
+    perspective.set_wrapped(false);
 
     affine.draw_textured_triangle(
         &texture,

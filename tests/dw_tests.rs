@@ -33,7 +33,7 @@ fn course_lighting_values() -> Lighting {
 
 fn old_parser_reference_canvas(width: u32, height: u32, line: Rgb, bg: Rgb) -> Canvas {
     let mut canvas = Canvas::new_with_bg(width, height, bg);
-    canvas.line = line;
+    canvas.set_line_color(line);
     canvas.set_shading_mode(ShadingMode::Flat);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
     canvas

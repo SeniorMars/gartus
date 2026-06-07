@@ -32,8 +32,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn render_frame(frame: usize, scene: &Scene) -> Canvas {
     let t = frame as f64 / FRAMES as f64;
     let mut canvas = sky(t);
-    canvas.wrapped = false;
-    canvas.upper_left_origin = true;
+    canvas.set_wrapped(false);
+    canvas.set_upper_left_origin(true);
 
     draw_sky_signals(&mut canvas, scene, t);
     draw_glass_dome(&mut canvas, t);

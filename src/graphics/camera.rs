@@ -16,10 +16,15 @@ use crate::{
     gmath::{edge_matrix::EdgeMatrix, matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::display::Canvas,
 };
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 use std::io::{self, Write};
 
 const RUSSIAN_ROULETTE_MIN_SURVIVAL_PROBABILITY: f64 = 0.05;
 const RUSSIAN_ROULETTE_MAX_SURVIVAL_PROBABILITY: f64 = 0.95;
+const CLIP_VERTEX_EPSILON: f64 = 1e-12;
+const DEFAULT_RENDER_TILE_SIZE: u32 = 16;
+const PROGRESS_RENDER_CHUNK_ROWS: u32 = 8;
 
 /// Pixel sampling pattern used for stochastic ray-camera renders.
 ///
@@ -52,7 +57,7 @@ pub struct AdaptiveSampling {
     pub min_samples: u32,
     /// Maximum samples to take if the pixel has not converged.
     pub max_samples: u32,
-    /// Stop once the largest channel standard deviation is below this threshold.
+    /// Stop once the largest channel standard error of the mean is below this threshold.
     pub error_threshold: f64,
 }
 
@@ -112,6 +117,47 @@ pub struct ProjectedSegment {
     pub b: ScreenPoint,
     /// Segment draw color.
     pub color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProjectionFrame {
+    origin: Point,
+    right: Vector,
+    up: Vector,
+    forward: Vector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CameraSpacePoint {
+    x: f64,
+    y: f64,
+    depth: f64,
+}
+
+impl CameraSpacePoint {
+    fn interpolate(self, other: Self, depth: f64) -> Self {
+        let depth_delta = other.depth - self.depth;
+        if depth_delta.abs() <= f64::EPSILON {
+            return Self { depth, ..self };
+        }
+
+        let t = (depth - self.depth) / depth_delta;
+        Self {
+            x: self.x + (other.x - self.x) * t,
+            y: self.y + (other.y - self.y) * t,
+            depth,
+        }
+    }
+
+    fn is_in_front_of(self, near_depth: f64) -> bool {
+        self.depth >= near_depth
+    }
+
+    fn is_close_to(self, other: Self) -> bool {
+        (self.x - other.x).abs() <= CLIP_VERTEX_EPSILON
+            && (self.y - other.y).abs() <= CLIP_VERTEX_EPSILON
+            && (self.depth - other.depth).abs() <= CLIP_VERTEX_EPSILON
+    }
 }
 
 /// Perspective path-tracing camera with stochastic pixel, lens, and time sampling.
@@ -200,15 +246,31 @@ impl Camera3D {
     }
 
     /// Sets the distance added to incoming z values before projection.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `camera_distance` is not finite.
     #[must_use]
     pub fn with_camera_distance(mut self, camera_distance: f64) -> Self {
+        assert!(
+            camera_distance.is_finite(),
+            "camera distance must be finite"
+        );
         self.camera_distance = camera_distance;
         self
     }
 
     /// Sets the focal length used for perspective scaling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `focal_length` is not positive and finite.
     #[must_use]
     pub fn with_focal_length(mut self, focal_length: f64) -> Self {
+        assert!(
+            focal_length.is_finite() && focal_length > 0.0,
+            "focal length must be positive and finite"
+        );
         self.focal_length = focal_length;
         self
     }
@@ -230,15 +292,31 @@ impl Camera3D {
     }
 
     /// Sets the vertical screen center as a fraction of canvas height.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `center_y_factor` is not finite.
     #[must_use]
     pub fn with_center_y_factor(mut self, center_y_factor: f64) -> Self {
+        assert!(
+            center_y_factor.is_finite(),
+            "center-y factor must be finite"
+        );
         self.center_y_factor = center_y_factor;
         self
     }
 
     /// Sets the minimum projected depth.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `near_depth` is not positive and finite.
     #[must_use]
     pub fn with_near_depth(mut self, near_depth: f64) -> Self {
+        assert!(
+            near_depth.is_finite() && near_depth > 0.0,
+            "near depth must be positive and finite"
+        );
         self.near_depth = near_depth;
         self
     }
@@ -282,31 +360,80 @@ impl Camera3D {
             .unwrap_or_else(|| Point::new(0.0, 0.0, -self.camera_distance))
     }
 
-    fn camera_frame(&self) -> Option<(Point, Vector, Vector, Vector)> {
+    fn camera_frame(&self) -> Option<ProjectionFrame> {
         let lookfrom = self.effective_lookfrom();
         let frame = CameraPose::new(lookfrom, self.lookat, self.vup).frame()?;
-        Some((frame.origin, -frame.right, frame.up, frame.forward))
+        Some(ProjectionFrame {
+            origin: frame.origin,
+            right: -frame.right,
+            up: frame.up,
+            forward: frame.forward,
+        })
+    }
+
+    fn camera_space_point(point: &[f64], frame: ProjectionFrame) -> Option<CameraSpacePoint> {
+        if point.len() < 3 {
+            return None;
+        }
+
+        let point = Point::new(point[0], point[1], point[2]);
+        let camera_relative = point - frame.origin;
+        Some(CameraSpacePoint {
+            x: camera_relative.dot(frame.right),
+            y: camera_relative.dot(frame.up),
+            depth: camera_relative.dot(frame.forward),
+        })
+    }
+
+    fn project_camera_space_point(&self, point: CameraSpacePoint) -> ScreenPoint {
+        let scale = self.focal_length / point.depth;
+        ScreenPoint {
+            x: f64::from(self.width) * 0.5 + point.x * scale,
+            y: f64::from(self.height) * self.center_y_factor - point.y * scale,
+            depth: point.depth,
+        }
     }
 
     /// Projects a homogeneous point into 2D screen coordinates.
     #[must_use]
     pub fn project(&self, point: &[f64]) -> Option<ScreenPoint> {
-        if point.len() < 3 {
+        let frame = self.camera_frame()?;
+        let point = Self::camera_space_point(point, frame)?;
+        if !point.is_in_front_of(self.near_depth) {
             return None;
         }
-        let (lookfrom, right, up, forward) = self.camera_frame()?;
-        let point = Point::new(point[0], point[1], point[2]);
-        let camera_relative = point - lookfrom;
-        let depth = camera_relative.dot(forward);
-        if depth < self.near_depth {
-            return None;
+        Some(self.project_camera_space_point(point))
+    }
+
+    /// Projects a triangle after clipping it against the near plane.
+    pub(crate) fn project_clipped_triangle(&self, points: [&[f64]; 3]) -> Vec<[ScreenPoint; 3]> {
+        let Some(frame) = self.camera_frame() else {
+            return Vec::new();
+        };
+        let Some(p0) = Self::camera_space_point(points[0], frame) else {
+            return Vec::new();
+        };
+        let Some(p1) = Self::camera_space_point(points[1], frame) else {
+            return Vec::new();
+        };
+        let Some(p2) = Self::camera_space_point(points[2], frame) else {
+            return Vec::new();
+        };
+
+        let clipped = clip_camera_triangle_to_near([p0, p1, p2], self.near_depth);
+        if clipped.len() < 3 {
+            return Vec::new();
         }
-        let scale = self.focal_length / depth;
-        Some(ScreenPoint {
-            x: f64::from(self.width) * 0.5 + camera_relative.dot(right) * scale,
-            y: f64::from(self.height) * self.center_y_factor - camera_relative.dot(up) * scale,
-            depth,
-        })
+
+        let mut triangles = Vec::with_capacity(clipped.len() - 2);
+        for vertex in 1..clipped.len() - 1 {
+            triangles.push([
+                self.project_camera_space_point(clipped[0]),
+                self.project_camera_space_point(clipped[vertex]),
+                self.project_camera_space_point(clipped[vertex + 1]),
+            ]);
+        }
+        triangles
     }
 
     /// Projects transformed mesh triangle edges into colored wireframe segments.
@@ -345,6 +472,44 @@ impl Camera3D {
         }
         segments
     }
+}
+
+fn clip_camera_triangle_to_near(
+    vertices: [CameraSpacePoint; 3],
+    near_depth: f64,
+) -> Vec<CameraSpacePoint> {
+    let mut clipped = Vec::with_capacity(4);
+    let mut previous = vertices[2];
+    let mut previous_inside = previous.is_in_front_of(near_depth);
+
+    for current in vertices {
+        let current_inside = current.is_in_front_of(near_depth);
+        if current_inside != previous_inside {
+            push_clipped_vertex(&mut clipped, previous.interpolate(current, near_depth));
+        }
+        if current_inside {
+            push_clipped_vertex(&mut clipped, current);
+        }
+
+        previous = current;
+        previous_inside = current_inside;
+    }
+
+    if clipped
+        .last()
+        .is_some_and(|last| clipped[0].is_close_to(*last))
+    {
+        clipped.pop();
+    }
+
+    clipped
+}
+
+fn push_clipped_vertex(vertices: &mut Vec<CameraSpacePoint>, vertex: CameraSpacePoint) {
+    if vertices.last().is_some_and(|last| last.is_close_to(vertex)) {
+        return;
+    }
+    vertices.push(vertex);
 }
 
 impl Default for RayCamera {
@@ -565,8 +730,8 @@ impl RayCamera {
     /// Enables adaptive per-pixel sampling for random stochastic world renders.
     ///
     /// The camera takes at least `min_samples`, up to `max_samples`, and stops early when the
-    /// largest channel standard deviation drops below `error_threshold`. Adaptive sampling is
-    /// ignored for stratified modes because those modes promise an exact jittered grid.
+    /// largest channel standard error of the mean drops below `error_threshold`. Adaptive sampling
+    /// is ignored for stratified modes because those modes promise an exact jittered grid.
     ///
     /// # Panics
     ///
@@ -1178,7 +1343,8 @@ impl RayCamera {
             return f64::INFINITY;
         }
 
-        (m2 / f64::from(sample_count - 1))
+        let variance = m2 / f64::from(sample_count - 1);
+        (variance / f64::from(sample_count))
             .max_component()
             .max(0.0)
             .sqrt()
@@ -1241,12 +1407,78 @@ impl RayCamera {
         Canvas::from_pixels_with_options(width, height, pixels, true, false)
     }
 
+    fn render_pixels_tiled<F>(width: u32, height: u32, tile_size: u32, pixel: F) -> Vec<Rgb>
+    where
+        F: Fn(u32, u32) -> Rgb + Sync,
+    {
+        let mut pixels = vec![Rgb::default(); Canvas::pixel_count(width, height)];
+        let width = usize::try_from(width).expect("image width should fit usize");
+        let height = usize::try_from(height).expect("image height should fit usize");
+        let tile_size = usize::try_from(tile_size.max(1)).expect("tile size should fit usize");
+        let band_len = width
+            .checked_mul(tile_size)
+            .expect("tile band pixel count should fit usize");
+
+        #[cfg(feature = "rayon")]
+        {
+            pixels
+                .par_chunks_mut(band_len)
+                .enumerate()
+                .for_each(|(band_index, band_pixels)| {
+                    let y_start = band_index * tile_size;
+                    Self::render_tile_band(band_pixels, width, height, y_start, tile_size, &pixel);
+                });
+        }
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            for (band_index, band_pixels) in pixels.chunks_mut(band_len).enumerate() {
+                let y_start = band_index * tile_size;
+                Self::render_tile_band(band_pixels, width, height, y_start, tile_size, &pixel);
+            }
+        }
+
+        pixels
+    }
+
+    fn render_tile_band<F>(
+        band_pixels: &mut [Rgb],
+        image_width: usize,
+        image_height: usize,
+        y_start: usize,
+        tile_size: usize,
+        pixel: &F,
+    ) where
+        F: Fn(u32, u32) -> Rgb,
+    {
+        debug_assert!(image_width > 0);
+        debug_assert_eq!(band_pixels.len() % image_width, 0);
+        let rows = band_pixels.len() / image_width;
+        for tile_x in (0..image_width).step_by(tile_size) {
+            let x_end = tile_x.saturating_add(tile_size).min(image_width);
+            for row in 0..rows {
+                let y = y_start + row;
+                if y >= image_height {
+                    return;
+                }
+                let row_offset = row * image_width;
+                for x in tile_x..x_end {
+                    band_pixels[row_offset + x] = pixel(
+                        u32::try_from(x).expect("pixel x should fit u32"),
+                        u32::try_from(y).expect("pixel y should fit u32"),
+                    );
+                }
+            }
+        }
+    }
+
     /// Renders a canvas by evaluating `ray_color` for each emitted camera ray.
     pub fn render<F>(self, mut ray_color: F) -> Canvas
     where
         F: FnMut(&Ray) -> LinearColor,
     {
-        let mut pixels = Vec::with_capacity(self.image_width as usize * self.image_height as usize);
+        let mut pixels =
+            Vec::with_capacity(Canvas::pixel_count(self.image_width, self.image_height));
         for y in 0..self.image_height {
             for x in 0..self.image_width {
                 pixels.push(Rgb::from(ray_color(&self.ray_for_pixel(x, y))));
@@ -1260,6 +1492,15 @@ impl RayCamera {
         self.render_world_with_optional_lights(world, None)
     }
 
+    /// Renders a hittable world in tile-height bands.
+    ///
+    /// When the `rayon` feature is enabled, tile bands are rendered independently in parallel. Use
+    /// this to tune tile size for previews or cache behavior; [`Self::render_world`] uses a
+    /// conservative default tile size.
+    pub fn render_world_tiled(self, world: &dyn Hittable, tile_size: u32) -> Canvas {
+        self.render_world_with_optional_lights_tiled(world, None, tile_size)
+    }
+
     /// Renders a hittable world while importance-sampling directions toward `lights`.
     ///
     /// Pass a lights-only or otherwise important target set here; passing the full scene is valid
@@ -1268,31 +1509,52 @@ impl RayCamera {
         self.render_world_with_optional_lights(world, Some(lights))
     }
 
+    /// Renders a hittable world in tile-height bands while importance-sampling `lights`.
+    ///
+    /// When the `rayon` feature is enabled, tile bands are rendered independently in parallel.
+    pub fn render_world_with_lights_tiled(
+        self,
+        world: &dyn Hittable,
+        lights: &dyn Hittable,
+        tile_size: u32,
+    ) -> Canvas {
+        self.render_world_with_optional_lights_tiled(world, Some(lights), tile_size)
+    }
+
     fn render_world_with_optional_lights(
         self,
         world: &dyn Hittable,
         lights: Option<&dyn Hittable>,
     ) -> Canvas {
+        self.render_world_with_optional_lights_tiled(world, lights, DEFAULT_RENDER_TILE_SIZE)
+    }
+
+    fn render_world_with_optional_lights_tiled(
+        self,
+        world: &dyn Hittable,
+        lights: Option<&dyn Hittable>,
+        tile_size: u32,
+    ) -> Canvas {
         let camera = self.initialize();
-        Canvas::from_fn_independent_with_options(
+        let pixels = Self::render_pixels_tiled(
             camera.image_width,
             camera.image_height,
+            tile_size,
             |x, y| camera.render_world_pixel(x, y, world, lights),
-            true,
-            false,
-        )
+        );
+        Self::image_canvas(camera.image_width, camera.image_height, pixels)
     }
 
     /// Renders a hittable world as surface-normal colors for debugging.
     pub fn render_world_normals(self, world: &dyn Hittable) -> Canvas {
         let camera = self.initialize();
-        Canvas::from_fn_independent_with_options(
+        let pixels = Self::render_pixels_tiled(
             camera.image_width,
             camera.image_height,
+            DEFAULT_RENDER_TILE_SIZE,
             |x, y| camera.render_normal_pixel(x, y, world),
-            true,
-            false,
-        )
+        );
+        Self::image_canvas(camera.image_width, camera.image_height, pixels)
     }
 
     /// Renders a canvas while writing scanline progress messages to `log`.
@@ -1308,7 +1570,8 @@ impl RayCamera {
         F: FnMut(&Ray) -> LinearColor,
         W: Write,
     {
-        let mut pixels = Vec::with_capacity(self.image_width as usize * self.image_height as usize);
+        let mut pixels =
+            Vec::with_capacity(Canvas::pixel_count(self.image_width, self.image_height));
         for y in 0..self.image_height {
             write!(log, "\rScanlines remaining: {} ", self.image_height - y)?;
             log.flush()?;
@@ -1327,6 +1590,13 @@ impl RayCamera {
 
     /// Renders a hittable world with antialiasing while writing scanline progress messages.
     ///
+    /// Rows are rendered in chunks so progress updates stay ordered. With the `rayon` feature
+    /// enabled, pixels inside each chunk are rendered independently in parallel.
+    ///
+    /// # Panics
+    ///
+    /// Panics on platforms where the image width or row indices cannot be represented as `usize`.
+    ///
     /// # Errors
     ///
     /// Returns any write error produced by `log`.
@@ -1340,13 +1610,59 @@ impl RayCamera {
     {
         let camera = self.initialize();
         let mut pixels =
-            Vec::with_capacity(camera.image_width as usize * camera.image_height as usize);
-        for y in 0..camera.image_height {
-            write!(log, "\rScanlines remaining: {} ", camera.image_height - y)?;
+            vec![Rgb::default(); Canvas::pixel_count(camera.image_width, camera.image_height)];
+        let width = usize::try_from(camera.image_width).expect("image width should fit usize");
+
+        let mut y_start = 0;
+        while y_start < camera.image_height {
+            write!(
+                log,
+                "\rScanlines remaining: {} ",
+                camera.image_height - y_start
+            )?;
             log.flush()?;
-            for x in 0..camera.image_width {
-                pixels.push(camera.render_world_pixel(x, y, world, None));
+            let y_end = y_start
+                .saturating_add(PROGRESS_RENDER_CHUNK_ROWS)
+                .min(camera.image_height);
+            let start = usize::try_from(y_start).expect("row index should fit usize") * width;
+            let end = usize::try_from(y_end).expect("row index should fit usize") * width;
+            let chunk = &mut pixels[start..end];
+
+            #[cfg(feature = "rayon")]
+            {
+                chunk
+                    .par_chunks_mut(width)
+                    .enumerate()
+                    .for_each(|(row_offset, row_pixels)| {
+                        let y =
+                            y_start + u32::try_from(row_offset).expect("chunk row should fit u32");
+                        for (x, pixel) in row_pixels.iter_mut().enumerate() {
+                            *pixel = camera.render_world_pixel(
+                                u32::try_from(x).expect("pixel x should fit u32"),
+                                y,
+                                world,
+                                None,
+                            );
+                        }
+                    });
             }
+
+            #[cfg(not(feature = "rayon"))]
+            {
+                for (row_offset, row_pixels) in chunk.chunks_mut(width).enumerate() {
+                    let y = y_start + u32::try_from(row_offset).expect("chunk row should fit u32");
+                    for (x, pixel) in row_pixels.iter_mut().enumerate() {
+                        *pixel = camera.render_world_pixel(
+                            u32::try_from(x).expect("pixel x should fit u32"),
+                            y,
+                            world,
+                            None,
+                        );
+                    }
+                }
+            }
+
+            y_start = y_end;
         }
         writeln!(log, "\rDone.                 ")?;
 
@@ -1467,9 +1783,89 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graphics::raytracing::{HitRecord, Material, SurfaceHit};
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     fn assert_close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1e-10);
+    }
+
+    #[derive(Debug, Default)]
+    struct CountingMissWorld {
+        samples: AtomicU32,
+    }
+
+    impl CountingMissWorld {
+        fn sample_count(&self) -> u32 {
+            self.samples.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Hittable for CountingMissWorld {
+        fn hit_with_rng(
+            &self,
+            _ray: &Ray,
+            _ray_t: Interval,
+            _rng: &mut SampleRng,
+        ) -> Option<HitRecord<'_>> {
+            self.samples.fetch_add(1, Ordering::SeqCst);
+            None
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct AlternatingEmissionMaterial;
+
+    impl Material for AlternatingEmissionMaterial {
+        fn emitted(
+            &self,
+            _ray_in: &Ray,
+            _hit: &HitRecord<'_>,
+            u: f64,
+            _v: f64,
+            _point: Point,
+        ) -> LinearColor {
+            if u < 0.5 {
+                LinearColor::default()
+            } else {
+                LinearColor::new(1.0, 1.0, 1.0)
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct AlternatingEmissionWorld {
+        samples: AtomicU32,
+        material: AlternatingEmissionMaterial,
+    }
+
+    impl AlternatingEmissionWorld {
+        fn sample_count(&self) -> u32 {
+            self.samples.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Hittable for AlternatingEmissionWorld {
+        fn hit_with_rng(
+            &self,
+            ray: &Ray,
+            _ray_t: Interval,
+            _rng: &mut SampleRng,
+        ) -> Option<HitRecord<'_>> {
+            let sample = self.samples.fetch_add(1, Ordering::SeqCst);
+            let u = if sample.is_multiple_of(2) { 0.0 } else { 1.0 };
+            Some(HitRecord::from_surface(
+                SurfaceHit {
+                    point: ray.at(1.0),
+                    normal: Vector::new(0.0, 0.0, 1.0),
+                    t: 1.0,
+                    u,
+                    v: 0.0,
+                    front_face: true,
+                },
+                &self.material,
+            ))
+        }
     }
 
     #[test]
@@ -1612,11 +2008,41 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_error_uses_largest_channel_variance() {
+    fn adaptive_error_uses_largest_channel_standard_error() {
         let m2 = LinearColor::new(1.0, 4.0, 9.0);
 
-        assert_close(RayCamera::adaptive_error(m2, 4), 3.0_f64.sqrt());
+        assert_close(RayCamera::adaptive_error(m2, 4), 0.75_f64.sqrt());
         assert!(RayCamera::adaptive_error(m2, 1).is_infinite());
+    }
+
+    #[test]
+    fn adaptive_sampling_stops_at_min_samples_for_zero_variance_pixel() {
+        let world = CountingMissWorld::default();
+        let camera = RayCamera::new(1, 1.0)
+            .with_background(LinearColor::new(0.25, 0.25, 0.25))
+            .with_adaptive_sampling(4, 16, 0.001);
+
+        let color = camera.render_world_pixel(0, 0, &world, None);
+
+        assert_eq!(world.sample_count(), 4);
+        assert_eq!(
+            color,
+            Rgb::from_linear_color(LinearColor::new(0.25, 0.25, 0.25))
+        );
+    }
+
+    #[test]
+    fn adaptive_sampling_reaches_max_samples_for_noisy_pixel() {
+        let world = AlternatingEmissionWorld::default();
+        let camera = RayCamera::new(1, 1.0).with_adaptive_sampling(4, 16, 0.001);
+
+        let color = camera.render_world_pixel(0, 0, &world, None);
+
+        assert_eq!(world.sample_count(), 16);
+        assert_eq!(
+            color,
+            Rgb::from_linear_color(LinearColor::new(0.5, 0.5, 0.5))
+        );
     }
 
     #[test]
@@ -1782,6 +2208,24 @@ mod tests {
     }
 
     #[test]
+    fn ray_camera_world_render_with_progress_matches_default_render() {
+        let world = crate::graphics::raytracing::scenes::normal_sphere_world();
+        let camera = RayCamera::new(8, 1.0)
+            .with_samples_per_pixel(2)
+            .with_max_depth(3)
+            .with_rng_seed(321);
+        let expected = camera.render_world(&world);
+        let mut log = Vec::new();
+
+        let actual = camera
+            .render_world_with_progress(&world, &mut log)
+            .expect("progress render should write");
+
+        assert_eq!(actual.pixels(), expected.pixels());
+        assert!(String::from_utf8_lossy(&log).contains("Scanlines remaining"));
+    }
+
+    #[test]
     fn ray_camera_world_render_with_lights_is_seeded_and_deterministic() {
         use crate::graphics::raytracing::{DiffuseLight, HittableList, Lambertian, Quad, Sphere};
 
@@ -1822,7 +2266,7 @@ mod tests {
         let world = crate::graphics::raytracing::scenes::normal_sphere_world();
         let canvas = RayCamera::new(4, 1.0).render_world(&world);
 
-        assert!(canvas.upper_left_origin);
-        assert!(!canvas.wrapped);
+        assert!(canvas.upper_left_origin());
+        assert!(!canvas.wrapped());
     }
 }

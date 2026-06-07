@@ -116,7 +116,7 @@ fn build_assets() -> Assets {
 
 fn render_frame(frame: usize, assets: &Assets) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(4, 5, 12));
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_line_width(1.0);
 
     // Use stylized Toon cell-shading with Phong specular reflection

@@ -108,8 +108,8 @@ fn render_frame(frame: usize, assets: &Assets) -> Canvas {
     let t = frame as f64 / FRAMES as f64;
     let breath = (t * TAU).sin();
     let mut canvas = sky(t);
-    canvas.wrapped = false;
-    canvas.upper_left_origin = true;
+    canvas.set_wrapped(false);
+    canvas.set_upper_left_origin(true);
     canvas.set_line_width(1.0);
     canvas.set_shading_mode(ShadingMode::Toon);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);

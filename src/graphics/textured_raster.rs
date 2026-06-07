@@ -326,7 +326,7 @@ impl Canvas {
             .fold(f64::NEG_INFINITY, f64::max)
             .ceil() as i64;
 
-        if !self.wrapped {
+        if !self.wrapped() {
             let width = i64::from(self.width());
             let height = i64::from(self.height());
             min_x = min_x.max(0);
@@ -371,7 +371,7 @@ impl Canvas {
 
         let sampler = texture.active_sampler();
         let use_mips = sampler.uses_mips();
-        let clipped_unwrapped = !self.wrapped;
+        let clipped_unwrapped = !self.wrapped();
         let block_count = if use_mips {
             usize::try_from((bounds.max_x - bounds.min_x) / 2 + 1)
                 .expect("texture bounds width is non-negative")

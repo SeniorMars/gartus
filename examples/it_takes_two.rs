@@ -18,7 +18,7 @@ fn render() -> Result<(), Box<dyn Error>> {
     let normalize = external::normalize_mesh_transform(&bunny, 260.0, external::MeshUpAxis::Y);
 
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(252, 240, 229));
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_shading_mode(ShadingMode::Flat);
     canvas.set_polygon_color_mode(PolygonColorMode::LineColor);
 

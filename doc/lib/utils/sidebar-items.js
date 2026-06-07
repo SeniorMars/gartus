@@ -1,1 +1,0 @@
-initSidebarItems({"fn":[["animation","Returns a new animation given a file name prefix."],["view_animation","Open's a given animation using imagemagick's `animate`."]]});

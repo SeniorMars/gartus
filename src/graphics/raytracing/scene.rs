@@ -15,10 +15,61 @@ use super::{
     bvh::{BvhPrimitiveInfo, FlatBvh, RayTraversal},
 };
 use crate::{
-    gmath::{matrix::Matrix, ray::Ray, vector::Point, vector::Vector},
-    graphics::scene::SurfaceScene,
+    gmath::{
+        geometry::{MovingSphereGeometry, QuadGeometry, SphereGeometry, TriangleGeometry},
+        ray::Ray,
+        vector::Point,
+        vector::Vector,
+    },
+    graphics::{material::SurfaceMaterial, scene::SurfaceScene},
 };
-use std::{fmt, sync::OnceLock};
+use std::{collections::HashMap, fmt, sync::OnceLock};
+
+/// Custom [`SurfaceMaterial`] to [`RayMaterial`] mapper used by [`SurfaceRayMaterialMode::Custom`].
+pub type SurfaceRayMaterialMapper<'a> = dyn Fn(&SurfaceMaterial) -> RayMaterial + Send + Sync + 'a;
+
+/// Policy for converting renderer-neutral [`SurfaceMaterial`] values into ray materials.
+#[derive(Default)]
+pub enum SurfaceRayMaterialMode<'a> {
+    /// Convert every surface material to Lambertian using its base color.
+    #[default]
+    Lambertian,
+    /// Use dielectric conversion when the surface has a refractive index; otherwise Lambertian.
+    PreferDielectric,
+    /// Convert every surface material to metal using its specular color and the supplied fuzz.
+    PreferMetal {
+        /// Metal fuzz value used for every converted material.
+        fuzz: f64,
+    },
+    /// Use a caller-supplied conversion function.
+    Custom(Box<SurfaceRayMaterialMapper<'a>>),
+}
+
+impl fmt::Debug for SurfaceRayMaterialMode<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Lambertian => formatter.write_str("Lambertian"),
+            Self::PreferDielectric => formatter.write_str("PreferDielectric"),
+            Self::PreferMetal { fuzz } => formatter
+                .debug_struct("PreferMetal")
+                .field("fuzz", fuzz)
+                .finish(),
+            Self::Custom(_) => formatter.write_str("Custom(..)"),
+        }
+    }
+}
+
+impl SurfaceRayMaterialMode<'_> {
+    fn convert(&self, material: &SurfaceMaterial) -> RayMaterial {
+        match self {
+            Self::Lambertian => RayMaterial::from_surface_lambertian(material),
+            Self::PreferDielectric => RayMaterial::from_surface_dielectric(material)
+                .unwrap_or_else(|| RayMaterial::from_surface_lambertian(material)),
+            Self::PreferMetal { fuzz } => RayMaterial::from_surface_metal(material, *fuzz),
+            Self::Custom(convert) => convert(material),
+        }
+    }
+}
 
 /// Compatibility collection of boxed hittable scene objects.
 ///
@@ -302,14 +353,14 @@ impl Hittable for HittableLayers<'_> {
 /// low-importance geometry.
 #[derive(Default)]
 pub struct SamplingTargetList {
-    objects: Vec<Box<dyn Hittable>>,
+    targets: WeightedSamplingTargetList,
 }
 
 impl fmt::Debug for SamplingTargetList {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SamplingTargetList")
-            .field("len", &self.objects.len())
+            .field("len", &self.len())
             .finish()
     }
 }
@@ -325,27 +376,24 @@ impl SamplingTargetList {
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            objects: Vec::with_capacity(capacity),
+            targets: WeightedSamplingTargetList::with_capacity(capacity),
         }
     }
 
     /// Adds a sphere sampling target.
     pub fn add_sphere(&mut self, center: Point, radius: f64) {
-        self.objects.push(Box::new(Sphere::new(center, radius)));
+        self.targets.add_sphere_weighted(center, radius, 1.0);
     }
 
     /// Adds a moving sphere sampling target.
     pub fn add_moving_sphere(&mut self, center_start: Point, center_end: Point, radius: f64) {
-        self.objects.push(Box::new(MovingSphere::new(
-            center_start,
-            center_end,
-            radius,
-        )));
+        self.targets
+            .add_moving_sphere_weighted(center_start, center_end, radius, 1.0);
     }
 
     /// Adds a quad sampling target.
     pub fn add_quad(&mut self, corner: Point, u: Vector, v: Vector) {
-        self.objects.push(Box::new(Quad::new(corner, u, v)));
+        self.targets.add_quad_weighted(corner, u, v, 1.0);
     }
 
     /// Adds a custom sampling target.
@@ -353,24 +401,24 @@ impl SamplingTargetList {
     /// The object should implement meaningful [`Hittable::pdf_value`] and
     /// [`Hittable::random_direction`] methods.
     pub fn add_target(&mut self, object: impl Hittable + 'static) {
-        self.objects.push(Box::new(object));
+        self.targets.add_target_weighted(object, 1.0);
     }
 
     /// Removes all sampling targets.
     pub fn clear(&mut self) {
-        self.objects.clear();
+        self.targets.clear();
     }
 
     /// Returns the number of sampling targets.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.objects.len()
+        self.targets.len()
     }
 
     /// Returns true when there are no sampling targets.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
+        self.targets.is_empty()
     }
 }
 
@@ -385,22 +433,11 @@ impl Hittable for SamplingTargetList {
     }
 
     fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
-        if self.objects.is_empty() {
-            return 0.0;
-        }
-
-        let weight = reciprocal_count(self.objects.len());
-        self.objects
-            .iter()
-            .map(|object| weight * object.pdf_value(context, direction))
-            .sum()
+        self.targets.pdf_value(context, direction)
     }
 
     fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
-        rng.random_index(self.objects.len()).map_or_else(
-            || Vector::new(1.0, 0.0, 0.0),
-            |index| self.objects[index].random_direction(context, rng),
-        )
+        self.targets.random_direction(context, rng)
     }
 }
 
@@ -485,7 +522,12 @@ impl WeightedSamplingTargetList {
             weight.is_finite() && weight > 0.0,
             "sampling target weight must be finite and positive"
         );
-        self.total_weight += weight;
+        let total_weight = self.total_weight + weight;
+        assert!(
+            total_weight.is_finite(),
+            "sampling target total weight must remain finite"
+        );
+        self.total_weight = total_weight;
         self.objects.push(WeightedSamplingTarget {
             object: Box::new(object),
             weight,
@@ -761,19 +803,212 @@ pub struct RayPrimitive {
     pub material: MaterialId,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GeometrySamplingTarget {
+    geometry: RayGeometry,
+}
+
+impl Hittable for GeometrySamplingTarget {
+    fn hit_with_rng(
+        &self,
+        _ray: &Ray,
+        _ray_t: Interval,
+        _rng: &mut SampleRng,
+    ) -> Option<HitRecord<'_>> {
+        None
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.geometry.bounding_box()
+    }
+
+    fn pdf_value(&self, context: PdfContext, direction: Vector) -> f64 {
+        self.geometry.pdf_value(context, direction)
+    }
+
+    fn random_direction(&self, context: PdfContext, rng: &mut SampleRng) -> Vector {
+        self.geometry.random_direction(context, rng)
+    }
+}
+
+/// Ergonomic builder for [`RayScene`] that resolves primitives through named materials.
+#[derive(Debug, Default)]
+pub struct RaySceneBuilder {
+    scene: RayScene,
+    material_names: HashMap<String, MaterialId>,
+}
+
+impl RaySceneBuilder {
+    /// Creates an empty scene builder.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty scene builder with reserved material and primitive capacity.
+    #[must_use]
+    pub fn with_capacity(materials: usize, primitives: usize) -> Self {
+        Self {
+            scene: RayScene::with_capacity(materials, primitives),
+            material_names: HashMap::with_capacity(materials),
+        }
+    }
+
+    /// Adds a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` has already been registered.
+    #[must_use]
+    pub fn material(mut self, name: impl Into<String>, material: impl Into<RayMaterial>) -> Self {
+        let name = name.into();
+        assert!(
+            !self.material_names.contains_key(&name),
+            "ray scene material name already exists"
+        );
+        let id = self.scene.add_material(material);
+        self.material_names.insert(name, id);
+        self
+    }
+
+    /// Adds a primitive with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn primitive(
+        mut self,
+        geometry: impl Into<RayGeometry>,
+        material: impl AsRef<str>,
+    ) -> Self {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_primitive(geometry, material);
+        self
+    }
+
+    /// Adds multiple geometry descriptors with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn geometries<I, G>(mut self, geometries: I, material: impl AsRef<str>) -> Self
+    where
+        I: IntoIterator<Item = G>,
+        G: Into<RayGeometry>,
+    {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_geometries(material, geometries);
+        self
+    }
+
+    /// Adds a sphere with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn sphere(mut self, center: Point, radius: f64, material: impl AsRef<str>) -> Self {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_sphere(center, radius, material);
+        self
+    }
+
+    /// Adds a moving sphere with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn moving_sphere(
+        mut self,
+        center_start: Point,
+        center_end: Point,
+        radius: f64,
+        material: impl AsRef<str>,
+    ) -> Self {
+        let material = self.material_id(material.as_ref());
+        self.scene
+            .add_moving_sphere(center_start, center_end, radius, material);
+        self
+    }
+
+    /// Adds a quad with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn quad(mut self, corner: Point, u: Vector, v: Vector, material: impl AsRef<str>) -> Self {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_quad(corner, u, v, material);
+        self
+    }
+
+    /// Adds a triangle with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn triangle(mut self, p0: Point, p1: Point, p2: Point, material: impl AsRef<str>) -> Self {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_triangle(p0, p1, p2, material);
+        self
+    }
+
+    /// Adds multiple triangles with a named material.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` has not been registered.
+    #[must_use]
+    pub fn triangles<I>(mut self, triangles: I, material: impl AsRef<str>) -> Self
+    where
+        I: IntoIterator<Item = TriangleGeometry>,
+    {
+        let material = self.material_id(material.as_ref());
+        self.scene.add_triangles(material, triangles);
+        self
+    }
+
+    /// Finishes the builder without prebuilding the BVH.
+    #[must_use]
+    pub fn build(self) -> RayScene {
+        self.scene
+    }
+
+    /// Finishes the builder after prebuilding the primitive BVH.
+    #[must_use]
+    pub fn build_bvh(mut self) -> RayScene {
+        self.scene.build_bvh();
+        self.scene
+    }
+
+    fn material_id(&self, name: &str) -> MaterialId {
+        *self
+            .material_names
+            .get(name)
+            .unwrap_or_else(|| panic!("unknown ray scene material name: {name}"))
+    }
+}
+
 /// Primary data-oriented path-tracing scene.
 ///
 /// `RayScene` is the canonical compiled scene for built-in path-traced primitives. It stores
 /// compact [`RayPrimitive`] values plus a material table, and caches a scene-level BVH over those
-/// primitives. General mesh/material application code should usually build a
-/// [`SurfaceScene`] and let [`crate::graphics::raytracing::PathTracer::render_scene`] compile it;
-/// use `RayScene` directly for low-level ray-specific materials, emissive primitives, and custom
-/// path-tracing scenes. [`HittableList`], [`BvhNode`], and [`SphereList`] remain useful
-/// compatibility or educational adapters for boxed/custom hittables and book-style examples.
+/// primitives. General mesh/material application code can build a [`SurfaceScene`] and call its
+/// [`to_ray_scene`](SurfaceScene::to_ray_scene) method once when repeated renders should reuse the compiled
+/// primitive table and cached BVH. [`PathTracer::render_scene`](crate::graphics::raytracing::PathTracer::render_scene)
+/// remains available as a one-shot convenience helper. Use `RayScene` directly for low-level
+/// ray-specific materials, emissive primitives, and custom path-tracing scenes. [`HittableList`],
+/// [`BvhNode`], and [`SphereList`] remain useful compatibility or educational adapters for
+/// boxed/custom hittables and book-style examples.
 ///
-/// For large procedural scenes, reserve capacity with [`Self::with_capacity`], insert primitives in
-/// bulk with [`Self::add_primitives`], and call [`Self::build_bvh`] before rendering when you want
-/// to pay BVH construction cost up front.
+/// For large procedural scenes, reserve capacity with [`Self::with_capacity`], insert geometry in
+/// bulk with [`Self::add_geometries`] or the typed bulk helpers, and call [`Self::build_bvh`]
+/// before rendering when you want to pay BVH construction cost up front.
 #[derive(Debug, Default)]
 pub struct RayScene {
     materials: Vec<RayMaterial>,
@@ -810,6 +1045,12 @@ impl RayScene {
             primitives: Vec::with_capacity(primitives),
             bvh: OnceLock::new(),
         }
+    }
+
+    /// Returns a named-material builder for ergonomic scene construction.
+    #[must_use]
+    pub fn builder() -> RaySceneBuilder {
+        RaySceneBuilder::new()
     }
 
     /// Adds a material and returns its table index.
@@ -860,6 +1101,38 @@ impl RayScene {
         self.invalidate_bvh();
     }
 
+    /// Adds multiple geometry descriptors using one existing material table index.
+    ///
+    /// This is the ergonomic bulk path for procedural scenes. It reserves from the iterator size
+    /// hint and invalidates the cached BVH once after all geometry has been appended.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_geometries<I, G>(&mut self, material: MaterialId, geometries: I)
+    where
+        I: IntoIterator<Item = G>,
+        G: Into<RayGeometry>,
+    {
+        assert!(
+            material < self.materials.len(),
+            "ray scene material id out of bounds"
+        );
+
+        let geometries = geometries.into_iter();
+        let (lower_bound, _) = geometries.size_hint();
+        self.primitives.reserve(lower_bound);
+
+        for geometry in geometries {
+            self.primitives.push(RayPrimitive {
+                geometry: geometry.into(),
+                material,
+            });
+        }
+
+        self.invalidate_bvh();
+    }
+
     /// Builds the primitive BVH and returns this scene.
     #[must_use]
     pub fn with_bvh(mut self) -> Self {
@@ -874,6 +1147,18 @@ impl RayScene {
     /// Panics if `material` is not a valid material id for this scene.
     pub fn add_sphere(&mut self, center: Point, radius: f64, material: MaterialId) {
         self.add_primitive(RayGeometry::sphere(center, radius), material);
+    }
+
+    /// Adds multiple spheres using one existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_spheres<I>(&mut self, material: MaterialId, spheres: I)
+    where
+        I: IntoIterator<Item = SphereGeometry>,
+    {
+        self.add_geometries(material, spheres);
     }
 
     /// Adds a moving sphere using an existing material table index.
@@ -894,6 +1179,18 @@ impl RayScene {
         );
     }
 
+    /// Adds multiple moving spheres using one existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_moving_spheres<I>(&mut self, material: MaterialId, spheres: I)
+    where
+        I: IntoIterator<Item = MovingSphereGeometry>,
+    {
+        self.add_geometries(material, spheres);
+    }
+
     /// Adds a quad using an existing material table index.
     ///
     /// # Panics
@@ -903,6 +1200,18 @@ impl RayScene {
         self.add_primitive(RayGeometry::quad(corner, u, v), material);
     }
 
+    /// Adds multiple quads using one existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_quads<I>(&mut self, material: MaterialId, quads: I)
+    where
+        I: IntoIterator<Item = QuadGeometry>,
+    {
+        self.add_geometries(material, quads);
+    }
+
     /// Adds a triangle using an existing material table index.
     ///
     /// # Panics
@@ -910,6 +1219,18 @@ impl RayScene {
     /// Panics if `material` is not a valid material id for this scene.
     pub fn add_triangle(&mut self, p0: Point, p1: Point, p2: Point, material: MaterialId) {
         self.add_primitive(RayGeometry::triangle(p0, p1, p2), material);
+    }
+
+    /// Adds multiple triangles using one existing material table index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `material` is not a valid material id for this scene.
+    pub fn add_triangles<I>(&mut self, material: MaterialId, triangles: I)
+    where
+        I: IntoIterator<Item = TriangleGeometry>,
+    {
+        self.add_geometries(material, triangles);
     }
 
     /// Adds a material and a sphere that references it.
@@ -968,6 +1289,43 @@ impl RayScene {
         &self.primitives
     }
 
+    /// Builds an unweighted sampling target list from primitives whose material matches `include`.
+    ///
+    /// This is useful for deriving a compact light list from a mixed scene:
+    ///
+    /// ```
+    /// # use gartus::prelude::*;
+    /// # let scene = RayScene::new();
+    /// let lights = scene.sampling_targets_by_material(RayMaterial::is_emissive);
+    /// ```
+    ///
+    /// The returned list is independent of scene intersections and contains only the matched
+    /// geometry PDF/random-direction behavior.
+    #[must_use]
+    pub fn sampling_targets_by_material<F>(&self, mut include: F) -> SamplingTargetList
+    where
+        F: FnMut(&RayMaterial) -> bool,
+    {
+        let mut targets = SamplingTargetList::with_capacity(self.primitives.len());
+        for primitive in &self.primitives {
+            if include(&self.materials[primitive.material]) {
+                targets.add_target(GeometrySamplingTarget {
+                    geometry: primitive.geometry,
+                });
+            }
+        }
+        targets
+    }
+
+    /// Builds a sampling target list containing primitives whose material is emissive.
+    ///
+    /// Pass this to [`PathTracer::render_with_lights`](crate::graphics::raytracing::PathTracer::render_with_lights)
+    /// instead of using the whole scene as a light sampler.
+    #[must_use]
+    pub fn emissive_targets(&self) -> SamplingTargetList {
+        self.sampling_targets_by_material(RayMaterial::is_emissive)
+    }
+
     /// Returns true when this scene has a built primitive BVH.
     #[must_use]
     pub fn has_bvh(&self) -> bool {
@@ -1004,6 +1362,43 @@ impl RayScene {
         )
     }
 
+    /// Converts a renderer-neutral surface scene using an explicit material conversion policy.
+    ///
+    /// The returned scene has its primitive BVH built before return. Diffuse texture paths remain
+    /// source-scene metadata unless the selected custom material mapper resolves them.
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn from_surface_scene_with_material_mode(
+        scene: &SurfaceScene,
+        material_mode: SurfaceRayMaterialMode<'_>,
+    ) -> Self {
+        let primitive_count = scene
+            .meshes()
+            .iter()
+            .map(|mesh| mesh.polygons.triangle_count())
+            .sum();
+        let mut ray_scene = Self::with_capacity(scene.len(), primitive_count);
+        let mut primitives = Vec::with_capacity(primitive_count);
+
+        for mesh in scene.meshes() {
+            let material = ray_scene.add_material(material_mode.convert(&mesh.material));
+            for (p0, p1, p2) in mesh.polygons.triangles() {
+                primitives.push(RayPrimitive {
+                    geometry: RayGeometry::triangle(
+                        Point::new(p0[0], p0[1], p0[2]),
+                        Point::new(p1[0], p1[1], p1[2]),
+                        Point::new(p2[0], p2[1], p2[2]),
+                    ),
+                    material,
+                });
+            }
+        }
+
+        ray_scene.add_primitives(primitives);
+        ray_scene.build_bvh();
+        ray_scene
+    }
+
     /// Builds and caches the primitive BVH.
     ///
     /// Calling this after bulk scene construction avoids paying BVH build cost on the first ray.
@@ -1027,43 +1422,37 @@ impl RayScene {
 
 impl From<&SurfaceScene> for RayScene {
     fn from(scene: &SurfaceScene) -> Self {
-        let primitive_count = scene
-            .meshes()
-            .iter()
-            .map(|mesh| mesh.polygons.triangle_count())
-            .sum();
-        let mut ray_scene = Self::with_capacity(scene.len(), primitive_count);
-        let mut primitives = Vec::with_capacity(primitive_count);
-        let identity = Matrix::identity_matrix(4);
-
-        for mesh in scene.meshes() {
-            let material = ray_scene.add_material(RayMaterial::from(mesh.material.as_lambertian()));
-            for (p0, p1, p2) in mesh.polygons.transformed_triangles(&identity) {
-                primitives.push(RayPrimitive {
-                    geometry: RayGeometry::triangle(
-                        Point::new(p0[0], p0[1], p0[2]),
-                        Point::new(p1[0], p1[1], p1[2]),
-                        Point::new(p2[0], p2[1], p2[2]),
-                    ),
-                    material,
-                });
-            }
-        }
-
-        ray_scene.add_primitives(primitives);
-        ray_scene.build_bvh();
-        ray_scene
+        Self::from_surface_scene_with_material_mode(scene, SurfaceRayMaterialMode::Lambertian)
     }
 }
 
 impl SurfaceScene {
     /// Converts this shared scene into a data-oriented ray scene.
     ///
-    /// Surface materials are mapped to Lambertian ray materials. Use [`RayScene`] directly when a
-    /// scene needs ray-specific material choices such as metal, dielectric, or emissive surfaces.
+    /// Surface materials are mapped to Lambertian ray materials using base colors, and the
+    /// resulting [`RayScene`] has its BVH built before it is returned. Diffuse texture paths are
+    /// retained only as source-scene metadata and are not loaded by this conversion.
+    ///
+    /// Use this method instead of [`PathTracer::render_scene`](crate::graphics::raytracing::PathTracer::render_scene)
+    /// for repeated renders of the same surface content. Use [`RayScene`] directly when a scene
+    /// needs ray-specific material choices such as textured, metal, dielectric, or emissive
+    /// surfaces.
     #[must_use]
     pub fn to_ray_scene(&self) -> RayScene {
         self.into()
+    }
+
+    /// Converts this shared scene into a data-oriented ray scene with a material policy.
+    ///
+    /// Use this when surface materials should preserve ray-specific hints such as refractive
+    /// indices or specular-metal conversion. The returned [`RayScene`] has its BVH built before it
+    /// is returned.
+    #[must_use]
+    pub fn to_ray_scene_with_material_mode(
+        &self,
+        material_mode: SurfaceRayMaterialMode<'_>,
+    ) -> RayScene {
+        RayScene::from_surface_scene_with_material_mode(self, material_mode)
     }
 }
 
@@ -1131,6 +1520,7 @@ impl Hittable for RayScene {
 ///
 /// Prefer [`RayScene`] for new built-in path-traced scenes. `SphereList` remains as a small
 /// specialized adapter for book-style random-sphere scenes and profiling comparisons.
+#[doc(hidden)]
 #[derive(Clone, Debug, Default)]
 pub struct SphereList {
     spheres: Vec<Sphere>,

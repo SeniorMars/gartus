@@ -1,10 +1,18 @@
-use std::{fmt, sync::Arc};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 #[cfg(not(feature = "external"))]
-use std::{fs, path::Path, str::FromStr};
+use std::{fs, str::FromStr};
 
 use super::{
     colors::{LinearRgb, Rgb},
     display::Canvas,
+    material::SurfaceMaterial,
+    scene::SurfaceScene,
 };
 use crate::gmath::vector::Point;
 #[cfg(feature = "rayon")]
@@ -72,6 +80,12 @@ pub struct Texture {
     filter: TextureFilter,
 }
 
+/// Cache for bitmap textures loaded from filesystem paths.
+#[derive(Clone, Debug, Default)]
+pub struct TextureCache {
+    textures: HashMap<PathBuf, Arc<Texture>>,
+}
+
 /// A texture sampler selected once for a draw call.
 pub(crate) enum ActiveTextureSampler<'a> {
     NearestBase {
@@ -111,6 +125,32 @@ impl Texture {
         }
     }
 
+    /// Loads a texture from an image path.
+    ///
+    /// With the `external` feature enabled, this delegates to the external image conversion loader.
+    /// Without that feature, it supports PPM input through the built-in parser.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, converted, or parsed.
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
+        let path = path.as_ref();
+        #[cfg(feature = "external")]
+        let canvas = {
+            let path = path.to_str().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "texture path is not valid UTF-8",
+                )
+            })?;
+            crate::external::ppmify(path, false)?
+        };
+        #[cfg(not(feature = "external"))]
+        let canvas = load_ppm_canvas(path)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(Self::from_canvas(canvas))
+    }
+
     /// Sets both texture-coordinate wrap modes.
     #[must_use]
     pub const fn wrap(mut self, wrap_s: TextureWrap, wrap_t: TextureWrap) -> Self {
@@ -130,6 +170,16 @@ impl Texture {
     #[must_use]
     pub fn mipmapped(mut self) -> Self {
         self.mipmaps = build_mipmaps(&self.image);
+        self
+    }
+
+    /// Generates and stores at most `level_count` texture levels, including the base image.
+    ///
+    /// Passing `0` or `1` stores no additional mipmaps. Larger values generate only the requested
+    /// number of downsampled levels, stopping earlier if the texture reaches `1x1`.
+    #[must_use]
+    pub fn with_mip_levels(mut self, level_count: usize) -> Self {
+        self.mipmaps = build_mipmaps_with_limit(&self.image, level_count.saturating_sub(1));
         self
     }
 
@@ -262,6 +312,91 @@ impl Texture {
                 max_level: self.mipmaps.len(),
             },
         }
+    }
+}
+
+impl TextureCache {
+    /// Creates an empty texture cache.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the number of cached textures.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.textures.len()
+    }
+
+    /// Returns true when the cache is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.textures.is_empty()
+    }
+
+    /// Removes all cached textures.
+    pub fn clear(&mut self) {
+        self.textures.clear();
+    }
+
+    /// Returns a cached texture by path.
+    #[must_use]
+    pub fn get(&self, path: impl AsRef<Path>) -> Option<Arc<Texture>> {
+        self.textures.get(path.as_ref()).map(Arc::clone)
+    }
+
+    /// Inserts or replaces a texture under `path`.
+    pub fn insert(&mut self, path: impl Into<PathBuf>, texture: Texture) -> Arc<Texture> {
+        let texture = Arc::new(texture);
+        self.textures.insert(path.into(), Arc::clone(&texture));
+        texture
+    }
+
+    /// Loads `path` if needed and returns the cached texture.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the texture cannot be loaded.
+    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<Arc<Texture>, Box<dyn Error>> {
+        let path = path.as_ref();
+        if let Some(texture) = self.textures.get(path) {
+            return Ok(Arc::clone(texture));
+        }
+
+        let texture = Arc::new(Texture::from_path(path)?);
+        self.textures
+            .insert(path.to_path_buf(), Arc::clone(&texture));
+        Ok(texture)
+    }
+
+    /// Loads the diffuse texture referenced by `material`, if present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the referenced texture cannot be loaded.
+    pub fn load_material_texture(
+        &mut self,
+        material: &SurfaceMaterial,
+    ) -> Result<Option<Arc<Texture>>, Box<dyn Error>> {
+        material
+            .diffuse_texture
+            .as_ref()
+            .map_or(Ok(None), |path| self.load(path).map(Some))
+    }
+
+    /// Loads all diffuse textures referenced by a surface scene.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first texture loading error.
+    pub fn load_surface_scene_materials(
+        &mut self,
+        scene: &SurfaceScene,
+    ) -> Result<(), Box<dyn Error>> {
+        for mesh in scene.meshes() {
+            self.load_material_texture(&mesh.material)?;
+        }
+        Ok(())
     }
 }
 
@@ -581,9 +716,13 @@ fn pixel_at_storage(image: &Canvas, x: u32, y: u32) -> Rgb {
 }
 
 fn build_mipmaps(image: &Canvas) -> Vec<Canvas> {
+    build_mipmaps_with_limit(image, usize::MAX)
+}
+
+fn build_mipmaps_with_limit(image: &Canvas, additional_levels: usize) -> Vec<Canvas> {
     let mut levels = Vec::new();
     let mut source = image;
-    while source.width() > 1 || source.height() > 1 {
+    while levels.len() < additional_levels && (source.width() > 1 || source.height() > 1) {
         levels.push(downsample_mipmap_level(source));
         source = levels.last().expect("just pushed generated mipmap level");
     }
@@ -674,6 +813,9 @@ fn mip_level_pair_from_lod(lod: f64, max_level: usize) -> (usize, usize, f64) {
 mod tests {
     use super::*;
     #[cfg(not(feature = "external"))]
+    use crate::gmath::polygon_matrix::PolygonMatrix;
+    #[cfg(not(feature = "external"))]
+    use crate::graphics::raytracing::Lambertian;
     use std::path::PathBuf;
 
     fn test_texture() -> Texture {
@@ -682,6 +824,23 @@ mod tests {
             2,
             vec![Rgb::RED, Rgb::GREEN, Rgb::BLUE, Rgb::WHITE],
         ))
+    }
+
+    #[test]
+    fn texture_cache_can_bind_material_texture_metadata() {
+        let path = PathBuf::from("inline.ppm");
+        let material = SurfaceMaterial::default().with_diffuse_texture(&path);
+        let mut cache = TextureCache::new();
+
+        let inserted = cache.insert(path.clone(), test_texture());
+        let loaded = cache
+            .load_material_texture(&material)
+            .expect("inserted texture should load")
+            .expect("material should reference a texture");
+
+        assert_eq!(cache.len(), 1);
+        assert!(Arc::ptr_eq(&inserted, &loaded));
+        assert!(cache.get(&path).is_some());
     }
 
     #[cfg(not(feature = "external"))]
@@ -710,6 +869,41 @@ mod tests {
         let canvas = load_ppm_canvas(&path).expect("parse p6 ppm");
 
         assert_eq!(canvas.pixels(), &[Rgb::new(255, 0, 128)]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(not(feature = "external"))]
+    #[test]
+    fn texture_cache_loads_surface_scene_material_paths_for_ray_materials() {
+        let path = temp_ppm_path("surface-scene-material");
+        std::fs::write(&path, b"P3\n2 1\n255\n255 0 0\n0 255 0\n").unwrap();
+        let material = SurfaceMaterial::default().with_diffuse_texture(&path);
+        let mut polygons = PolygonMatrix::new();
+        polygons.add_polygon((0.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 1.0, -1.0));
+        let mut scene = SurfaceScene::new();
+        scene.add_mesh(polygons, material);
+        let mut cache = TextureCache::new();
+
+        cache
+            .load_surface_scene_materials(&scene)
+            .expect("surface scene texture path should load");
+        let texture = cache.get(&path).expect("texture should be cached");
+        let texture: SurfaceTextureRef = texture;
+        let lambertian = Lambertian::from_shared_texture(texture);
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(
+            lambertian
+                .texture()
+                .sample_linear(TextureSample::new(0.0, 0.0, Point::default())),
+            LinearRgb::from_rgb_srgb(Rgb::RED)
+        );
+        assert_eq!(
+            lambertian
+                .texture()
+                .sample_linear(TextureSample::new(1.0, 0.0, Point::default())),
+            LinearRgb::from_rgb_srgb(Rgb::GREEN)
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -762,6 +956,17 @@ mod tests {
 
         assert_eq!(texture.level_count(), 2);
         assert_eq!(texture.sample_lod(0.0, 0.0, 1.0), Rgb::new(128, 128, 128));
+    }
+
+    #[test]
+    fn mip_level_count_can_be_limited() {
+        let full = Texture::from_canvas(Canvas::new(8, 8, Rgb::WHITE)).mipmapped();
+        let limited = Texture::from_canvas(Canvas::new(8, 8, Rgb::WHITE)).with_mip_levels(2);
+        let base_only = Texture::from_canvas(Canvas::new(8, 8, Rgb::WHITE)).with_mip_levels(1);
+
+        assert_eq!(full.level_count(), 4);
+        assert_eq!(limited.level_count(), 2);
+        assert_eq!(base_only.level_count(), 1);
     }
 
     #[test]

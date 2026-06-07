@@ -78,9 +78,36 @@ are designed to sit above any one renderer. The same scene data can be rasterize
 with `SurfaceScene::rasterize` or path traced with
 `PathTracer::render_scene`.
 
-This is the preferred layer for ordinary mesh/material content. Use the lower
-level ray-tracing types only when you need ray-specific behavior such as glass,
-metal, emissive geometry, participating media, SDFs, or custom hittables.
+This is the preferred layer for ordinary mesh/material content. For one-off
+path-traced previews, use the convenience renderer:
+
+```rust
+use gartus::prelude::*;
+
+let surface_scene = SurfaceScene::new();
+let camera = RayCamera::new(400, 1.0);
+let image = PathTracer::new(camera).render_scene(&surface_scene);
+```
+
+For animation, camera iteration, or sample-count iteration, compile once and
+render the compiled scene repeatedly so the primitive table and BVH are reused:
+
+```rust
+use gartus::prelude::*;
+
+let surface_scene = SurfaceScene::new();
+let ray_scene = surface_scene.to_ray_scene();
+
+let preview = PathTracer::new(RayCamera::new(400, 1.0)).render(&ray_scene);
+let final_image = PathTracer::new(
+    RayCamera::new(800, 1.0).with_stratified_grid_width(16),
+)
+.render(&ray_scene);
+```
+
+Use lower-level ray-tracing types directly when you need ray-specific behavior
+such as glass, metal, emissive geometry, participating media, SDFs, or custom
+hittables.
 
 ### Path Tracing
 
@@ -103,9 +130,12 @@ Core pieces include:
 - stratified sampling, adaptive sampling, defocus blur, motion blur, and
   configurable recursion depth
 
-For mesh-heavy scenes made from built-in ray geometry, prefer `RayScene`; it
-stores compact primitive/material tables and caches a BVH. For book-style scenes
-or custom hittables, use `HittableList`.
+For mesh-heavy renderer-neutral scenes, call `SurfaceScene::to_ray_scene()` once
+and render the compiled `RayScene` repeatedly. `PathTracer::render_scene` is
+intentionally ergonomic, but it recompiles this scene every call. For built-in
+ray geometry, build a `RayScene` directly so its compact primitive/material
+tables and cached BVH are reused. For book-style scenes or custom hittables, use
+`HittableList`.
 
 ```rust
 use gartus::prelude::*;

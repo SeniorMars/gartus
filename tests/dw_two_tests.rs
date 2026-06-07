@@ -27,7 +27,7 @@ fn pixels_eq(a: &Canvas, b: &Canvas) -> bool {
 
 fn manual_face_canvas() -> Canvas {
     let mut canvas = Canvas::new_with_bg(500, 500, Rgb::WHITE);
-    canvas.line = Rgb::BLACK;
+    canvas.set_line_color(Rgb::BLACK);
     canvas.set_shading_mode(ShadingMode::Flat);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
 

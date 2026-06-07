@@ -3,7 +3,7 @@ use gartus::prelude::{Canvas, EdgeMatrix, Matrix, Rgb};
 pub fn make_pory() {
     let mut porygon = Canvas::new_with_bg(512, 512, Rgb::new(17, 46, 81));
 
-    porygon.upper_left_origin = true;
+    porygon.set_upper_left_origin(true);
 
     let corrs = [
         552, 661, 622, 654, 622, 654, 768, 535, 768, 535, 743, 505, 743, 505, 669, 510, 669, 510,
@@ -57,7 +57,7 @@ pub fn make_pory_anim() {
     let file_prefix = "porygon";
     let mut porygon = Canvas::new_with_bg(512, 512, purplish);
 
-    porygon.upper_left_origin = true;
+    porygon.set_upper_left_origin(true);
     let mut recorder = FrameRecorder::new("anim", file_prefix).with_delay(2);
 
     let corrs = [

@@ -4,6 +4,8 @@ use core::slice;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 use std::{
+    error::Error,
+    fmt,
     fs::File,
     io::{self, BufWriter, Write},
     ops::{Index, IndexMut},
@@ -102,17 +104,185 @@ pub struct Canvas {
     height: u32,
     pixels: Vec<Rgb>,
     zbuffer: Vec<f64>,
-    /// When true, (0,0) is top-left. When false (default), (0,0) is bottom-left.
-    pub upper_left_origin: bool,
-    /// When true (default), coordinates wrap around canvas edges. When false, out-of-bounds plots are clipped.
-    pub wrapped: bool,
-    /// A `PixelColor` that represents the color that will be used to draw lines.
-    pub line: Rgb,
+    upper_left_origin: bool,
+    wrapped: bool,
+    line: Rgb,
     /// Width of drawn lines in pixels. Default 1.0.
     line_width: f64,
     polygon_color_mode: PolygonColorMode,
     shading_mode: ShadingMode,
     lighting: Lighting,
+}
+
+/// Error returned by checked [`Canvas`] constructors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CanvasBuildError {
+    /// `width * height` overflowed while computing the pixel count.
+    DimensionsOverflow,
+    /// The canvas has more pixels than can be indexed on this platform.
+    TooLargeForPlatform,
+    /// The supplied pixel data length did not match `width * height`.
+    PixelDataLengthMismatch {
+        /// Number of pixels required by the canvas dimensions.
+        expected: usize,
+        /// Number of pixels supplied by the caller.
+        actual: usize,
+    },
+    /// The backing pixel or z-buffer allocation could not be reserved.
+    AllocationFailed,
+}
+
+impl fmt::Display for CanvasBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DimensionsOverflow => formatter.write_str("canvas dimensions overflow"),
+            Self::TooLargeForPlatform => formatter.write_str("canvas too large for this platform"),
+            Self::PixelDataLengthMismatch { expected, actual } => write!(
+                formatter,
+                "pixel data length mismatch: expected {expected}, got {actual}"
+            ),
+            Self::AllocationFailed => formatter.write_str("canvas allocation failed"),
+        }
+    }
+}
+
+impl Error for CanvasBuildError {}
+
+/// Lightweight RGB image buffer without canvas drawing state or z-buffer data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RgbImage {
+    width: u32,
+    height: u32,
+    pixels: Vec<Rgb>,
+}
+
+impl RgbImage {
+    /// Creates an image filled with `pixel`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height` overflows or if allocation fails.
+    #[must_use]
+    pub fn new(width: u32, height: u32, pixel: Rgb) -> Self {
+        Self::try_new(width, height, pixel).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Creates a checked image filled with `pixel`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if allocation fails.
+    pub fn try_new(width: u32, height: u32, pixel: Rgb) -> Result<Self, CanvasBuildError> {
+        let pixel_count = Canvas::try_pixel_count(width, height)?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(pixel_count)
+            .map_err(|_| CanvasBuildError::AllocationFailed)?;
+        pixels.resize(pixel_count, pixel);
+        Ok(Self {
+            width,
+            height,
+            pixels,
+        })
+    }
+
+    /// Creates an image from exact pixel data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixels.len()` is not `width * height`.
+    #[must_use]
+    pub fn from_pixels(width: u32, height: u32, pixels: Vec<Rgb>) -> Self {
+        Self::try_from_pixels(width, height, pixels).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Creates a checked image from exact pixel data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if `pixels.len()` does not
+    /// match that count.
+    pub fn try_from_pixels(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+    ) -> Result<Self, CanvasBuildError> {
+        let expected = Canvas::try_pixel_count(width, height)?;
+        if pixels.len() != expected {
+            return Err(CanvasBuildError::PixelDataLengthMismatch {
+                expected,
+                actual: pixels.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            pixels,
+        })
+    }
+
+    /// Returns the image width.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Returns the image height.
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Returns the number of pixels.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.pixels.len()
+    }
+
+    /// Returns true when this image has no pixels.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.pixels.is_empty()
+    }
+
+    /// Returns immutable pixel data.
+    #[must_use]
+    pub fn pixels(&self) -> &[Rgb] {
+        &self.pixels
+    }
+
+    /// Returns mutable pixel data.
+    #[must_use]
+    pub fn pixels_mut(&mut self) -> &mut [Rgb] {
+        &mut self.pixels
+    }
+
+    /// Consumes the image and returns its pixel data.
+    #[must_use]
+    pub fn into_pixels(self) -> Vec<Rgb> {
+        self.pixels
+    }
+
+    /// Converts this image into a drawing canvas.
+    pub fn into_canvas(self) -> Canvas {
+        self.into()
+    }
+}
+
+impl From<RgbImage> for Canvas {
+    fn from(image: RgbImage) -> Self {
+        Self::from_pixels(image.width, image.height, image.pixels)
+    }
+}
+
+impl From<Canvas> for RgbImage {
+    fn from(canvas: Canvas) -> Self {
+        Self {
+            width: canvas.width,
+            height: canvas.height,
+            pixels: canvas.pixels,
+        }
+    }
 }
 
 impl Default for Canvas {
@@ -139,9 +309,24 @@ impl Canvas {
         CanvasBuilder::new(width, height)
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    fn pixel_count(width: u32, height: u32) -> usize {
-        width as usize * height as usize
+    pub(crate) fn pixel_count(width: u32, height: u32) -> usize {
+        Self::try_pixel_count(width, height).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    fn try_pixel_count(width: u32, height: u32) -> Result<usize, CanvasBuildError> {
+        let count = u64::from(width)
+            .checked_mul(u64::from(height))
+            .ok_or(CanvasBuildError::DimensionsOverflow)?;
+        usize::try_from(count).map_err(|_| CanvasBuildError::TooLargeForPlatform)
+    }
+
+    fn zbuffer_for_pixel_count(pixel_count: usize) -> Result<Vec<f64>, CanvasBuildError> {
+        let mut zbuffer = Vec::new();
+        zbuffer
+            .try_reserve_exact(pixel_count)
+            .map_err(|_| CanvasBuildError::AllocationFailed)?;
+        zbuffer.resize(pixel_count, f64::NEG_INFINITY);
+        Ok(zbuffer)
     }
 
     /// Returns a new blank [Canvas] to be drawn on.
@@ -162,6 +347,17 @@ impl Canvas {
     /// ```
     pub fn new(width: u32, height: u32, line_color: Rgb) -> Self {
         Self::builder(width, height).line_color(line_color).build()
+    }
+
+    /// Returns a checked new blank [`Canvas`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if allocation fails.
+    pub fn try_new(width: u32, height: u32, line_color: Rgb) -> Result<Self, CanvasBuildError> {
+        Self::builder(width, height)
+            .line_color(line_color)
+            .try_build()
     }
 
     /// Returns a new [Canvas] to be drawn on with a specific background color.
@@ -187,6 +383,21 @@ impl Canvas {
             .build()
     }
 
+    /// Returns a checked new [`Canvas`] with a specific background color.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if allocation fails.
+    pub fn try_new_with_bg(
+        width: u32,
+        height: u32,
+        background_color: Rgb,
+    ) -> Result<Self, CanvasBuildError> {
+        Self::builder(width, height)
+            .background(background_color)
+            .try_build()
+    }
+
     /// Returns a new [`Canvas`] initialized with exact pixel data.
     ///
     /// # Panics
@@ -194,6 +405,20 @@ impl Canvas {
     /// Panics if `pixels.len()` is not `width * height`.
     pub fn from_pixels(width: u32, height: u32, pixels: Vec<Rgb>) -> Self {
         Self::from_pixels_with_options(width, height, pixels, false, true)
+    }
+
+    /// Returns a checked [`Canvas`] initialized with exact pixel data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented, if `pixels.len()` does not match
+    /// that count, or if z-buffer allocation fails.
+    pub fn try_from_pixels(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+    ) -> Result<Self, CanvasBuildError> {
+        Self::try_from_pixels_with_options(width, height, pixels, false, true)
     }
 
     /// Returns a new [`Canvas`] initialized with exact pixel data and coordinate options.
@@ -208,16 +433,35 @@ impl Canvas {
         upper_left_origin: bool,
         wrapped: bool,
     ) -> Self {
-        assert_eq!(
-            pixels.len(),
-            Self::pixel_count(width, height),
-            "pixel data must match canvas size"
-        );
-        Self {
+        Self::try_from_pixels_with_options(width, height, pixels, upper_left_origin, wrapped)
+            .unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Returns a checked [`Canvas`] initialized with exact pixel data and coordinate options.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented, if `pixels.len()` does not match
+    /// that count, or if z-buffer allocation fails.
+    pub fn try_from_pixels_with_options(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+        upper_left_origin: bool,
+        wrapped: bool,
+    ) -> Result<Self, CanvasBuildError> {
+        let pixel_count = Self::try_pixel_count(width, height)?;
+        if pixels.len() != pixel_count {
+            return Err(CanvasBuildError::PixelDataLengthMismatch {
+                expected: pixel_count,
+                actual: pixels.len(),
+            });
+        }
+        Ok(Self {
             width,
             height,
             pixels,
-            zbuffer: vec![f64::NEG_INFINITY; Self::pixel_count(width, height)],
+            zbuffer: Self::zbuffer_for_pixel_count(pixel_count)?,
             upper_left_origin,
             wrapped,
             line: Rgb::default(),
@@ -225,7 +469,7 @@ impl Canvas {
             polygon_color_mode: PolygonColorMode::default(),
             shading_mode: ShadingMode::default(),
             lighting: Lighting::default(),
-        }
+        })
     }
 
     /// Returns a new [`Canvas`] initialized by evaluating `pixel` for every storage coordinate.
@@ -304,10 +548,15 @@ impl Canvas {
     ///
     /// The first storage row maps to `domain.y_max` and the last row approaches `domain.y_min`,
     /// which matches the common top-to-bottom scan order used by image and fractal renderers.
+    /// Zero width or height returns an empty canvas without evaluating `pixel`.
     pub fn from_domain<F>(width: u32, height: u32, domain: Domain2D, mut pixel: F) -> Self
     where
         F: FnMut(f64, f64) -> Rgb,
     {
+        if width == 0 || height == 0 {
+            return Self::from_pixels(width, height, Vec::new());
+        }
+
         let scale_x = (domain.x_max - domain.x_min) / f64::from(width);
         let scale_y = (domain.y_max - domain.y_min) / f64::from(height);
         Self::from_fn(width, height, |x, y| {
@@ -494,6 +743,28 @@ impl Canvas {
         self.pixels.is_empty()
     }
 
+    /// Returns true when external `(0, 0)` coordinates map to the top-left pixel.
+    #[must_use]
+    pub fn upper_left_origin(&self) -> bool {
+        self.upper_left_origin
+    }
+
+    /// Sets whether external `(0, 0)` coordinates map to the top-left pixel.
+    pub fn set_upper_left_origin(&mut self, upper_left_origin: bool) {
+        self.upper_left_origin = upper_left_origin;
+    }
+
+    /// Returns true when out-of-bounds coordinates wrap around canvas edges.
+    #[must_use]
+    pub fn wrapped(&self) -> bool {
+        self.wrapped
+    }
+
+    /// Sets whether out-of-bounds coordinates wrap around canvas edges.
+    pub fn set_wrapped(&mut self, wrapped: bool) {
+        self.wrapped = wrapped;
+    }
+
     /// Returns an iterator over the pixels of the [Canvas].
     pub fn iter(&self) -> slice::Iter<'_, Rgb> {
         self.pixels.iter()
@@ -515,7 +786,7 @@ impl Canvas {
     /// let iter = image.iter_row();
     /// ```
     pub fn iter_row(&self) -> slice::ChunksExact<'_, Rgb> {
-        self.pixels.chunks_exact(self.width as usize)
+        self.pixels.chunks_exact((self.width as usize).max(1))
     }
 
     /// Returns a mutable iterator that iterates over a specific row.
@@ -529,7 +800,7 @@ impl Canvas {
     /// let mut iter = image.iter_row_mut();
     /// ```
     pub fn iter_row_mut(&mut self) -> slice::ChunksExactMut<'_, Rgb> {
-        self.pixels.chunks_exact_mut(self.width as usize)
+        self.pixels.chunks_exact_mut((self.width as usize).max(1))
     }
 
     /// Returns a reference to the `(x, y)` pixel in the canvas.
@@ -925,6 +1196,11 @@ impl Canvas {
         self.line = color;
     }
 
+    /// Sets the current drawing line color.
+    pub fn set_line_color(&mut self, color: Rgb) {
+        self.line = color;
+    }
+
     /// Sets the color of the drawing line to a different color given a [Rgb] value.
     ///
     /// # Arguments
@@ -1016,7 +1292,15 @@ impl Canvas {
     }
 
     /// Sets the current drawing line width.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width` is not positive and finite.
     pub fn set_line_width(&mut self, width: f64) {
+        assert!(
+            width.is_finite() && width > 0.0,
+            "line width must be positive and finite"
+        );
         self.line_width = width;
     }
 
@@ -1252,7 +1536,15 @@ impl CanvasBuilder {
     }
 
     /// Sets the initial drawing line width.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width` is not positive and finite.
     pub fn line_width(mut self, width: f64) -> Self {
+        assert!(
+            width.is_finite() && width > 0.0,
+            "line width must be positive and finite"
+        );
         self.line_width = width;
         self
     }
@@ -1288,10 +1580,28 @@ impl CanvasBuilder {
     }
 
     /// Consumes the builder and returns a new [Canvas].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height` cannot be represented or if allocation fails.
     pub fn build(self) -> Canvas {
-        let pixels = vec![self.background; Canvas::pixel_count(self.width, self.height)];
-        let zbuffer = vec![f64::NEG_INFINITY; pixels.len()];
-        Canvas {
+        self.try_build().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Consumes the builder and returns a checked new [`Canvas`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if allocation fails.
+    pub fn try_build(self) -> Result<Canvas, CanvasBuildError> {
+        let pixel_count = Canvas::try_pixel_count(self.width, self.height)?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(pixel_count)
+            .map_err(|_| CanvasBuildError::AllocationFailed)?;
+        pixels.resize(pixel_count, self.background);
+        let zbuffer = Canvas::zbuffer_for_pixel_count(pixel_count)?;
+        Ok(Canvas {
             width: self.width,
             height: self.height,
             pixels,
@@ -1303,13 +1613,141 @@ impl CanvasBuilder {
             polygon_color_mode: self.polygon_color_mode,
             shading_mode: self.shading_mode,
             lighting: self.lighting,
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_new_builds_canvas_with_checked_dimensions() {
+        let canvas = Canvas::try_new_with_bg(2, 3, Rgb::new(1, 2, 3)).expect("valid canvas");
+
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 3);
+        assert_eq!(canvas.pixels(), &[Rgb::new(1, 2, 3); 6]);
+    }
+
+    #[test]
+    fn zero_size_canvas_accessors_are_empty_and_non_panicking() {
+        let mut canvas = Canvas::new(0, 0, Rgb::WHITE);
+
+        assert_eq!(canvas.width(), 0);
+        assert_eq!(canvas.height(), 0);
+        assert_eq!(canvas.len(), 0);
+        assert!(canvas.is_empty());
+        assert_eq!(canvas.get_pixel(0, 0), None);
+        assert_eq!(canvas.get_pixel(-1, -1), None);
+        assert_eq!(canvas.get_zbuffer(0, 0), None);
+        assert_eq!(canvas.iter_row().count(), 0);
+        assert_eq!(canvas.iter_row_mut().count(), 0);
+
+        canvas.plot(&Rgb::RED, 0, 0);
+        assert!(canvas.pixels().is_empty());
+    }
+
+    #[test]
+    fn zero_width_canvas_rows_and_domain_mapping_are_empty() {
+        let mut calls = 0;
+        let canvas = Canvas::from_domain(0, 3, Domain2D::new(-1.0, 1.0, -1.0, 1.0), |_, _| {
+            calls += 1;
+            Rgb::RED
+        });
+
+        assert_eq!(canvas.width(), 0);
+        assert_eq!(canvas.height(), 3);
+        assert_eq!(canvas.len(), 0);
+        assert_eq!(calls, 0);
+        assert_eq!(canvas.iter_row().count(), 0);
+    }
+
+    #[test]
+    fn zero_height_domain_mapping_is_empty() {
+        let mut calls = 0;
+        let canvas = Canvas::from_domain(3, 0, Domain2D::new(-1.0, 1.0, -1.0, 1.0), |_, _| {
+            calls += 1;
+            Rgb::RED
+        });
+
+        assert_eq!(canvas.width(), 3);
+        assert_eq!(canvas.height(), 0);
+        assert_eq!(canvas.len(), 0);
+        assert_eq!(calls, 0);
+        assert_eq!(canvas.iter_row().count(), 0);
+    }
+
+    #[test]
+    fn huge_canvas_dimensions_return_checked_error() {
+        let error = Canvas::builder(u32::MAX, u32::MAX)
+            .try_build()
+            .expect_err("huge canvas should not allocate");
+
+        assert!(matches!(
+            error,
+            CanvasBuildError::AllocationFailed | CanvasBuildError::TooLargeForPlatform
+        ));
+    }
+
+    #[test]
+    fn canvas_state_accessors_update_origin_wrapping_and_line_color() {
+        let mut canvas = Canvas::new(2, 2, Rgb::BLACK);
+
+        canvas.set_upper_left_origin(true);
+        canvas.set_wrapped(false);
+        canvas.set_line_color(Rgb::new(1, 2, 3));
+
+        assert!(canvas.upper_left_origin());
+        assert!(!canvas.wrapped());
+        assert_eq!(canvas.line_color(), Rgb::new(1, 2, 3));
+    }
+
+    #[test]
+    #[should_panic(expected = "line width must be positive and finite")]
+    fn canvas_rejects_non_finite_line_width() {
+        let mut canvas = Canvas::new(2, 2, Rgb::BLACK);
+
+        canvas.set_line_width(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "line width must be positive and finite")]
+    fn canvas_builder_rejects_negative_line_width() {
+        let _ = Canvas::builder(2, 2).line_width(-1.0);
+    }
+
+    #[test]
+    fn try_from_pixels_rejects_wrong_pixel_count() {
+        let err = Canvas::try_from_pixels(2, 2, vec![Rgb::BLACK; 3]).expect_err("wrong length");
+
+        assert_eq!(
+            err,
+            CanvasBuildError::PixelDataLengthMismatch {
+                expected: 4,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn rgb_image_is_lightweight_pixel_storage_convertible_to_canvas() {
+        let image = RgbImage::try_new(2, 2, Rgb::BLUE).expect("valid image");
+        let canvas = image.clone().into_canvas();
+        let round_trip = RgbImage::from(canvas);
+
+        assert_eq!(image.width(), 2);
+        assert_eq!(image.height(), 2);
+        assert_eq!(image.pixels(), &[Rgb::BLUE; 4]);
+        assert_eq!(round_trip, image);
+        assert_eq!(
+            RgbImage::try_from_pixels(2, 2, vec![Rgb::BLACK; 3]),
+            Err(CanvasBuildError::PixelDataLengthMismatch {
+                expected: 4,
+                actual: 3,
+            })
+        );
+    }
 
     #[test]
     fn from_fn_visits_pixels_in_storage_order() {

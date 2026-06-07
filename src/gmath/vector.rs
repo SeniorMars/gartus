@@ -19,6 +19,18 @@ impl Point {
         Self { data: [x, y, z] }
     }
 
+    /// Creates a 3D point only when all coordinates are finite.
+    #[must_use]
+    pub fn try_new(x: f64, y: f64, z: f64) -> Option<Self> {
+        (x.is_finite() && y.is_finite() && z.is_finite()).then_some(Self { data: [x, y, z] })
+    }
+
+    /// Returns true when every coordinate is finite.
+    #[must_use]
+    pub fn is_finite(self) -> bool {
+        self.data.iter().all(|value| value.is_finite())
+    }
+
     /// Returns the point's x coordinate.
     #[must_use]
     pub fn x(self) -> f64 {
@@ -62,6 +74,18 @@ impl Vector {
     #[must_use]
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self { data: [x, y, z] }
+    }
+
+    /// Creates a 3D vector only when all components are finite.
+    #[must_use]
+    pub fn try_new(x: f64, y: f64, z: f64) -> Option<Self> {
+        (x.is_finite() && y.is_finite() && z.is_finite()).then_some(Self { data: [x, y, z] })
+    }
+
+    /// Returns true when every component is finite.
+    #[must_use]
+    pub fn is_finite(self) -> bool {
+        self.data.iter().all(|value| value.is_finite())
     }
 
     /// Returns the vector's x component.
@@ -282,6 +306,17 @@ impl Sub<Vector> for Point {
 #[allow(clippy::float_cmp)]
 mod test {
     use super::*;
+
+    #[test]
+    fn checked_point_and_vector_constructors_reject_non_finite_values() {
+        assert_eq!(
+            Point::try_new(1.0, 2.0, 3.0),
+            Some(Point::new(1.0, 2.0, 3.0))
+        );
+        assert_eq!(Point::try_new(1.0, f64::NAN, 3.0), None);
+        assert!(Vector::new(1.0, 2.0, 3.0).is_finite());
+        assert_eq!(Vector::try_new(1.0, f64::INFINITY, 3.0), None);
+    }
 
     #[test]
     fn test_vector_between_points() {

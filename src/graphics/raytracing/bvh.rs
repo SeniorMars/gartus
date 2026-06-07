@@ -461,6 +461,14 @@ mod tests {
         Aabb::new((-1.0, -1.0, min_z), (1.0, 1.0, max_z))
     }
 
+    fn unit_bounds() -> Aabb {
+        Aabb::new((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+    }
+
+    fn bounds_entry(ray: Ray, t_min: f64, t_max: f64) -> Option<f64> {
+        RayTraversal::new(&ray).hit_bounds(unit_bounds(), t_min, t_max)
+    }
+
     #[test]
     fn traversal_stack_preserves_entries_past_inline_capacity() {
         let mut stack = TraversalStack::new(0.0);
@@ -518,5 +526,66 @@ mod tests {
 
         assert_eq!(hit, Some(TestHit { t: 1.5 }));
         assert_eq!(visited, vec![0]);
+    }
+
+    #[test]
+    fn ray_traversal_handles_axis_parallel_rays_inside_bounds() {
+        for direction in [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(-1.0, 0.0, 0.0),
+            Vector::new(0.0, -1.0, 0.0),
+            Vector::new(0.0, 0.0, -1.0),
+        ] {
+            let ray = Ray::new(Point::new(0.0, 0.0, 0.0), direction);
+
+            assert_eq!(bounds_entry(ray, 0.0, 10.0), Some(0.0));
+        }
+    }
+
+    #[test]
+    fn ray_traversal_rejects_parallel_rays_outside_slab() {
+        let cases = [
+            (Point::new(0.0, 2.0, 0.0), Vector::new(1.0, 0.0, 0.0)),
+            (Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 1.0, 0.0)),
+            (Point::new(2.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)),
+        ];
+
+        for (origin, direction) in cases {
+            let ray = Ray::new(origin, direction);
+
+            assert_eq!(bounds_entry(ray, 0.0, 10.0), None);
+        }
+    }
+
+    #[test]
+    fn ray_traversal_handles_rays_starting_inside_bounds() {
+        let ray = Ray::new(Point::new(0.25, -0.25, 0.5), Vector::new(0.0, 0.0, 1.0));
+
+        assert_eq!(bounds_entry(ray, 0.0, 10.0), Some(0.0));
+    }
+
+    #[test]
+    fn ray_traversal_accepts_boundary_parallel_rays() {
+        let ray = Ray::new(Point::new(1.0, -2.0, 0.0), Vector::new(0.0, 1.0, 0.0));
+
+        assert_eq!(bounds_entry(ray, 0.0, 10.0), Some(1.0));
+    }
+
+    #[test]
+    fn ray_traversal_rejects_single_point_boundary_touch() {
+        let ray = Ray::new(Point::new(2.0, 2.0, 0.0), Vector::new(-1.0, -1.0, 1.0));
+
+        assert_eq!(bounds_entry(ray, 0.0, 10.0), None);
+    }
+
+    #[test]
+    fn ray_traversal_handles_zero_direction_components() {
+        let inside = Ray::new(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0));
+        let outside = Ray::new(Point::new(2.0, 0.0, -2.0), Vector::new(0.0, 0.0, 1.0));
+
+        assert_eq!(bounds_entry(inside, 0.0, 10.0), Some(1.0));
+        assert_eq!(bounds_entry(outside, 0.0, 10.0), None);
     }
 }

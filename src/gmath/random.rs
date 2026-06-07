@@ -29,10 +29,25 @@ impl SampleRng {
     }
 
     /// Returns a random index in `0..upper`, or `None` when `upper == 0`.
+    ///
+    /// # Panics
+    ///
+    /// Panics on platforms where `usize` can represent ranges larger than this `u64`-backed RNG.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn random_index(&mut self, upper: usize) -> Option<usize> {
-        (upper > 0).then(|| (self.next_u64() % upper as u64) as usize)
+        if upper == 0 {
+            return None;
+        }
+
+        let upper = u64::try_from(upper).expect("sample range must fit in u64");
+        let zone = u64::MAX - (u64::MAX % upper);
+        loop {
+            let value = self.next_u64();
+            if value < zone {
+                return Some((value % upper) as usize);
+            }
+        }
     }
 
     /// Returns a random real in `[0, 1)`.
@@ -69,9 +84,15 @@ impl SampleRng {
         )
     }
 
-    /// Returns a uniformly random unit vector using rejection sampling.
+    /// Returns a uniformly random unit vector using spherical-coordinate inversion.
     #[must_use]
     pub fn random_unit_vector(&mut self) -> Vector {
+        self.random_unit_vector_spherical()
+    }
+
+    /// Returns a uniformly random unit vector using rejection sampling.
+    #[must_use]
+    pub fn random_unit_vector_rejection(&mut self) -> Vector {
         loop {
             let point = self.random_vector_range(-1.0, 1.0);
             let length_squared = point.length_squared();
@@ -107,7 +128,7 @@ impl SampleRng {
     /// Returns a random unit vector on the same hemisphere as `normal`.
     #[must_use]
     pub fn random_on_hemisphere(&mut self, normal: Vector) -> Vector {
-        let on_unit_sphere = self.random_unit_vector();
+        let on_unit_sphere = self.random_unit_vector_spherical();
         if on_unit_sphere.dot(normal) > 0.0 {
             on_unit_sphere
         } else {
@@ -162,6 +183,7 @@ mod tests {
         let mut rng = SampleRng::new(5);
 
         assert_eq!(rng.random_index(0), None);
+        assert_eq!(rng.random_index(1), Some(0));
         for _ in 0..100 {
             assert!(rng.random_index(7).is_some_and(|index| index < 7));
         }
@@ -185,6 +207,16 @@ mod tests {
             let vector = rng.random_unit_vector_spherical();
             assert!((vector.length() - 1.0).abs() < 1e-12);
             assert!((-1.0..=1.0).contains(&vector.z()));
+        }
+    }
+
+    #[test]
+    fn random_unit_vector_rejection_is_unit_length() {
+        let mut rng = SampleRng::new(37);
+
+        for _ in 0..20 {
+            let vector = rng.random_unit_vector_rejection();
+            assert!((vector.length() - 1.0).abs() < 1e-12);
         }
     }
 

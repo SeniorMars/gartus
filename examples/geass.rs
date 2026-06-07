@@ -2,7 +2,7 @@ use gartus::prelude::{Canvas, EdgeMatrix, FrameRecorder, Matrix, Rgb};
 
 fn geass() {
     let mut img = Canvas::new_with_bg(800, 800, Rgb::new(24, 26, 27));
-    img.upper_left_origin = true;
+    img.set_upper_left_origin(true);
 
     let geass_corrs = [
         170, 216, 190, 249, 190, 249, 220, 274, 220, 274, 250, 295, 250, 295, 289, 318, 289, 318,

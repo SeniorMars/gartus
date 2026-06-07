@@ -48,8 +48,8 @@ fn main() -> io::Result<()> {
 
 fn render_frame(frame: usize, scene: &Scene) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(4, 8, 17));
-    canvas.wrapped = false;
-    canvas.upper_left_origin = true;
+    canvas.set_wrapped(false);
+    canvas.set_upper_left_origin(true);
     canvas.set_line_width(1.0);
 
     let t = frame as f64 / FRAMES as f64;

@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["Matrix","A m x n Matrix is represented here"]]});

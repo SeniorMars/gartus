@@ -367,8 +367,8 @@ impl Canvas {
             return;
         }
 
-        let previous_wrapped = self.wrapped;
-        self.wrapped = false;
+        let previous_wrapped = self.wrapped();
+        self.set_wrapped(false);
 
         let mut stack = vec![(x, y)];
 
@@ -405,7 +405,7 @@ impl Canvas {
             self.scanline_seed_helper(&mut stack, lx, rx, y - 1, fill_color, boundary_color);
         }
 
-        self.wrapped = previous_wrapped;
+        self.set_wrapped(previous_wrapped);
     }
 
     fn scanline_seed_helper(
@@ -457,7 +457,7 @@ impl Canvas {
     /// // image.draw_lines(&edges)
     /// ```
     pub fn draw_lines(&mut self, edges: &EdgeMatrix) {
-        self.try_draw_lines(edges);
+        self.draw_lines_checked(edges);
     }
 
     /// Applies `transform` to `edges`, then draws the transformed lines.
@@ -465,31 +465,45 @@ impl Canvas {
         self.draw_lines(&edges.apply(transform));
     }
 
-    /// Draws all lines in `edges` onto the [`Canvas`], returning before drawing if the assertion fails.
+    /// Draws all lines in `edges` onto the [`Canvas`] after validating edge pairs.
     ///
     /// # Panics
     /// Panics if the edge matrix does not contain an even number of points.
-    pub fn try_draw_lines(&mut self, edges: &EdgeMatrix) {
+    pub fn draw_lines_checked(&mut self, edges: &EdgeMatrix) {
         assert!(
             edges.cols().is_multiple_of(2),
             "edge matrix must contain pairs of points"
         );
 
         for (p0, p1) in edges.iter_edges() {
-            self.draw_line_z(self.line, (p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2]));
+            self.draw_line_z(
+                self.line_color(),
+                (p0[0], p0[1], p0[2]),
+                (p1[0], p1[1], p1[2]),
+            );
         }
+    }
+
+    /// Deprecated alias for [`Self::draw_lines_checked`].
+    #[deprecated(
+        since = "0.1.0",
+        note = "use draw_lines_checked; this method panics instead of returning Result"
+    )]
+    #[doc(hidden)]
+    pub fn try_draw_lines(&mut self, edges: &EdgeMatrix) {
+        self.draw_lines_checked(edges);
     }
 
     /// Draws all lines in provided in a given [`EdgeMatrix`] onto the [`Canvas`] with perspective division.
     pub fn draw_lines_perspective(&mut self, edges: &EdgeMatrix) {
-        self.try_draw_lines_perspective(edges);
+        self.draw_lines_perspective_checked(edges);
     }
 
     /// Draws all lines in `edges` with perspective division onto the [`Canvas`].
     ///
     /// # Panics
     /// Panics if the edge matrix does not contain an even number of points.
-    pub fn try_draw_lines_perspective(&mut self, edges: &EdgeMatrix) {
+    pub fn draw_lines_perspective_checked(&mut self, edges: &EdgeMatrix) {
         assert!(
             edges.cols().is_multiple_of(2),
             "edge matrix must contain pairs of points"
@@ -502,8 +516,18 @@ impl Canvas {
             let Some((x1, y1, z1)) = perspective_xyz(p1) else {
                 continue;
             };
-            self.draw_line_z(self.line, (x0, y0, z0), (x1, y1, z1));
+            self.draw_line_z(self.line_color(), (x0, y0, z0), (x1, y1, z1));
         }
+    }
+
+    /// Deprecated alias for [`Self::draw_lines_perspective_checked`].
+    #[deprecated(
+        since = "0.1.0",
+        note = "use draw_lines_perspective_checked; this method panics instead of returning Result"
+    )]
+    #[doc(hidden)]
+    pub fn try_draw_lines_perspective(&mut self, edges: &EdgeMatrix) {
+        self.draw_lines_perspective_checked(edges);
     }
 
     /// Fills all triangles in `polygons` onto the [`Canvas`] with backface culling.
@@ -534,7 +558,7 @@ impl Canvas {
 
         let shading_mode = self.shading_mode();
         let color_mode = self.polygon_color_mode();
-        let line_color = self.line;
+        let line_color = self.line_color();
         let lighting = if matches!(
             (shading_mode, color_mode),
             (
@@ -600,11 +624,12 @@ impl Canvas {
         }
     }
 
-    /// Draws one filled triangle with a fixed color.
+    /// Draws one raw filled triangle with a fixed color.
     ///
-    /// This bypasses [`PolygonMatrix`] construction for callers that already have a single
-    /// screen-space triangle.
-    pub fn draw_triangle(
+    /// This bypasses [`PolygonMatrix`] construction for callers that already have a single raw
+    /// screen-space triangle. It does not perform backface culling; use
+    /// [`Self::draw_triangle_culled`] when winding should match [`Self::draw_polygons`].
+    pub fn draw_triangle_raw(
         &mut self,
         color: Rgb,
         p0: (f64, f64, f64),
@@ -617,10 +642,40 @@ impl Canvas {
         self.draw_scanline_triangle(color, p0, p1, p2);
     }
 
+    /// Draws one filled triangle with a fixed color.
+    ///
+    /// This is a compatibility alias for [`Self::draw_triangle_raw`]. It does not perform backface
+    /// culling.
+    pub fn draw_triangle(
+        &mut self,
+        color: Rgb,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        self.draw_triangle_raw(color, p0, p1, p2);
+    }
+
+    /// Draws one filled triangle with backface culling.
+    ///
+    /// Back-facing triangles are culled to match [`Self::draw_polygons`].
+    pub fn draw_triangle_culled(
+        &mut self,
+        color: Rgb,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        if !triangle_points_are_finite([p0, p1, p2]) || triangle_normal(p0, p1, p2)[2] <= 0.0 {
+            return;
+        }
+        self.draw_scanline_triangle(color, p0, p1, p2);
+    }
+
     /// Draws one flat Phong-lit triangle using the canvas lighting state.
     ///
     /// Back-facing triangles are culled to match [`Self::draw_polygons`].
-    pub fn draw_lit_triangle(
+    pub fn draw_lit_triangle_culled(
         &mut self,
         p0: (f64, f64, f64),
         p1: (f64, f64, f64),
@@ -638,6 +693,18 @@ impl Canvas {
             .prepare()
             .illuminate_at(normal, triangle_centroid(p0, p1, p2));
         self.draw_scanline_triangle(color, p0, p1, p2);
+    }
+
+    /// Draws one flat Phong-lit triangle using the canvas lighting state.
+    ///
+    /// This is a compatibility alias for [`Self::draw_lit_triangle_culled`].
+    pub fn draw_lit_triangle(
+        &mut self,
+        p0: (f64, f64, f64),
+        p1: (f64, f64, f64),
+        p2: (f64, f64, f64),
+    ) {
+        self.draw_lit_triangle_culled(p0, p1, p2);
     }
 
     fn draw_polygon_edges(
@@ -783,7 +850,7 @@ impl Canvas {
         let y = i64::from(y);
         let z = p0.z;
 
-        if !self.wrapped {
+        if !self.wrapped() {
             let height = i64::from(self.height());
             if height == 0 || y + line_radius < 0 || y - line_radius >= height {
                 return;
@@ -909,7 +976,7 @@ impl Canvas {
         let line_radius = self.line_radius();
         let y = i64::from(y);
 
-        if !self.wrapped {
+        if !self.wrapped() {
             let height = i64::from(self.height());
             if height == 0 || y + line_radius < 0 || y - line_radius >= height {
                 return;
@@ -1124,7 +1191,7 @@ impl Canvas {
         let line_radius = self.line_radius();
         let y = i64::from(y);
 
-        if !self.wrapped {
+        if !self.wrapped() {
             let height = i64::from(self.height());
             if height == 0 || y + line_radius < 0 || y - line_radius >= height {
                 return;
@@ -1199,7 +1266,7 @@ impl Canvas {
         let line_radius = self.line_radius();
         let y = i64::from(y);
 
-        if !self.wrapped {
+        if !self.wrapped() {
             let height = i64::from(self.height());
             if height == 0 || y + line_radius < 0 || y - line_radius >= height {
                 return;

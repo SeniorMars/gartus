@@ -8,7 +8,7 @@ fn script_1() {
     let mut pig = Parser::new("./scripts/pig.cg", 400, 400, &Rgb::new(0, 255, 0));
     pig.set_display_enabled(false);
 
-    pig.canvas_mut().upper_left_origin = false;
+    pig.canvas_mut().set_upper_left_origin(false);
 
     // pig.edge_matrix_fun(&|edges| {
     //     let mut i = 400;
@@ -44,7 +44,7 @@ fn script2() {
     let file = "./scripts/transform.cg";
     let mut parser = Parser::new(file, 400, 400, &Rgb::new(0, 255, 0));
     parser.set_display_enabled(false);
-    parser.canvas_mut().upper_left_origin = false;
+    parser.canvas_mut().set_upper_left_origin(false);
 
     parser.parse_file().expect("Script is valid");
 }

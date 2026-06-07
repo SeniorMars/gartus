@@ -139,7 +139,7 @@ fn main() {
     let width = 10; // Adjust the maze size as needed
     let height = 10;
     let mut canvas = Canvas::new_with_bg(width * 60, height * 60, Rgb::new(255, 255, 255));
-    canvas.upper_left_origin = true;
+    canvas.set_upper_left_origin(true);
     let mut turtle = Turtle::new(Rgb::new(0, 0, 0), 90.0, 0.0, 0.0);
 
     // Create a maze

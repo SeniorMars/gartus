@@ -290,8 +290,8 @@ fn build_carousel_stage() -> PolygonMatrix {
 
 fn render_frame(frame: usize, scene: &Scene) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(0, 0, 0));
-    canvas.wrapped = false;
-    canvas.upper_left_origin = false; // Y goes up
+    canvas.set_wrapped(false);
+    canvas.set_upper_left_origin(false); // Y goes up
 
     let t = frame as f64 / FRAMES as f64;
     let phase = t * PI * 2.0;

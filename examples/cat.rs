@@ -5,7 +5,7 @@ fn cat() {
     let mut cat = Canvas::new(610, 610, Rgb::default());
 
     let mut head: Vec<(i32, i32)> = Vec::new();
-    cat.upper_left_origin = true;
+    cat.set_upper_left_origin(true);
     cat.set_line_rgb_values(255, 255, 255);
 
     head.push((350 - 150, 222));
@@ -25,7 +25,7 @@ fn cat() {
     for i in 0..head.len() {
         if i + 1 != head.len() {
             cat.draw_line(
-                cat.line,
+                cat.line_color(),
                 head[i].0 as f64,
                 head[i].1 as f64,
                 head[i + 1].0 as f64,
@@ -44,7 +44,7 @@ fn cat() {
     for i in 0..eye_left.len() {
         if i + 1 != eye_left.len() {
             cat.draw_line(
-                cat.line,
+                cat.line_color(),
                 eye_left[i].0 as f64,
                 eye_left[i].1 as f64,
                 eye_left[i + 1].0 as f64,
@@ -65,7 +65,7 @@ fn cat() {
     for i in 0..eye_right.len() {
         if i + 1 != eye_right.len() {
             cat.draw_line(
-                cat.line,
+                cat.line_color(),
                 eye_right[i].0 as f64,
                 eye_right[i].1 as f64,
                 eye_right[i + 1].0 as f64,
@@ -85,7 +85,7 @@ fn cat() {
             //     rng.gen_range(0..=255),
             // );
             cat.draw_line(
-                cat.line,
+                cat.line_color(),
                 mouth[i].0 as f64,
                 mouth[i].1 as f64,
                 mouth[i + 1].0 as f64,
@@ -94,21 +94,21 @@ fn cat() {
         }
     }
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (371 - 150) as f64,
         341_f64,
         (317 - 150) as f64,
         337_f64,
     );
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (370 - 150) as f64,
         325_f64,
         (321 - 150) as f64,
         307_f64,
     );
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (375 - 150) as f64,
         360_f64,
         (327 - 150) as f64,
@@ -116,21 +116,21 @@ fn cat() {
     );
 
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (538 - 150) as f64,
         341_f64,
         (585 - 150) as f64,
         337_f64,
     );
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (536 - 150) as f64,
         325_f64,
         (578 - 150) as f64,
         307_f64,
     );
     cat.draw_line(
-        cat.line,
+        cat.line_color(),
         (534 - 150) as f64,
         360_f64,
         (579 - 150) as f64,

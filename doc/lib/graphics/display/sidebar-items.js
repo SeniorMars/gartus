@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["Canvas","An art [Canvas] / computer screen is represented here."],["Pixel","A computer pixel struct is represented by its red, green, blue values"]]});

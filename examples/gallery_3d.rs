@@ -146,7 +146,7 @@ fn make_orbiting_crystals() -> Vec<MeshObject> {
 
 fn render_frame(frame: usize, objects: &[MeshObject]) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, background());
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_line_width(1.0);
 
     let t = frame as f64 / FRAMES as f64;

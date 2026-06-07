@@ -112,7 +112,7 @@ fn path_to_str(path: &Path) -> Result<&str, Box<dyn Error>> {
 
 fn render_frame(frame: usize, scene: &Scene) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(5, 7, 12));
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_polygon_color_mode(PolygonColorMode::LineColor);
 
     let t = frame as f64 / FRAMES as f64;

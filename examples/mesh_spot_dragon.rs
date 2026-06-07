@@ -91,8 +91,8 @@ fn load_models() -> Result<Vec<Model>, Box<dyn Error>> {
 
 fn render_frame(frame: usize, models: &[Model], scanner: &EdgeMatrix) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, background());
-    canvas.wrapped = false;
-    canvas.upper_left_origin = true;
+    canvas.set_wrapped(false);
+    canvas.set_upper_left_origin(true);
     canvas.set_line_width(1.0);
 
     let t = frame as f64 / FRAMES as f64;

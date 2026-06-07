@@ -3,17 +3,29 @@ name = "gartus"
 version = "0.1.0"
 authors = ["Seniormars <cjh16@rice.edu>"]
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A Rust graphics library for raster drawing, mesh scenes, MDL scripts, and path tracing."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SeniorMars/gartus"
+readme = "README.md"
+keywords = ["graphics", "rendering", "raster", "ray-tracing", "mdl"]
+categories = ["graphics", "rendering", "multimedia::images", "mathematics"]
 
 [profile.dev]
 opt-level = 0
 debug = true
 
 [profile.release]
+debug = 0
+incremental = false
+lto = "thin"
+codegen-units = 1
+
+[profile.release-dev]
+inherits = "release"
 debug = 1
 incremental = true
 lto = "off"
+codegen-units = 16
 
 [profile.render]
 inherits = "release"
@@ -69,6 +81,10 @@ required-features = ["external"]
 
 [[example]]
 name = "solarsystem"
+
+[[example]]
+name = "scotty_carousel"
+required-features = ["external"]
 
 [[example]]
 name = "it_takes_two"

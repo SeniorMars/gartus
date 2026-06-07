@@ -6,7 +6,7 @@ fn owl() {
 
     let mut owl = Canvas::new(500, 500, Rgb::new(255, 255, 255));
 
-    owl.upper_left_origin = true;
+    owl.set_upper_left_origin(true);
     owl.set_line_width(2.0);
     let mut recorder = FrameRecorder::new("anim", "owl").with_delay(2);
 
@@ -58,7 +58,7 @@ fn owl() {
                 rng.random_range(0..=255),
             );
             owl.draw_line(
-                owl.line,
+                owl.line_color(),
                 corrs[i] as f64,
                 corrs[i + 1] as f64,
                 corrs[i + 2] as f64,

@@ -79,7 +79,7 @@ fn render() -> Result<(), Box<dyn Error>> {
 
 fn render_frame(scene: &Scene, frame: usize) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(12, 13, 19));
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
 
     draw_backdrop(&mut canvas);

@@ -208,7 +208,7 @@ impl Parser {
     #[must_use]
     pub fn new_with_bg(file_name: &str, width: u32, height: u32, color: &Rgb, bg: &Rgb) -> Self {
         let mut canvas = Canvas::new_with_bg(width, height, *bg);
-        canvas.line = *color;
+        canvas.set_line_color(*color);
         canvas.set_shading_mode(ShadingMode::Flat);
         canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
         Self {
@@ -609,7 +609,7 @@ impl Parser {
         match (args.next(), args.next(), args.next(), args.next()) {
             (Some(name), None, None, None) => match Rgb::name_to_const(&name.to_lowercase()) {
                 Some(color) => {
-                    self.canvas.line = color;
+                    self.canvas.set_line_color(color);
                     Ok(())
                 }
                 None => Err(ParserError::ArgumentError(line_num, line.to_string())),
@@ -618,7 +618,7 @@ impl Parser {
                 let red = self.parse_u8_value(r_s, line_num, line)?;
                 let green = self.parse_u8_value(g_s, line_num, line)?;
                 let blue = self.parse_u8_value(b_s, line_num, line)?;
-                self.canvas.line = Rgb::new(red, green, blue);
+                self.canvas.set_line_color(Rgb::new(red, green, blue));
                 Ok(())
             }
             _ => Err(ParserError::ArgumentError(line_num, line.to_string())),
@@ -718,7 +718,7 @@ impl Parser {
 
     /// Set the parser's color.
     pub fn set_color(&mut self, color: &Rgb) {
-        self.canvas.line = *color;
+        self.canvas.set_line_color(*color);
     }
 
     /// Get a reference to the parser's trans matrix.

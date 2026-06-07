@@ -8,7 +8,7 @@ fn main() {
     let height = 800;
     // Dark background to make peaks pop
     let mut canvas = Canvas::new_with_bg(width, height, Rgb::BLACK);
-    canvas.wrapped = false; // Disable wrapping to prevent top-to-bottom overlap
+    canvas.set_wrapped(false); // Disable wrapping to prevent top-to-bottom overlap
 
     // 1. Generate height map using Diamond-Square
     println!("Generating random terrain...");

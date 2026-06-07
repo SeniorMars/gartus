@@ -40,6 +40,12 @@ impl Interval {
         Self { min, max }
     }
 
+    /// Creates a finite interval when `min <= max`.
+    #[must_use]
+    pub fn try_new(min: f64, max: f64) -> Option<Self> {
+        (min.is_finite() && max.is_finite() && min <= max).then_some(Self { min, max })
+    }
+
     /// Returns the interval width.
     #[must_use]
     pub fn size(self) -> f64 {
@@ -1059,7 +1065,7 @@ fn random_direction_to_sphere(
     let distance_squared = direction.length_squared();
     let radius_squared = geometry.radius() * geometry.radius();
     if distance_squared <= radius_squared || distance_squared <= f64::EPSILON {
-        return rng.random_unit_vector();
+        return rng.random_unit_vector_spherical();
     }
 
     let local = random_to_sphere(geometry.radius(), distance_squared, rng);
@@ -1099,3 +1105,16 @@ fn random_to_sphere(radius: f64, distance_squared: f64, rng: &mut SampleRng) -> 
 }
 
 const SHADOW_ACNE_PDF_EPSILON: f64 = 0.001;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_interval_constructor_requires_finite_ordered_bounds() {
+        assert_eq!(Interval::try_new(0.0, 1.0), Some(Interval::new(0.0, 1.0)));
+        assert_eq!(Interval::try_new(1.0, 0.0), None);
+        assert_eq!(Interval::try_new(0.0, f64::INFINITY), None);
+        assert_eq!(Interval::try_new(f64::NAN, 1.0), None);
+    }
+}

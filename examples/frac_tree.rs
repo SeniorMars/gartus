@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     fs::create_dir_all("final/fractals")?;
 
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::new(5, 8, 14));
-    canvas.upper_left_origin = true;
+    canvas.set_upper_left_origin(true);
 
     let mut turtle = Turtle::new(
         Rgb::new(126, 78, 42),

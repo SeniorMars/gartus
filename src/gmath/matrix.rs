@@ -2,6 +2,7 @@ use super::vector::Vector;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 use std::{
+    error::Error,
     fmt,
     ops::{Add, AddAssign, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
     slice::{self},
@@ -25,22 +26,96 @@ pub struct Matrix {
     pub(crate) data: Vec<f64>,
 }
 
+/// Error returned by checked [`Matrix`] constructors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixShapeError {
+    /// `rows * cols` overflowed `usize`.
+    DimensionsOverflow,
+    /// The supplied data length did not match `rows * cols`.
+    DataLengthMismatch {
+        /// Number of elements required by the matrix shape.
+        expected: usize,
+        /// Number of elements supplied by the caller.
+        actual: usize,
+    },
+    /// The matrix allocation could not be reserved.
+    AllocationFailed,
+}
+
+impl fmt::Display for MatrixShapeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DimensionsOverflow => formatter.write_str("matrix dimensions overflow"),
+            Self::DataLengthMismatch { expected, actual } => write!(
+                formatter,
+                "matrix data length mismatch: expected {expected}, got {actual}"
+            ),
+            Self::AllocationFailed => formatter.write_str("matrix allocation failed"),
+        }
+    }
+}
+
+impl Error for MatrixShapeError {}
+
 #[allow(dead_code)]
 impl Matrix {
+    fn element_count(rows: usize, cols: usize) -> usize {
+        rows.checked_mul(cols).expect("matrix dimensions overflow")
+    }
+
+    fn try_element_count(rows: usize, cols: usize) -> Result<usize, MatrixShapeError> {
+        rows.checked_mul(cols)
+            .ok_or(MatrixShapeError::DimensionsOverflow)
+    }
+
     /// Returns a new row x column [Matrix] with a vector that contains the data.
     ///
     /// # Panics
     ///
-    /// Panics if the size of data isn't the same as rows * cols
+    /// Panics if `rows * cols` overflows or if the size of data isn't the same as rows * cols.
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
-        assert_eq!(rows * cols, data.len(), "Matrix must be filled completely");
+        let expected = Self::element_count(rows, cols);
+        assert_eq!(expected, data.len(), "Matrix must be filled completely");
         Self { rows, cols, data }
     }
 
+    /// Returns a checked row x column [`Matrix`] with caller-supplied data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `rows * cols` overflows or if `data.len()` does not match the shape.
+    pub fn try_new(rows: usize, cols: usize, data: Vec<f64>) -> Result<Self, MatrixShapeError> {
+        let expected = Self::try_element_count(rows, cols)?;
+        if data.len() != expected {
+            return Err(MatrixShapeError::DataLengthMismatch {
+                expected,
+                actual: data.len(),
+            });
+        }
+        Ok(Self { rows, cols, data })
+    }
+
     /// Returns a new row x column [Matrix] initialized to zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rows * cols` overflows or if the backing allocation cannot be reserved.
     pub fn zeros(rows: usize, cols: usize) -> Self {
-        let data = vec![0.0; rows * cols];
-        Self { rows, cols, data }
+        Self::try_zeros(rows, cols).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Returns a checked row x column [`Matrix`] initialized to zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `rows * cols` overflows or if the backing allocation cannot be reserved.
+    pub fn try_zeros(rows: usize, cols: usize) -> Result<Self, MatrixShapeError> {
+        let element_count = Self::try_element_count(rows, cols)?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(element_count)
+            .map_err(|_| MatrixShapeError::AllocationFailed)?;
+        data.resize(element_count, 0.0);
+        Ok(Self { rows, cols, data })
     }
 
     /// Fill the [Matrix] with a vector of floats.
@@ -53,11 +128,8 @@ impl Matrix {
     ///
     /// Panics if the size of data isn't the same as rows * cols
     pub fn fill_data(&mut self, data: Vec<f64>) {
-        assert_eq!(
-            self.rows * self.cols,
-            data.len(),
-            "Matrix must be filled completely"
-        );
+        let expected = Self::element_count(self.rows, self.cols);
+        assert_eq!(expected, data.len(), "Matrix must be filled completely");
         self.data = data;
     }
 
@@ -87,7 +159,7 @@ impl Matrix {
 
     /// Returns a new N by N identity [Matrix].
     pub fn identity_matrix(size: usize) -> Self {
-        let mut matrix: Matrix = Matrix::new(size, size, vec![0.0; size * size]);
+        let mut matrix = Self::zeros(size, size);
         for i in 0..size {
             matrix.set(i, i, 1.0);
         }
@@ -292,8 +364,9 @@ impl Matrix {
             return None;
         }
 
-        let mut y_data = vec![0.0; n * target_b.cols];
-        let mut x_data = vec![0.0; n * target_b.cols];
+        let workspace_len = Self::element_count(n, target_b.cols);
+        let mut y_data = vec![0.0; workspace_len];
+        let mut x_data = vec![0.0; workspace_len];
 
         for col in 0..target_b.cols {
             for (i, &pivot_row) in p_vec.iter().enumerate().take(n) {
@@ -421,7 +494,7 @@ impl Matrix {
 
     /// Returns the transpose [`Matrix`] of self.
     pub fn transpose(&self) -> Self {
-        let mut new_data = vec![0.0; self.rows * self.cols];
+        let mut new_data = vec![0.0; Self::element_count(self.rows, self.cols)];
         for row in 0..self.rows {
             for col in 0..self.cols {
                 let original_idx = col * self.rows + row;
@@ -710,7 +783,10 @@ impl Matrix {
 
         #[cfg(feature = "rayon")]
         {
-            let work = self.rows * self.cols * other.cols;
+            let work = self
+                .rows
+                .saturating_mul(self.cols)
+                .saturating_mul(other.cols);
             if work >= PARALLEL_MATRIX_MULTIPLY_WORK_THRESHOLD {
                 result
                     .data
@@ -1061,6 +1137,26 @@ impl fmt::Display for Matrix {
 mod tests {
     use super::*;
     use std::iter::Iterator;
+
+    #[test]
+    fn checked_matrix_constructors_validate_shape_arithmetic() {
+        let matrix = Matrix::try_zeros(2, 3).expect("valid shape");
+
+        assert_eq!(matrix.rows(), 2);
+        assert_eq!(matrix.cols(), 3);
+        assert_eq!(matrix.len(), 6);
+        assert_eq!(
+            Matrix::try_new(2, 3, vec![0.0; 5]).expect_err("wrong length"),
+            MatrixShapeError::DataLengthMismatch {
+                expected: 6,
+                actual: 5
+            }
+        );
+        assert_eq!(
+            Matrix::try_new(usize::MAX, 2, Vec::new()).expect_err("overflow"),
+            MatrixShapeError::DimensionsOverflow
+        );
+    }
 
     #[test]
     fn new_matrix() {

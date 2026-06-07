@@ -23,7 +23,11 @@ static TEMP_PPM_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Non-PPM inputs are converted through a temporary `.ppm` file that is removed after parsing.
 ///
 /// # Errors
-/// todo!()
+/// Returns an error if `file_name` does not exist, has no valid extension, or cannot be read.
+/// Non-PPM inputs also return an error if `ImageMagick`'s `magick` command cannot convert the image
+/// to PPM. PPM parsing returns an error for malformed headers or pixel tokens, unsupported magic
+/// values other than `P3` and `P6`, unsupported `maxval` 0, channel values greater than `maxval`,
+/// oversized image dimensions or byte counts, missing binary separators, and truncated pixel data.
 ///
 /// # Examples
 ///
@@ -95,7 +99,7 @@ fn temp_ppm_path(path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 fn dimension_glitch(canvas: &Canvas) -> Canvas {
-    let mut glitched = Canvas::new(canvas.height(), canvas.width(), canvas.line);
+    let mut glitched = Canvas::new(canvas.height(), canvas.width(), canvas.line_color());
     glitched.fill_canvas(canvas.pixels().to_vec());
     glitched
 }

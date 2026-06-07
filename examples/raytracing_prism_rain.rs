@@ -4,6 +4,7 @@
 //! mirror-water floor, custom triangular prisms, a rotating mirrored lotus basin, and a pulsing
 //! glass lens oracle.
 
+use gartus::graphics::raytracing::BvhNode;
 use gartus::prelude::*;
 use std::{error::Error, f64::consts::PI, fs, sync::Arc};
 

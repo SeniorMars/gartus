@@ -365,7 +365,7 @@ fn build_planets() -> Vec<Planet> {
 
 fn render_frame(frame: usize, assets: &Assets, planets: &[Planet]) -> Canvas {
     let mut canvas = Canvas::new_with_bg(WIDTH, HEIGHT, Rgb::BLACK);
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
     canvas.set_line_width(1.0);
     canvas.set_shading_mode(ShadingMode::Phong);
     canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);

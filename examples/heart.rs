@@ -2,7 +2,7 @@ use gartus::prelude::{Canvas, EdgeMatrix, Matrix, Rgb};
 
 fn main() {
     let mut heart = Canvas::new(610, 610, Rgb::default());
-    heart.upper_left_origin = true;
+    heart.set_upper_left_origin(true);
     let mut points = EdgeMatrix::new();
     let corrs = [
         365, 341, 376, 315, 376, 315, 404, 289, 404, 289, 429, 263, 429, 263, 458, 239, 458, 239,

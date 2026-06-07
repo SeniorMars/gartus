@@ -2,8 +2,20 @@ use crate::gmath::vector::Vector;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, Sub};
 
-/// Marker trait for color spaces that can be converted to display RGB.
-pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {}
+/// Color spaces that can be converted into display and linear RGB.
+pub trait ColorSpace: Copy + Default + PartialEq + Debug + Into<Rgb> {
+    /// Converts this color into display RGB.
+    #[must_use]
+    fn to_rgb(self) -> Rgb {
+        self.into()
+    }
+
+    /// Converts this color into linear RGB using the library's gamma-2 display decode.
+    #[must_use]
+    fn to_linear_rgb(self) -> LinearRgb {
+        LinearRgb::from_rgb_srgb(self.to_rgb())
+    }
+}
 
 /// Linear RGB color components, before display gamma encoding.
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -21,6 +33,16 @@ impl LinearRgb {
     #[must_use]
     pub const fn new(red: f64, green: f64, blue: f64) -> Self {
         Self { red, green, blue }
+    }
+
+    /// Creates a linear RGB color only when every channel is finite.
+    #[must_use]
+    pub fn try_new(red: f64, green: f64, blue: f64) -> Option<Self> {
+        (red.is_finite() && green.is_finite() && blue.is_finite()).then_some(Self {
+            red,
+            green,
+            blue,
+        })
     }
 
     /// Returns the red component. Kept as an alias for vector-like raytracing code.
@@ -201,6 +223,12 @@ impl From<Vector> for LinearRgb {
 impl From<LinearRgb> for Vector {
     fn from(color: LinearRgb) -> Self {
         Self::new(color.red, color.green, color.blue)
+    }
+}
+
+impl ColorSpace for LinearRgb {
+    fn to_linear_rgb(self) -> LinearRgb {
+        self
     }
 }
 
@@ -570,7 +598,11 @@ impl ColorRamp {
     }
 }
 
-impl ColorSpace for Rgb {}
+impl ColorSpace for Rgb {
+    fn to_rgb(self) -> Rgb {
+        self
+    }
+}
 
 impl From<Vector> for Rgb {
     fn from(color: Vector) -> Self {
@@ -983,6 +1015,11 @@ mod test {
         assert!(LinearRgb::new(0.1, 0.8, 0.4).is_finite());
         assert!(!LinearRgb::new(0.1, f64::NAN, 0.4).is_finite());
         assert!(!LinearRgb::new(0.1, f64::INFINITY, 0.4).is_finite());
+        assert_eq!(
+            LinearRgb::try_new(0.1, 0.8, 0.4),
+            Some(LinearRgb::new(0.1, 0.8, 0.4))
+        );
+        assert_eq!(LinearRgb::try_new(0.1, f64::NAN, 0.4), None);
     }
 
     #[test]
@@ -991,6 +1028,20 @@ mod test {
 
         assert_eq!(Rgb::from_linear_color(color), Rgb::new(0, 255, 0));
         assert_eq!(Rgb::from_raw_linear_color(color), Rgb::new(0, 255, 0));
+    }
+
+    #[test]
+    fn color_space_trait_exposes_display_and_linear_rgb() {
+        let linear = LinearRgb::new(0.25, 0.0, 1.0);
+        let rgb = Rgb::new(128, 0, 255);
+        let hsl = Hsl::new(120, 100, 50);
+
+        assert_eq!(linear.to_rgb(), rgb);
+        assert_eq!(linear.to_linear_rgb(), linear);
+        assert_eq!(rgb.to_rgb(), rgb);
+        assert_eq!(rgb.to_linear_rgb(), LinearRgb::from_rgb_srgb(rgb));
+        assert_eq!(hsl.to_rgb(), Rgb::GREEN);
+        assert_eq!(hsl.to_linear_rgb(), LinearRgb::from_rgb_srgb(Rgb::GREEN));
     }
 
     #[test]

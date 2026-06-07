@@ -184,7 +184,7 @@ where
     let mut canvas = Canvas::from_domain(width, height, view, |x, y| {
         pixel(Complex::new(x as f32, y as f32))
     });
-    canvas.upper_left_origin = true;
+    canvas.set_upper_left_origin(true);
     canvas
 }
 

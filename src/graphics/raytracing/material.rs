@@ -86,12 +86,26 @@ impl fmt::Debug for Lambertian {
 
 impl Lambertian {
     /// Creates a Lambertian material with the supplied albedo.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any albedo channel is not finite.
     #[must_use]
     pub fn new(albedo: LinearColor) -> Self {
+        assert!(albedo.is_finite(), "Lambertian albedo must be finite");
         Self {
             albedo,
             texture: Arc::new(SolidColor::new(albedo)),
         }
+    }
+
+    /// Creates a Lambertian material only when `albedo` is finite.
+    #[must_use]
+    pub fn try_new(albedo: LinearColor) -> Option<Self> {
+        albedo.is_finite().then(|| Self {
+            albedo,
+            texture: Arc::new(SolidColor::new(albedo)),
+        })
     }
 
     /// Creates a Lambertian material from a shared texture.
@@ -215,9 +229,21 @@ pub struct DiffuseLight {
 
 impl DiffuseLight {
     /// Creates a light material with a constant emitted color.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any emitted color channel is not finite.
     #[must_use]
     pub fn new(emit: LinearColor) -> Self {
+        assert!(emit.is_finite(), "diffuse light color must be finite");
         Self::from_texture(SolidColor::new(emit))
+    }
+
+    /// Creates a light material only when the emitted color is finite.
+    #[must_use]
+    pub fn try_new(emit: LinearColor) -> Option<Self> {
+        emit.is_finite()
+            .then(|| Self::from_texture(SolidColor::new(emit)))
     }
 
     /// Creates a light material from a shared texture.
@@ -264,9 +290,22 @@ pub struct Isotropic {
 
 impl Isotropic {
     /// Creates an isotropic material with constant attenuation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any albedo channel is not finite.
     #[must_use]
     pub fn new(albedo: LinearColor) -> Self {
+        assert!(albedo.is_finite(), "isotropic albedo must be finite");
         Self::from_texture(SolidColor::new(albedo))
+    }
+
+    /// Creates an isotropic material only when `albedo` is finite.
+    #[must_use]
+    pub fn try_new(albedo: LinearColor) -> Option<Self> {
+        albedo
+            .is_finite()
+            .then(|| Self::from_texture(SolidColor::new(albedo)))
     }
 
     /// Creates an isotropic material from a shared texture.
@@ -319,12 +358,29 @@ pub struct Metal {
 
 impl Metal {
     /// Creates a metal material with clamped fuzziness.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any albedo channel or `fuzz` is not finite.
     #[must_use]
     pub fn new(albedo: LinearColor, fuzz: f64) -> Self {
+        assert!(
+            albedo.is_finite() && fuzz.is_finite(),
+            "metal material values must be finite"
+        );
         Self {
             albedo,
             fuzz: fuzz.clamp(0.0, 1.0),
         }
+    }
+
+    /// Creates a metal material only when `albedo` and `fuzz` are finite.
+    #[must_use]
+    pub fn try_new(albedo: LinearColor, fuzz: f64) -> Option<Self> {
+        (albedo.is_finite() && fuzz.is_finite()).then_some(Self {
+            albedo,
+            fuzz: fuzz.clamp(0.0, 1.0),
+        })
     }
 
     /// Creates a sharp metal material from display RGB bytes.
@@ -384,7 +440,7 @@ impl Material for Metal {
             .direction()
             .normalized()
             .reflected(hit.shading_normal);
-        let scattered_direction = reflected + self.fuzz * rng.random_unit_vector();
+        let scattered_direction = reflected + self.fuzz * rng.random_unit_vector_spherical();
         if scattered_direction.dot(hit.normal) <= 0.0 {
             return None;
         }
@@ -576,6 +632,30 @@ impl RayMaterial {
     pub fn from_surface_dielectric(material: &SurfaceMaterial) -> Option<Self> {
         material.as_dielectric().map(Self::Dielectric)
     }
+
+    /// Returns true for light-emitting material variants.
+    #[must_use]
+    pub const fn is_emissive(&self) -> bool {
+        matches!(self, Self::DiffuseLight(_))
+    }
+
+    /// Returns true for materials that scatter through a deterministic specular ray.
+    #[must_use]
+    pub const fn is_delta(&self) -> bool {
+        matches!(self, Self::Metal(_) | Self::Dielectric(_))
+    }
+
+    /// Returns true for volume phase-function material variants.
+    #[must_use]
+    pub const fn is_volume_phase(&self) -> bool {
+        matches!(self, Self::Isotropic(_))
+    }
+
+    /// Returns true for materials that provide explicit PDF-sampled scattering.
+    #[must_use]
+    pub const fn has_pdf_scatter(&self) -> bool {
+        matches!(self, Self::Lambertian(_) | Self::Isotropic(_))
+    }
 }
 
 impl From<Lambertian> for RayMaterial {
@@ -657,4 +737,57 @@ pub type MaterialRef = Arc<dyn Material>;
 
 pub(crate) fn default_material() -> MaterialRef {
     Arc::new(Lambertian::new(LinearColor::new(0.5, 0.5, 0.5)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_material_constructors_reject_non_finite_values() {
+        let finite = LinearColor::new(0.2, 0.3, 0.4);
+        let invalid = LinearColor::new(0.2, f64::NAN, 0.4);
+
+        assert!(Lambertian::try_new(finite).is_some());
+        assert!(DiffuseLight::try_new(finite).is_some());
+        assert!(Isotropic::try_new(finite).is_some());
+        assert!(Lambertian::try_new(invalid).is_none());
+        assert!(DiffuseLight::try_new(invalid).is_none());
+        assert!(Isotropic::try_new(invalid).is_none());
+        assert!(Metal::try_new(finite, f64::NAN).is_none());
+        assert!(Metal::try_new(invalid, 0.2).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "Lambertian albedo must be finite")]
+    fn lambertian_constructor_rejects_non_finite_albedo() {
+        let _ = Lambertian::new(LinearColor::new(0.2, f64::NAN, 0.4));
+    }
+
+    #[test]
+    #[should_panic(expected = "metal material values must be finite")]
+    fn metal_constructor_rejects_non_finite_fuzz() {
+        let _ = Metal::new(LinearColor::new(0.2, 0.3, 0.4), f64::NAN);
+    }
+
+    #[test]
+    fn ray_material_flags_describe_scattering_behavior() {
+        let lambertian = RayMaterial::lambertian(LinearColor::new(0.2, 0.3, 0.4));
+        let light = RayMaterial::diffuse_light(LinearColor::new(3.0, 2.0, 1.0));
+        let isotropic = RayMaterial::isotropic(LinearColor::new(0.5, 0.5, 0.5));
+        let metal = RayMaterial::metal(LinearColor::new(0.7, 0.6, 0.5), 0.1);
+        let dielectric = RayMaterial::dielectric(RefractiveIndex::GLASS);
+
+        assert!(lambertian.has_pdf_scatter());
+        assert!(!lambertian.is_delta());
+        assert!(!lambertian.is_emissive());
+        assert!(light.is_emissive());
+        assert!(!light.has_pdf_scatter());
+        assert!(isotropic.has_pdf_scatter());
+        assert!(isotropic.is_volume_phase());
+        assert!(metal.is_delta());
+        assert!(dielectric.is_delta());
+        assert!(!metal.has_pdf_scatter());
+        assert!(!dielectric.has_pdf_scatter());
+    }
 }

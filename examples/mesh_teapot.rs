@@ -5,7 +5,7 @@ fn main() {
     let width = 800;
     let height = 800;
     let mut canvas = Canvas::new_with_bg(width, height, Rgb::new(24, 26, 27));
-    canvas.wrapped = false;
+    canvas.set_wrapped(false);
 
     println!("Loading Utah Teapot mesh...");
     let matrix = external::meshify("examples/data/meshes/teapot.obj").expect("Could not load mesh");

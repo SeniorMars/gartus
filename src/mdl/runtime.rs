@@ -184,8 +184,8 @@ impl RenderConfig {
 
     pub(crate) fn create_canvas(&self) -> Canvas {
         let mut canvas = Canvas::new_with_bg(self.width, self.height, self.background);
-        canvas.line = self.line_color;
-        canvas.wrapped = self.wrapped;
+        canvas.set_line_color(self.line_color);
+        canvas.set_wrapped(self.wrapped);
         canvas.set_shading_mode(CanvasShadingMode::Flat);
         canvas.set_polygon_color_mode(PolygonColorMode::PhongReflection);
         canvas

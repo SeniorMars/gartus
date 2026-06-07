@@ -413,7 +413,7 @@ impl PolygonMatrix {
     }
 
     /// Returns an iterator over triangle vertex triples as `&[f64]` slices of length 4.
-    pub fn iter_triangles(&self) -> impl Iterator<Item = (&[f64], &[f64], &[f64])> + '_ {
+    pub fn triangles(&self) -> impl Iterator<Item = (&[f64], &[f64], &[f64])> + '_ {
         self.inner.data().chunks_exact(12).map(|tri| {
             let (p01, p2) = tri.split_at(8);
             let (p0, p1) = p01.split_at(4);
@@ -421,12 +421,17 @@ impl PolygonMatrix {
         })
     }
 
+    /// Compatibility alias for [`Self::triangles`].
+    pub fn iter_triangles(&self) -> impl Iterator<Item = (&[f64], &[f64], &[f64])> + '_ {
+        self.triangles()
+    }
+
     /// Returns transformed triangle vertex triples without allocating a transformed `PolygonMatrix`.
     pub fn transformed_triangles<'a>(
         &'a self,
         transform: &'a Matrix,
     ) -> impl Iterator<Item = ([f64; 4], [f64; 4], [f64; 4])> + 'a {
-        self.iter_triangles().map(|(p0, p1, p2)| {
+        self.triangles().map(|(p0, p1, p2)| {
             (
                 transform.transform_homogeneous_point(p0),
                 transform.transform_homogeneous_point(p1),
