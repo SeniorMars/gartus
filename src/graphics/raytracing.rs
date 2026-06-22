@@ -18,7 +18,7 @@
 //! to importance-sample real emitters or other important geometry without mixing those targets into
 //! the world intersection container.
 
-pub use crate::gmath::random::SampleRng;
+pub use crate::{gmath::random::SampleRng, graphics::camera::DirectLightingMode};
 mod bvh;
 pub mod instance;
 pub mod material;
@@ -37,17 +37,20 @@ use crate::{
     gmath::polygon_matrix::Bounds3,
     graphics::colors::{LinearRgb, Rgb},
 };
+pub use bvh::BvhBuildOptions;
 pub use instance::{MatrixInstance, RotateY, Translate};
 pub use material::{
-    Dielectric, DiffuseLight, Isotropic, Lambertian, Material, MaterialRef, Metal, RayMaterial,
-    ScatterRecord,
+    Dielectric, DiffuseLight, HenyeyGreenstein, Isotropic, Lambertian, Material, MaterialRef,
+    Metal, RayMaterial, ScatterRecord,
 };
 pub use mesh::{MeshTriangle, TriangleMesh};
 pub use object::{
     HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
     SceneObject, Sphere, SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
 };
-pub use pdf::{CosinePdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf};
+pub use pdf::{
+    CosinePdf, HenyeyGreensteinPdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf,
+};
 pub use renderer::{PathTracer, RenderOptions};
 #[doc(hidden)]
 pub use scene::SphereList;
@@ -59,22 +62,33 @@ pub use scene::{
 pub use sdf::{DistanceField, DistanceFieldRef, FnDistanceField, SdfObject};
 pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, SolidColor, TextureRef};
 pub use volume::{
-    ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, FnDensityField,
-    NonUniformMedium,
+    ConstantDensity, ConstantMedium, CurlNoiseField, DensityField, DensityFieldRef,
+    DomainWarpedDensityField, ExtractedSurface, FluidParticle, FnDensityField, GridBounds,
+    GridDensityField, GridDensityMetadata, GridInterpolation, LiquidSurface, MacCellFlags,
+    MacFluidEmitter, MacFluidGrid2, MacFluidGrid3, MacProjectionStats, MacScalarAdvection,
+    MacScalarGrid3, MacStepStats, MarchingCubes, NonUniformMedium, ParticleSplatField,
+    ProceduralDensityField, ProceduralDensityPreset, SplatKernel, StableFluidEmitter,
+    StableFluidGrid2,
 };
 
 /// Common ray-tracing types for `use gartus::graphics::raytracing::prelude::*`.
 pub mod prelude {
     pub use super::{
-        BvhNode, ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, Dielectric,
-        DiffuseLight, DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField, Hittable,
-        HittableLayers, HittableList, Lambertian, LinearColor, MaterialId, MaterialRef,
-        MatrixInstance, Metal, NonUniformMedium, PathTracer, Quad, RayGeometry, RayMaterial,
-        RayPrimitive, RayScene, RaySceneBuilder, RenderOptions, RotateY, SamplingTargetList,
-        SdfObject, Sphere, SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate,
-        TriangleMesh, WeightedSamplingTargetList, box_object,
+        BvhBuildOptions, BvhNode, ConstantDensity, ConstantMedium, CurlNoiseField, DensityField,
+        DensityFieldRef, Dielectric, DiffuseLight, DistanceField, DistanceFieldRef,
+        DomainWarpedDensityField, ExtractedSurface, FluidParticle, FnDensityField, FnDistanceField,
+        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
+        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
+        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
+        MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
+        MaterialId, MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField,
+        PathTracer, ProceduralDensityField, ProceduralDensityPreset, Quad, RayGeometry,
+        RayMaterial, RayPrimitive, RayScene, RaySceneBuilder, RenderOptions, RotateY,
+        SamplingTargetList, SdfObject, Sphere, SplatKernel, StableFluidEmitter, StableFluidGrid2,
+        SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate, TriangleMesh,
+        WeightedSamplingTargetList, box_object,
     };
-    pub use crate::graphics::camera::{AdaptiveSampling, RayCamera};
+    pub use crate::graphics::camera::{AdaptiveSampling, DirectLightingMode, RayCamera};
 }
 
 /// Floating-point infinity for ray intervals.
@@ -1510,6 +1524,32 @@ mod tests {
     }
 
     #[test]
+    fn path_tracer_render_ray_scene_auto_samples_emissive_targets() {
+        let mut scene = RayScene::new();
+        let diffuse = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.7, 0.7, 0.7)));
+        let light = scene.add_material(RayMaterial::diffuse_light(LinearColor::new(4.0, 4.0, 4.0)));
+        scene.add_sphere(Point::new(0.0, 0.0, -1.0), 0.5, diffuse);
+        scene.add_quad(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            light,
+        );
+
+        let canvas = PathTracer::new(
+            RayCamera::new(2, 1.0)
+                .with_samples_per_pixel(1)
+                .with_max_depth(2)
+                .with_background(LinearColor::default())
+                .with_rng_seed(23),
+        )
+        .render_ray_scene(&scene);
+
+        assert_eq!(canvas.width(), 2);
+        assert_eq!(canvas.height(), 2);
+    }
+
+    #[test]
     fn sphere_hit_flips_normal_for_inside_ray() {
         let sphere = Sphere::new(Point::new(0.0, 0.0, 0.0), 1.0);
         let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0));
@@ -1613,6 +1653,29 @@ mod tests {
                 assert_eq!(bvh_hit, brute_hit);
             }
         }
+    }
+
+    #[test]
+    fn triangle_mesh_bvh_options_control_leaf_size() {
+        let mut polygons = PolygonMatrix::new();
+        for index in 0..8 {
+            let x = f64::from(u32::try_from(index).expect("test index fits u32"));
+            polygons.add_polygon((x, 0.0, -1.0), (x + 0.5, 0.0, -1.0), (x, 0.5, -1.0));
+        }
+
+        let small_leaves = TriangleMesh::from_polygon_matrix_with_bvh_options(
+            &polygons,
+            Lambertian::new(LinearColor::new(0.2, 0.2, 0.2)),
+            BvhBuildOptions::new().with_leaf_size(1),
+        );
+        let large_leaf = TriangleMesh::from_polygon_matrix_with_bvh_options(
+            &polygons,
+            Lambertian::new(LinearColor::new(0.2, 0.2, 0.2)),
+            BvhBuildOptions::new().with_leaf_size(8),
+        );
+
+        assert!(small_leaves.bvh_node_count() > large_leaf.bvh_node_count());
+        assert_eq!(large_leaf.bvh_node_count(), Some(1));
     }
 
     #[test]

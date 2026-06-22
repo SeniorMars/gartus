@@ -6,7 +6,7 @@ use crate::gmath::{
     vector::{Point, Vector},
 };
 use crate::graphics::raytracing::{
-    Hittable, INFINITY, Interval, LinearColor, PdfContext, ScatterRecord, component_mul,
+    HitRecord, Hittable, INFINITY, Interval, LinearColor, PdfContext, ScatterRecord, component_mul,
     degrees_to_radians,
 };
 use crate::graphics::raytracing::{
@@ -45,6 +45,22 @@ pub enum PixelSampleMode {
         /// Number of strata along each pixel axis.
         grid_width: u32,
     },
+}
+
+/// Direct-lighting strategy used when rendering with an explicit light target set.
+///
+/// [`Self::CurrentPathContinuation`] preserves the existing renderer behavior: diffuse and volume
+/// bounces sample a mixture of the material PDF and the light-target PDF, then collect light if
+/// that continuation ray reaches an emitter. [`Self::NextEventEstimation`] samples one light
+/// direction immediately, casts a visibility ray through the world, then continues the path with
+/// the material PDF only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DirectLightingMode {
+    /// Mix light-target sampling into the ordinary path-continuation direction.
+    #[default]
+    CurrentPathContinuation,
+    /// Add direct lighting with an explicit shadow ray at each diffuse or volume scattering event.
+    NextEventEstimation,
 }
 
 /// Per-pixel adaptive sampling settings for random world renders.
@@ -175,6 +191,7 @@ pub struct RayCamera {
     samples_per_pixel: u32,
     pixel_sample_mode: PixelSampleMode,
     adaptive_sampling: Option<AdaptiveSampling>,
+    direct_lighting_mode: DirectLightingMode,
     max_depth: u32,
     russian_roulette_min_depth: Option<u32>,
     rng_seed: u64,
@@ -202,6 +219,7 @@ struct RayCameraParams {
     samples_per_pixel: u32,
     pixel_sample_mode: PixelSampleMode,
     adaptive_sampling: Option<AdaptiveSampling>,
+    direct_lighting_mode: DirectLightingMode,
     max_depth: u32,
     russian_roulette_min_depth: Option<u32>,
     rng_seed: u64,
@@ -214,6 +232,15 @@ struct RayCameraParams {
     shutter_start: f64,
     shutter_end: f64,
     background: LinearColor,
+}
+
+#[derive(Clone, Copy)]
+struct RayColorContext<'a> {
+    world: &'a dyn Hittable,
+    lights: Option<&'a dyn Hittable>,
+    direct_lighting_mode: DirectLightingMode,
+    background: LinearColor,
+    russian_roulette_min_depth: Option<u32>,
 }
 
 impl Camera3D {
@@ -543,6 +570,7 @@ impl RayCamera {
             samples_per_pixel: 1,
             pixel_sample_mode: PixelSampleMode::Random,
             adaptive_sampling: None,
+            direct_lighting_mode: DirectLightingMode::CurrentPathContinuation,
             max_depth: 10,
             russian_roulette_min_depth: Some(5),
             rng_seed: 1,
@@ -597,6 +625,7 @@ impl RayCamera {
             samples_per_pixel: params.samples_per_pixel.max(1),
             pixel_sample_mode: params.pixel_sample_mode,
             adaptive_sampling: params.adaptive_sampling,
+            direct_lighting_mode: params.direct_lighting_mode,
             max_depth: params.max_depth,
             russian_roulette_min_depth: params.russian_roulette_min_depth,
             rng_seed: params.rng_seed,
@@ -627,6 +656,7 @@ impl RayCamera {
             samples_per_pixel: self.samples_per_pixel,
             pixel_sample_mode: self.pixel_sample_mode,
             adaptive_sampling: self.adaptive_sampling,
+            direct_lighting_mode: self.direct_lighting_mode,
             max_depth: self.max_depth,
             russian_roulette_min_depth: self.russian_roulette_min_depth,
             rng_seed: self.rng_seed,
@@ -753,6 +783,13 @@ impl RayCamera {
     #[must_use]
     pub fn without_adaptive_sampling(mut self) -> Self {
         self.adaptive_sampling = None;
+        self
+    }
+
+    /// Sets the direct-lighting strategy used by [`Self::render_world_with_lights`].
+    #[must_use]
+    pub fn with_direct_lighting_mode(mut self, mode: DirectLightingMode) -> Self {
+        self.direct_lighting_mode = mode;
         self
     }
 
@@ -934,6 +971,12 @@ impl RayCamera {
         self.adaptive_sampling
     }
 
+    /// Returns the direct-lighting strategy used for renders with explicit light targets.
+    #[must_use]
+    pub const fn direct_lighting_mode(self) -> DirectLightingMode {
+        self.direct_lighting_mode
+    }
+
     /// Returns the actual number of samples used per pixel for the current sampling mode.
     #[must_use]
     pub fn effective_samples_per_pixel(self) -> u32 {
@@ -1104,30 +1147,26 @@ impl RayCamera {
     fn ray_color(
         ray: &Ray,
         depth: u32,
-        world: &dyn Hittable,
-        lights: Option<&dyn Hittable>,
-        background: LinearColor,
-        russian_roulette_min_depth: Option<u32>,
+        context: RayColorContext<'_>,
         rng: &mut SampleRng,
     ) -> LinearColor {
         let mut current_ray = *ray;
         let mut attenuation = LinearColor::new(1.0, 1.0, 1.0);
         let mut color = LinearColor::default();
+        let mut allow_emitted = true;
 
         for bounce_index in 0..depth {
-            let Some(record) = world.hit_with_rng(
+            let Some(record) = context.world.hit_with_rng(
                 &current_ray,
                 Interval::new(SHADOW_ACNE_EPSILON, INFINITY),
                 rng,
             ) else {
-                return color + component_mul(attenuation, background);
+                return color + component_mul(attenuation, context.background);
             };
 
-            let emitted =
-                record
-                    .material
-                    .emitted(&current_ray, &record, record.u, record.v, record.point);
-            color += component_mul(attenuation, emitted);
+            if allow_emitted {
+                color += component_mul(attenuation, Self::emitted_at(&current_ray, &record));
+            }
 
             let Some(scatter) = record.material.scatter(&current_ray, &record, rng) else {
                 return color;
@@ -1140,9 +1179,10 @@ impl RayCamera {
                 } => {
                     attenuation = component_mul(attenuation, scatter_attenuation);
                     current_ray = ray;
+                    allow_emitted = true;
                     if !Self::russian_roulette_survives(
                         bounce_index,
-                        russian_roulette_min_depth,
+                        context.russian_roulette_min_depth,
                         &mut attenuation,
                         rng,
                     ) {
@@ -1153,18 +1193,36 @@ impl RayCamera {
                     attenuation: scatter_attenuation,
                     pdf: material_pdf,
                 } => {
-                    let light_pdf = lights.map(|lights| {
-                        HittablePdf::new(lights, PdfContext::new(record.point, current_ray.time()))
-                    });
+                    let (scattered_direction, pdf_value, suppress_next_emission) =
+                        match (context.direct_lighting_mode, context.lights) {
+                            (DirectLightingMode::CurrentPathContinuation, Some(lights)) => {
+                                let light_pdf = HittablePdf::new(
+                                    lights,
+                                    PdfContext::new(record.point, current_ray.time()),
+                                );
+                                let mixture_pdf = MixturePdf::new(light_pdf, material_pdf);
+                                let direction = mixture_pdf.generate(rng);
+                                (direction, mixture_pdf.value(direction), false)
+                            }
+                            (DirectLightingMode::NextEventEstimation, Some(lights)) => {
+                                let direct = Self::estimate_direct_lighting(
+                                    &current_ray,
+                                    &record,
+                                    context.world,
+                                    lights,
+                                    scatter_attenuation,
+                                    rng,
+                                );
+                                color += component_mul(attenuation, direct);
 
-                    let (scattered_direction, pdf_value) = if let Some(light_pdf) = light_pdf {
-                        let mixture_pdf = MixturePdf::new(light_pdf, material_pdf);
-                        let direction = mixture_pdf.generate(rng);
-                        (direction, mixture_pdf.value(direction))
-                    } else {
-                        let direction = material_pdf.generate(rng);
-                        (direction, material_pdf.value(direction))
-                    };
+                                let direction = material_pdf.generate(rng);
+                                (direction, material_pdf.value(direction), true)
+                            }
+                            (_, None) => {
+                                let direction = material_pdf.generate(rng);
+                                (direction, material_pdf.value(direction), false)
+                            }
+                        };
 
                     if !pdf_value.is_finite() || pdf_value <= f64::EPSILON {
                         return color;
@@ -1185,9 +1243,10 @@ impl RayCamera {
                         scatter_attenuation * (scattering_pdf / pdf_value),
                     );
                     current_ray = scattered_ray;
+                    allow_emitted = !suppress_next_emission;
                     if !Self::russian_roulette_survives(
                         bounce_index,
-                        russian_roulette_min_depth,
+                        context.russian_roulette_min_depth,
                         &mut attenuation,
                         rng,
                     ) {
@@ -1198,6 +1257,63 @@ impl RayCamera {
         }
 
         color
+    }
+
+    fn ray_color_context<'a>(
+        self,
+        world: &'a dyn Hittable,
+        lights: Option<&'a dyn Hittable>,
+    ) -> RayColorContext<'a> {
+        RayColorContext {
+            world,
+            lights,
+            direct_lighting_mode: self.direct_lighting_mode,
+            background: self.background,
+            russian_roulette_min_depth: self.russian_roulette_min_depth,
+        }
+    }
+
+    fn emitted_at(ray: &Ray, hit: &HitRecord<'_>) -> LinearColor {
+        hit.material.emitted(ray, hit, hit.u, hit.v, hit.point)
+    }
+
+    fn estimate_direct_lighting(
+        ray_in: &Ray,
+        hit: &HitRecord<'_>,
+        world: &dyn Hittable,
+        lights: &dyn Hittable,
+        scatter_attenuation: LinearColor,
+        rng: &mut SampleRng,
+    ) -> LinearColor {
+        let context = PdfContext::new(hit.point, ray_in.time());
+        let light_pdf = HittablePdf::new(lights, context);
+        let direction_to_light = light_pdf.generate(rng);
+        let light_pdf_value = light_pdf.value(direction_to_light);
+
+        if !light_pdf_value.is_finite() || light_pdf_value <= f64::EPSILON {
+            return LinearColor::default();
+        }
+
+        let shadow_ray = Ray::with_time(hit.point, direction_to_light, ray_in.time());
+        let scattering_pdf = hit.material.scattering_pdf(ray_in, hit, &shadow_ray);
+        if !scattering_pdf.is_finite() || scattering_pdf <= 0.0 {
+            return LinearColor::default();
+        }
+
+        let Some(light_hit) = world.hit_with_rng(
+            &shadow_ray,
+            Interval::new(SHADOW_ACNE_EPSILON, INFINITY),
+            rng,
+        ) else {
+            return LinearColor::default();
+        };
+
+        let emitted = Self::emitted_at(&shadow_ray, &light_hit);
+        if !emitted.is_finite() {
+            return LinearColor::default();
+        }
+
+        component_mul(scatter_attenuation, emitted) * (scattering_pdf / light_pdf_value)
     }
 
     fn russian_roulette_survives(
@@ -1266,10 +1382,7 @@ impl RayCamera {
                             Self::ray_color(
                                 &ray,
                                 self.max_depth,
-                                world,
-                                lights,
-                                self.background,
-                                self.russian_roulette_min_depth,
+                                self.ray_color_context(world, lights),
                                 &mut rng,
                             ),
                         ));
@@ -1294,10 +1407,7 @@ impl RayCamera {
         Self::ray_color(
             &ray,
             self.max_depth,
-            world,
-            lights,
-            self.background,
-            self.russian_roulette_min_depth,
+            self.ray_color_context(world, lights),
             rng,
         )
     }
@@ -1404,7 +1514,7 @@ impl RayCamera {
     }
 
     fn image_canvas(width: u32, height: u32, pixels: Vec<Rgb>) -> Canvas {
-        Canvas::from_pixels_with_options(width, height, pixels, true, false)
+        Canvas::from_pixels_rgb_only(width, height, pixels, true, false)
     }
 
     fn render_pixels_tiled<F>(width: u32, height: u32, tile_size: u32, pixel: F) -> Vec<Rgb>
@@ -1484,7 +1594,7 @@ impl RayCamera {
                 pixels.push(Rgb::from(ray_color(&self.ray_for_pixel(x, y))));
             }
         }
-        Canvas::from_pixels_with_options(self.image_width, self.image_height, pixels, true, false)
+        Canvas::from_pixels_rgb_only(self.image_width, self.image_height, pixels, true, false)
     }
 
     /// Renders a hittable world using this camera's antialiasing sample count.
@@ -1777,6 +1887,34 @@ impl Canvas {
             camera.project_mesh_wireframe_segments(mesh, transform, stride, color_for_triangle);
         sort_segments_back_to_front(&mut segments);
         self.draw_projected_segments(segments);
+    }
+
+    /// Projects and draws a filled mesh without allocating a projected [`PolygonMatrix`].
+    pub fn draw_projected_mesh(&mut self, camera: &Camera3D, mesh: &PolygonMatrix, color: Rgb) {
+        self.set_line_color(color);
+        for (p0, p1, p2) in mesh.triangles() {
+            for [a, b, c] in camera.project_clipped_triangle([p0, p1, p2]) {
+                self.draw_triangle_culled(
+                    color,
+                    (a.x, a.y, -a.depth),
+                    (b.x, b.y, -b.depth),
+                    (c.x, c.y, -c.depth),
+                );
+            }
+        }
+    }
+
+    /// Projects and draws a filled mesh with the canvas's current lighting state.
+    pub fn draw_lit_projected_mesh(&mut self, camera: &Camera3D, mesh: &PolygonMatrix) {
+        for (p0, p1, p2) in mesh.triangles() {
+            for [a, b, c] in camera.project_clipped_triangle([p0, p1, p2]) {
+                self.draw_lit_triangle_culled(
+                    (a.x, a.y, -a.depth),
+                    (b.x, b.y, -b.depth),
+                    (c.x, c.y, -c.depth),
+                );
+            }
+        }
     }
 }
 
@@ -2262,11 +2400,53 @@ mod tests {
     }
 
     #[test]
+    fn ray_camera_next_event_estimation_render_is_seeded_and_deterministic() {
+        use crate::graphics::raytracing::{DiffuseLight, HittableList, Lambertian, Quad, Sphere};
+
+        let mut world = HittableList::new();
+        world.add(Sphere::with_material(
+            Point::new(0.0, 0.0, -1.0),
+            0.5,
+            Lambertian::new(LinearColor::new(0.7, 0.7, 0.7)),
+        ));
+        world.add(Quad::with_material(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            DiffuseLight::new(LinearColor::new(4.0, 4.0, 4.0)),
+        ));
+
+        let mut lights = HittableList::new();
+        lights.add(Quad::new(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        ));
+
+        let camera = RayCamera::new(6, 1.0)
+            .with_samples_per_pixel(4)
+            .with_max_depth(4)
+            .with_background(LinearColor::default())
+            .with_direct_lighting_mode(DirectLightingMode::NextEventEstimation)
+            .with_rng_seed(321);
+
+        assert_eq!(
+            camera.direct_lighting_mode(),
+            DirectLightingMode::NextEventEstimation
+        );
+        let first = camera.render_world_with_lights(&world, &lights);
+        let second = camera.render_world_with_lights(&world, &lights);
+
+        assert_eq!(first.pixels(), second.pixels());
+    }
+
+    #[test]
     fn ray_camera_world_render_uses_image_coordinate_canvas() {
         let world = crate::graphics::raytracing::scenes::normal_sphere_world();
         let canvas = RayCamera::new(4, 1.0).render_world(&world);
 
         assert!(canvas.upper_left_origin());
         assert!(!canvas.wrapped());
+        assert!(canvas.zbuffer().is_empty());
     }
 }

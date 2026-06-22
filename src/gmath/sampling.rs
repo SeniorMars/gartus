@@ -8,6 +8,7 @@
 use super::{geometry::OrthonormalBasis, random::SampleRng, vector::Vector};
 
 const SPHERE_AREA: f64 = 4.0 * std::f64::consts::PI;
+const HG_ISOTROPIC_EPSILON: f64 = 1e-3;
 
 /// Direction-sampling probability density function over solid angle.
 ///
@@ -78,6 +79,88 @@ impl Pdf for CosinePdf {
 
     fn generate(&self, rng: &mut SampleRng) -> Vector {
         self.basis.local(rng.random_cosine_direction())
+    }
+}
+
+/// Henyey-Greenstein phase-function distribution around a forward direction.
+///
+/// Positive `g` values favor forward scattering, negative values favor back scattering, and zero
+/// matches a uniform sphere distribution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HenyeyGreensteinPdf {
+    basis: OrthonormalBasis,
+    g: f64,
+}
+
+impl HenyeyGreensteinPdf {
+    /// Creates a Henyey-Greenstein PDF around `forward`.
+    ///
+    /// Returns `None` if `forward` cannot form a basis.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `g` is not finite or is outside `(-1.0, 1.0)`.
+    #[must_use]
+    pub fn new(forward: Vector, g: f64) -> Option<Self> {
+        assert!(
+            g.is_finite() && g.abs() < 1.0,
+            "Henyey-Greenstein anisotropy must be finite and in (-1, 1)"
+        );
+        OrthonormalBasis::from_w(forward).map(|basis| Self { basis, g })
+    }
+
+    /// Returns the anisotropy parameter.
+    #[must_use]
+    pub const fn anisotropy(self) -> f64 {
+        self.g
+    }
+
+    /// Returns the basis used by this PDF.
+    #[must_use]
+    pub const fn basis(self) -> OrthonormalBasis {
+        self.basis
+    }
+
+    /// Evaluates the Henyey-Greenstein phase function for a scattering cosine.
+    #[must_use]
+    pub fn phase_value(cosine_theta: f64, g: f64) -> f64 {
+        if !cosine_theta.is_finite() || !g.is_finite() || g.abs() >= 1.0 {
+            return 0.0;
+        }
+        let denominator = 1.0 + g * g - 2.0 * g * cosine_theta.clamp(-1.0, 1.0);
+        if denominator <= f64::EPSILON {
+            return 0.0;
+        }
+        (1.0 - g * g) / (SPHERE_AREA * denominator.powf(1.5))
+    }
+}
+
+impl Pdf for HenyeyGreensteinPdf {
+    fn value(&self, direction: Vector) -> f64 {
+        let direction_length = direction.length();
+        if direction_length <= f64::EPSILON {
+            return 0.0;
+        }
+        let cosine_theta = direction.dot(self.basis.w()) / direction_length;
+        Self::phase_value(cosine_theta, self.g)
+    }
+
+    fn generate(&self, rng: &mut SampleRng) -> Vector {
+        let r1 = rng.random_double();
+        let r2 = rng.random_double();
+        let cosine_theta = if self.g.abs() < HG_ISOTROPIC_EPSILON {
+            1.0 - 2.0 * r1
+        } else {
+            let term = (1.0 - self.g * self.g) / (1.0 - self.g + 2.0 * self.g * r1);
+            ((1.0 + self.g * self.g - term * term) / (2.0 * self.g)).clamp(-1.0, 1.0)
+        };
+        let sine_theta = (1.0 - cosine_theta * cosine_theta).max(0.0).sqrt();
+        let phi = 2.0 * std::f64::consts::PI * r2;
+        self.basis.local(Vector::new(
+            phi.cos() * sine_theta,
+            phi.sin() * sine_theta,
+            cosine_theta,
+        ))
     }
 }
 
@@ -240,6 +323,38 @@ mod tests {
         }
 
         assert_within(cosine_sum / f64::from(samples), 2.0 / 3.0, 0.025);
+    }
+
+    #[test]
+    fn henyey_greenstein_pdf_biases_forward_or_backward() {
+        let forward = Vector::new(0.0, 0.0, 1.0);
+        let forward_pdf = HenyeyGreensteinPdf::new(forward, 0.6).expect("basis should be valid");
+        let backward_pdf = HenyeyGreensteinPdf::new(forward, -0.6).expect("basis should be valid");
+
+        assert_close(
+            HenyeyGreensteinPdf::phase_value(0.25, 0.0),
+            1.0 / (4.0 * std::f64::consts::PI),
+        );
+        assert!(forward_pdf.value(forward) > forward_pdf.value(-forward));
+        assert!(backward_pdf.value(-forward) > backward_pdf.value(forward));
+    }
+
+    #[test]
+    fn henyey_greenstein_pdf_samples_mean_cosine_near_anisotropy() {
+        let forward = Vector::new(0.0, 0.0, 1.0);
+        let g = 0.55;
+        let pdf = HenyeyGreensteinPdf::new(forward, g).expect("basis should be valid");
+        let mut rng = SampleRng::new(107);
+        let samples = 8192;
+        let mut cosine_sum = 0.0;
+
+        for _ in 0..samples {
+            let sample = pdf.generate(&mut rng);
+            assert_within(sample.length(), 1.0, 1e-12);
+            cosine_sum += sample.dot(forward);
+        }
+
+        assert_within(cosine_sum / f64::from(samples), g, 0.035);
     }
 
     #[test]

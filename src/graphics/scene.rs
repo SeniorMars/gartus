@@ -1,23 +1,46 @@
 //! Renderer-neutral scene data shared by raster and ray renderers.
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::OnceLock};
 
 use crate::gmath::{matrix::Matrix, polygon_matrix::PolygonMatrix};
 use crate::graphics::{
     camera::Camera3D,
     colors::Rgb,
     display::{Canvas, PolygonColorMode, ShadingMode},
+    draw::VertexNormalPlan,
     lighting::{Lighting, PhongMaterial},
     material::SurfaceMaterial,
 };
 
 /// One polygon mesh paired with renderer-neutral material data.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct SurfaceMesh {
     /// Mesh triangles in world coordinates.
     pub polygons: PolygonMatrix,
     /// Surface material shared by raster and ray renderers.
     pub material: SurfaceMaterial,
+    vertex_normal_plan: OnceLock<VertexNormalPlan>,
+}
+
+impl Clone for SurfaceMesh {
+    fn clone(&self) -> Self {
+        let vertex_normal_plan = self
+            .vertex_normal_plan
+            .get()
+            .cloned()
+            .map_or_else(OnceLock::new, OnceLock::from);
+        Self {
+            polygons: self.polygons.clone(),
+            material: self.material.clone(),
+            vertex_normal_plan,
+        }
+    }
+}
+
+impl PartialEq for SurfaceMesh {
+    fn eq(&self, other: &Self) -> bool {
+        self.polygons == other.polygons && self.material == other.material
+    }
 }
 
 impl SurfaceMesh {
@@ -27,7 +50,19 @@ impl SurfaceMesh {
         Self {
             polygons,
             material: material.into(),
+            vertex_normal_plan: OnceLock::new(),
         }
+    }
+
+    /// Returns a cached vertex-normal plan for this mesh's polygon data.
+    ///
+    /// The plan is reusable for repeated rasterization of the same mesh data. If callers mutate the
+    /// public [`Self::polygons`] field directly after this cache is initialized, construct a fresh
+    /// `SurfaceMesh` to rebuild the plan for the new topology.
+    #[must_use]
+    pub fn vertex_normal_plan(&self) -> &VertexNormalPlan {
+        self.vertex_normal_plan
+            .get_or_init(|| VertexNormalPlan::from_polygon_data(self.polygons.as_matrix().data()))
     }
 }
 
@@ -137,23 +172,22 @@ impl SurfaceScene {
         });
 
         for mesh in &self.meshes {
-            let projected = project_mesh(camera, &mesh.polygons);
-            if projected.is_empty() {
-                continue;
-            }
-            canvas.set_line_color(mesh.material.base_color.gamma_encode());
+            let color = mesh.material.base_color.gamma_encode();
             if let Some(lighting) = &lighting {
                 let mut mesh_lighting = lighting.clone();
                 mesh_lighting.set_material(PhongMaterial::from(&mesh.material));
                 canvas.set_lighting(mesh_lighting);
+                canvas.draw_lit_projected_mesh(camera, &mesh.polygons);
+            } else {
+                canvas.draw_projected_mesh(camera, &mesh.polygons, color);
             }
-            canvas.draw_polygons(&projected);
         }
 
         canvas
     }
 }
 
+#[cfg(test)]
 fn project_mesh(camera: &Camera3D, mesh: &PolygonMatrix) -> PolygonMatrix {
     let mut projected = PolygonMatrix::with_capacity(mesh.cols());
     for (p0, p1, p2) in mesh.triangles() {
@@ -248,6 +282,23 @@ mod tests {
 
         assert!(canvas.pixels().contains(&Rgb::GREEN));
         assert!(canvas.pixels().contains(&Rgb::RED));
+    }
+
+    #[test]
+    fn surface_mesh_reuses_cached_vertex_normal_plan() {
+        let mut mesh = PolygonMatrix::new();
+        mesh.add_polygon((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0));
+        let mesh = SurfaceMesh::new(mesh, SurfaceMaterial::default());
+
+        let first = mesh.vertex_normal_plan();
+        let second = mesh.vertex_normal_plan();
+
+        assert!(std::ptr::eq(first, second));
+        assert!(
+            first
+                .normals_for_polygon_data(mesh.polygons.as_matrix().data())
+                .is_some()
+        );
     }
 
     #[test]

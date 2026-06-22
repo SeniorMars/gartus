@@ -1,135 +1,13 @@
-//! Participating media for path tracing.
-
-use super::{
-    Aabb, HitRecord, Hittable, INFINITY, Interval, LinearColor, MaterialRef, material::Isotropic,
+use super::super::{
+    Aabb, HitRecord, Hittable, INFINITY, Interval, LinearColor, Material, MaterialRef,
+    material::Isotropic,
 };
+use super::field::{DensityField, DensityFieldRef};
 use crate::{
-    gmath::{
-        random::SampleRng,
-        ray::Ray,
-        vector::{Point, Vector},
-    },
+    gmath::{random::SampleRng, ray::Ray, vector::Vector},
     graphics::texture::SurfaceTexture,
 };
 use std::{fmt, sync::Arc};
-
-/// Spatially varying density used by non-uniform participating media.
-///
-/// `density` returns the local extinction density at a world-space point and ray time. Values at
-/// or below zero are treated as empty space by [`NonUniformMedium`]. `max_density` is the majorant
-/// used for Woodcock tracking, so it must be greater than or equal to the maximum density the field
-/// can return over the medium bounds.
-pub trait DensityField: Send + Sync {
-    /// Returns the local density at `point` for `time`.
-    fn density(&self, point: Point, time: f64) -> f64;
-
-    /// Returns a positive finite upper bound for [`Self::density`].
-    fn max_density(&self) -> f64;
-}
-
-impl<T: DensityField + ?Sized> DensityField for Arc<T> {
-    fn density(&self, point: Point, time: f64) -> f64 {
-        (**self).density(point, time)
-    }
-
-    fn max_density(&self) -> f64 {
-        (**self).max_density()
-    }
-}
-
-/// Shared density-field handle.
-pub type DensityFieldRef = Arc<dyn DensityField>;
-
-/// Constant density field usable with [`NonUniformMedium`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ConstantDensity {
-    density: f64,
-}
-
-impl ConstantDensity {
-    /// Creates a constant density field.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `density` is not positive and finite.
-    #[must_use]
-    pub fn new(density: f64) -> Self {
-        assert!(
-            density.is_finite() && density > 0.0,
-            "density field maximum must be positive and finite"
-        );
-        Self { density }
-    }
-
-    /// Returns the stored density.
-    #[must_use]
-    pub const fn value(self) -> f64 {
-        self.density
-    }
-}
-
-impl DensityField for ConstantDensity {
-    fn density(&self, _point: Point, _time: f64) -> f64 {
-        self.density
-    }
-
-    fn max_density(&self) -> f64 {
-        self.density
-    }
-}
-
-/// Closure-backed density field with an explicit majorant.
-pub struct FnDensityField<F> {
-    density_fn: F,
-    max_density: f64,
-}
-
-impl<F> fmt::Debug for FnDensityField<F> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("FnDensityField")
-            .field("max_density", &self.max_density)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<F> FnDensityField<F> {
-    /// Creates a density field from a closure and explicit maximum density.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `max_density` is not positive and finite.
-    #[must_use]
-    pub fn new(max_density: f64, density_fn: F) -> Self {
-        assert!(
-            max_density.is_finite() && max_density > 0.0,
-            "density field maximum must be positive and finite"
-        );
-        Self {
-            density_fn,
-            max_density,
-        }
-    }
-
-    /// Returns the explicit maximum density.
-    #[must_use]
-    pub const fn maximum_density(&self) -> f64 {
-        self.max_density
-    }
-}
-
-impl<F> DensityField for FnDensityField<F>
-where
-    F: Fn(Point, f64) -> f64 + Send + Sync,
-{
-    fn density(&self, point: Point, time: f64) -> f64 {
-        (self.density_fn)(point, time)
-    }
-
-    fn max_density(&self) -> f64 {
-        self.max_density
-    }
-}
 
 /// A constant-density participating medium bounded by another hittable object.
 pub struct ConstantMedium {
@@ -271,7 +149,7 @@ fn boundary_interval(
     })
 }
 
-fn medium_hit_record<'a>(ray: &Ray, t: f64, material: &'a dyn super::Material) -> HitRecord<'a> {
+fn medium_hit_record<'a>(ray: &Ray, t: f64, material: &'a dyn Material) -> HitRecord<'a> {
     let normal = Vector::new(1.0, 0.0, 0.0);
     HitRecord {
         point: ray.at(t),
@@ -432,7 +310,7 @@ impl<D: DensityField> NonUniformMedium<D> {
         self.max_density
     }
 
-    fn clamped_density(&self, point: Point, time: f64) -> f64 {
+    fn clamped_density(&self, point: crate::gmath::vector::Point, time: f64) -> f64 {
         let density = self.density_field.density(point, time);
         if density.is_finite() {
             density.clamp(0.0, self.max_density)
@@ -486,64 +364,5 @@ impl<D: DensityField> Hittable for NonUniformMedium<D> {
 
     fn bounding_box(&self) -> Option<Aabb> {
         self.bounds
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graphics::raytracing::Sphere;
-
-    fn assert_close(actual: f64, expected: f64) {
-        assert!((actual - expected).abs() < 1e-10);
-    }
-
-    #[test]
-    fn function_density_field_reports_explicit_majorant() {
-        let field = FnDensityField::new(3.5, |point: Point, time| point.x() + time);
-
-        assert_close(field.maximum_density(), 3.5);
-        assert_close(field.max_density(), 3.5);
-        assert_close(field.density(Point::new(2.0, 0.0, 0.0), 0.25), 2.25);
-    }
-
-    #[test]
-    fn non_uniform_medium_rejects_empty_density() {
-        let boundary = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
-        let field = FnDensityField::new(1.0, |_point: Point, _time| 0.0);
-        let medium = NonUniformMedium::new(boundary, field, LinearColor::new(1.0, 1.0, 1.0));
-        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0));
-        let mut rng = SampleRng::new(47);
-
-        assert!(
-            medium
-                .hit_with_rng(&ray, Interval::new(0.0, INFINITY), &mut rng)
-                .is_none()
-        );
-        assert!(medium.bounding_box().is_some());
-    }
-
-    #[test]
-    fn non_uniform_medium_samples_dense_region() {
-        let boundary = Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5);
-        let field = FnDensityField::new(16.0, |point: Point, time| {
-            if point.z() < -0.75 && time > 0.5 {
-                16.0
-            } else {
-                0.0
-            }
-        });
-        let medium = NonUniformMedium::new(boundary, field, LinearColor::new(1.0, 1.0, 1.0));
-        let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.75);
-        let mut rng = SampleRng::new(47);
-
-        let record = medium
-            .hit_with_rng(&ray, Interval::new(0.0, INFINITY), &mut rng)
-            .expect("dense region should scatter");
-
-        assert!(record.t > 0.75);
-        assert!(record.t < 1.5);
-        assert_eq!(record.normal, Vector::new(1.0, 0.0, 0.0));
-        assert!(record.front_face);
     }
 }

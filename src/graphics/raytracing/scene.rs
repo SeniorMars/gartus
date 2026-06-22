@@ -12,7 +12,7 @@
 use super::{
     Aabb, HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
     RayMaterial, SampleRng, Sphere,
-    bvh::{BvhPrimitiveInfo, FlatBvh, RayTraversal},
+    bvh::{BvhBuildOptions, BvhPrimitiveInfo, FlatBvh, RayTraversal},
 };
 use crate::{
     gmath::{
@@ -150,7 +150,15 @@ impl HittableList {
     /// Builds a BVH from this list, returning `None` if any object lacks bounds.
     #[must_use]
     pub fn into_bvh(self) -> Option<BvhNode> {
-        BvhNode::from_hittables(self.objects)
+        self.into_bvh_with_options(BvhBuildOptions::default())
+    }
+
+    /// Builds a BVH from this list using explicit build options.
+    ///
+    /// Returns `None` if any object lacks bounds.
+    #[must_use]
+    pub fn into_bvh_with_options(self, options: BvhBuildOptions) -> Option<BvhNode> {
+        BvhNode::from_hittables_with_options(self.objects, options)
     }
 
     /// Returns the number of objects in the scene.
@@ -625,13 +633,28 @@ impl BvhNode {
     /// Builds a BVH from bounded hittable objects.
     #[must_use]
     pub fn from_hittables(objects: Vec<Box<dyn Hittable>>) -> Option<Self> {
-        let bvh = ObjectBvh::build(&objects)?;
+        Self::from_hittables_with_options(objects, BvhBuildOptions::default())
+    }
+
+    /// Builds a BVH from bounded hittable objects using explicit build options.
+    #[must_use]
+    pub fn from_hittables_with_options(
+        objects: Vec<Box<dyn Hittable>>,
+        options: BvhBuildOptions,
+    ) -> Option<Self> {
+        let bvh = ObjectBvh::build(&objects, options)?;
         let bounds = bvh.bounds();
         Some(Self {
             objects,
             bvh,
             bounds,
         })
+    }
+
+    /// Returns the number of flat BVH nodes in this object hierarchy.
+    #[must_use]
+    pub fn node_count(&self) -> usize {
+        self.bvh.node_count()
     }
 
     /// Brute-force hit path used as a correctness oracle for the object BVH.
@@ -682,9 +705,7 @@ struct ObjectBvh {
 }
 
 impl ObjectBvh {
-    const LEAF_SIZE: usize = 4;
-
-    fn build(objects: &[Box<dyn Hittable>]) -> Option<Self> {
+    fn build(objects: &[Box<dyn Hittable>], options: BvhBuildOptions) -> Option<Self> {
         let primitive_info = objects
             .iter()
             .enumerate()
@@ -694,17 +715,17 @@ impl ObjectBvh {
                     .map(|bounds| BvhPrimitiveInfo::new(index, bounds))
             })
             .collect::<Option<Vec<_>>>()?;
-        FlatBvh::build(&primitive_info, Self::LEAF_SIZE).map(|bvh| Self { bvh })
+        FlatBvh::build(&primitive_info, options).map(|bvh| Self { bvh })
     }
 
-    fn build_ray_primitives(primitives: &[RayPrimitive]) -> Option<Self> {
+    fn build_ray_primitives(primitives: &[RayPrimitive], options: BvhBuildOptions) -> Option<Self> {
         let primitive_info = primitives
             .iter()
             .map(|primitive| primitive.geometry.bounding_box())
             .enumerate()
             .map(|(index, bounds)| bounds.map(|bounds| BvhPrimitiveInfo::new(index, bounds)))
             .collect::<Option<Vec<_>>>()?;
-        FlatBvh::build(&primitive_info, Self::LEAF_SIZE).map(|bvh| Self { bvh })
+        FlatBvh::build(&primitive_info, options).map(|bvh| Self { bvh })
     }
 
     fn bounds(&self) -> Aabb {
@@ -986,6 +1007,13 @@ impl RaySceneBuilder {
         self.scene
     }
 
+    /// Finishes the builder after prebuilding the primitive BVH with explicit build options.
+    #[must_use]
+    pub fn build_bvh_with_options(mut self, options: BvhBuildOptions) -> RayScene {
+        self.scene.build_bvh_with_options(options);
+        self.scene
+    }
+
     fn material_id(&self, name: &str) -> MaterialId {
         *self
             .material_names
@@ -1137,6 +1165,13 @@ impl RayScene {
     #[must_use]
     pub fn with_bvh(mut self) -> Self {
         self.build_bvh();
+        self
+    }
+
+    /// Builds the primitive BVH with explicit build options and returns this scene.
+    #[must_use]
+    pub fn with_bvh_options(mut self, options: BvhBuildOptions) -> Self {
+        self.build_bvh_with_options(options);
         self
     }
 
@@ -1332,6 +1367,14 @@ impl RayScene {
         self.bvh.get().is_some_and(Option::is_some)
     }
 
+    /// Returns the number of flat BVH nodes when this scene has a built primitive BVH.
+    #[must_use]
+    pub fn bvh_node_count(&self) -> Option<usize> {
+        self.bvh
+            .get()
+            .and_then(|cached| cached.as_ref().map(ObjectBvh::node_count))
+    }
+
     /// Returns the number of primitives in the scene.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -1372,6 +1415,24 @@ impl RayScene {
         scene: &SurfaceScene,
         material_mode: SurfaceRayMaterialMode<'_>,
     ) -> Self {
+        Self::from_surface_scene_with_material_mode_and_bvh_options(
+            scene,
+            material_mode,
+            BvhBuildOptions::default(),
+        )
+    }
+
+    /// Converts a renderer-neutral surface scene with explicit material and BVH build policies.
+    ///
+    /// The returned scene has its primitive BVH built before return. Diffuse texture paths remain
+    /// source-scene metadata unless the selected custom material mapper resolves them.
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn from_surface_scene_with_material_mode_and_bvh_options(
+        scene: &SurfaceScene,
+        material_mode: SurfaceRayMaterialMode<'_>,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
         let primitive_count = scene
             .meshes()
             .iter()
@@ -1395,7 +1456,7 @@ impl RayScene {
         }
 
         ray_scene.add_primitives(primitives);
-        ray_scene.build_bvh();
+        ray_scene.build_bvh_with_options(bvh_options);
         ray_scene
     }
 
@@ -1405,13 +1466,23 @@ impl RayScene {
     /// Empty scenes, or scenes containing unbounded primitives, cache a `None` BVH and use the
     /// linear fallback path.
     pub fn build_bvh(&mut self) {
-        let bvh = ObjectBvh::build_ray_primitives(&self.primitives);
+        self.build_bvh_with_options(BvhBuildOptions::default());
+    }
+
+    /// Builds and caches the primitive BVH using explicit build options.
+    ///
+    /// Empty scenes, or scenes containing unbounded primitives, cache a `None` BVH and use the
+    /// linear fallback path.
+    pub fn build_bvh_with_options(&mut self, options: BvhBuildOptions) {
+        let bvh = ObjectBvh::build_ray_primitives(&self.primitives, options);
         self.bvh = OnceLock::from(bvh);
     }
 
     fn cached_bvh(&self) -> Option<&ObjectBvh> {
         self.bvh
-            .get_or_init(|| ObjectBvh::build_ray_primitives(&self.primitives))
+            .get_or_init(|| {
+                ObjectBvh::build_ray_primitives(&self.primitives, BvhBuildOptions::default())
+            })
             .as_ref()
     }
 
@@ -1453,6 +1524,20 @@ impl SurfaceScene {
         material_mode: SurfaceRayMaterialMode<'_>,
     ) -> RayScene {
         RayScene::from_surface_scene_with_material_mode(self, material_mode)
+    }
+
+    /// Converts this shared scene into a data-oriented ray scene with material and BVH policies.
+    #[must_use]
+    pub fn to_ray_scene_with_material_mode_and_bvh_options(
+        &self,
+        material_mode: SurfaceRayMaterialMode<'_>,
+        bvh_options: BvhBuildOptions,
+    ) -> RayScene {
+        RayScene::from_surface_scene_with_material_mode_and_bvh_options(
+            self,
+            material_mode,
+            bvh_options,
+        )
     }
 }
 
@@ -1617,6 +1702,30 @@ fn reciprocal_count(count: usize) -> f64 {
 mod tests {
     use super::*;
     use crate::gmath::ray::Ray;
+
+    #[test]
+    fn ray_scene_build_bvh_with_options_uses_leaf_size() {
+        let mut scene = RayScene::new();
+        let material = scene.add_material(RayMaterial::lambertian(
+            crate::graphics::raytracing::LinearColor::new(0.5, 0.5, 0.5),
+        ));
+        for index in 0..8 {
+            let x = f64::from(u32::try_from(index).expect("test index fits u32")) * 3.0;
+            scene.add_sphere(Point::new(x, 0.0, -5.0), 0.5, material);
+        }
+
+        let mut single_primitive_leaves = scene.clone();
+        single_primitive_leaves.build_bvh_with_options(BvhBuildOptions::new().with_leaf_size(1));
+        let mut all_primitives_in_one_leaf = scene;
+        all_primitives_in_one_leaf.build_bvh_with_options(BvhBuildOptions::new().with_leaf_size(8));
+
+        assert!(single_primitive_leaves.has_bvh());
+        assert!(all_primitives_in_one_leaf.has_bvh());
+        assert!(
+            single_primitive_leaves.bvh_node_count() > all_primitives_in_one_leaf.bvh_node_count()
+        );
+        assert_eq!(all_primitives_in_one_leaf.bvh_node_count(), Some(1));
+    }
 
     #[test]
     fn hittable_layers_return_nearest_hit_across_prebuilt_bvhs() {

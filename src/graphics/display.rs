@@ -329,6 +329,12 @@ impl Canvas {
         Ok(zbuffer)
     }
 
+    pub(crate) fn ensure_zbuffer(&mut self) {
+        if self.zbuffer.len() != self.pixels.len() {
+            self.zbuffer = vec![f64::NEG_INFINITY; self.pixels.len()];
+        }
+    }
+
     /// Returns a new blank [Canvas] to be drawn on.
     ///
     /// # Arguments
@@ -437,6 +443,25 @@ impl Canvas {
             .unwrap_or_else(|err| panic!("{err}"))
     }
 
+    /// Returns a new [`Canvas`] initialized with exact pixel data and no z-buffer allocation.
+    ///
+    /// This is useful for renderers and image filters that only need an output image. Depth data is
+    /// allocated lazily if a later drawing operation needs it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixels.len()` is not `width * height`.
+    pub fn from_pixels_rgb_only(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+        upper_left_origin: bool,
+        wrapped: bool,
+    ) -> Self {
+        Self::try_from_pixels_rgb_only(width, height, pixels, upper_left_origin, wrapped)
+            .unwrap_or_else(|err| panic!("{err}"))
+    }
+
     /// Returns a checked [`Canvas`] initialized with exact pixel data and coordinate options.
     ///
     /// # Errors
@@ -462,6 +487,41 @@ impl Canvas {
             height,
             pixels,
             zbuffer: Self::zbuffer_for_pixel_count(pixel_count)?,
+            upper_left_origin,
+            wrapped,
+            line: Rgb::default(),
+            line_width: 1.0,
+            polygon_color_mode: PolygonColorMode::default(),
+            shading_mode: ShadingMode::default(),
+            lighting: Lighting::default(),
+        })
+    }
+
+    /// Returns a checked [`Canvas`] initialized with exact pixel data and no z-buffer allocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `width * height` cannot be represented or if `pixels.len()` does not
+    /// match that count.
+    pub fn try_from_pixels_rgb_only(
+        width: u32,
+        height: u32,
+        pixels: Vec<Rgb>,
+        upper_left_origin: bool,
+        wrapped: bool,
+    ) -> Result<Self, CanvasBuildError> {
+        let pixel_count = Self::try_pixel_count(width, height)?;
+        if pixels.len() != pixel_count {
+            return Err(CanvasBuildError::PixelDataLengthMismatch {
+                expected: pixel_count,
+                actual: pixels.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            pixels,
+            zbuffer: Vec::new(),
             upper_left_origin,
             wrapped,
             line: Rgb::default(),
@@ -629,7 +689,11 @@ impl Canvas {
             width,
             height,
             pixels,
-            zbuffer: vec![f64::NEG_INFINITY; Self::pixel_count(width, height)],
+            zbuffer: if self.zbuffer.len() == self.pixels.len() {
+                vec![f64::NEG_INFINITY; Self::pixel_count(width, height)]
+            } else {
+                Vec::new()
+            },
             upper_left_origin: self.upper_left_origin,
             wrapped: self.wrapped,
             line: self.line,
@@ -681,7 +745,11 @@ impl Canvas {
             width: self.width,
             height: self.height,
             pixels,
-            zbuffer: vec![f64::NEG_INFINITY; self.pixels.len()],
+            zbuffer: if self.zbuffer.len() == self.pixels.len() {
+                vec![f64::NEG_INFINITY; self.pixels.len()]
+            } else {
+                Vec::new()
+            },
             upper_left_origin: self.upper_left_origin,
             wrapped: self.wrapped,
             line: self.line,
@@ -825,6 +893,9 @@ impl Canvas {
     #[must_use]
     pub fn get_zbuffer(&self, x: i64, y: i64) -> Option<f64> {
         let (x, y) = self.normalize_coords(x, y)?;
+        if self.zbuffer.len() != self.pixels.len() {
+            return None;
+        }
         Some(self.zbuffer[y as usize * self.width as usize + x as usize])
     }
 
@@ -885,6 +956,7 @@ impl Canvas {
         }
 
         if let Some((x, y)) = self.normalize_coords(x, y) {
+            self.ensure_zbuffer();
             let index = y as usize * self.width as usize + x as usize;
             if z > self.zbuffer[index] {
                 self.pixels[index] = *pixel;
@@ -900,6 +972,7 @@ impl Canvas {
             return None;
         }
 
+        debug_assert_eq!(self.zbuffer.len(), self.pixels.len());
         let (x, y) = self.normalize_coords(x, y)?;
         let index = y as usize * self.width as usize + x as usize;
         (z > self.zbuffer[index]).then_some(index)
@@ -921,6 +994,7 @@ impl Canvas {
         debug_assert!(x >= 0 && x < i64::from(self.width));
         debug_assert!(y >= 0 && y < i64::from(self.height));
 
+        debug_assert_eq!(self.zbuffer.len(), self.pixels.len());
         let storage_y = if self.upper_left_origin {
             y
         } else {
@@ -933,6 +1007,7 @@ impl Canvas {
     /// Sets a z-buffered pixel by storage index.
     pub(crate) fn plot_z_index_unchecked(&mut self, index: usize, pixel: Rgb, z: f64) {
         debug_assert!(index < self.pixels.len());
+        debug_assert_eq!(self.zbuffer.len(), self.pixels.len());
         self.pixels[index] = pixel;
         self.zbuffer[index] = z;
     }
@@ -957,6 +1032,8 @@ impl Canvas {
         if width == 0 || height == 0 || y < 0 || y >= height || x0 > x1 || !z.is_finite() {
             return;
         }
+
+        self.ensure_zbuffer();
 
         if x1 < 0 || x0 >= width {
             return;
@@ -1005,6 +1082,8 @@ impl Canvas {
         if width == 0 || height == 0 || y < 0 || y >= height || x0 > x1 || !z.is_finite() {
             return;
         }
+
+        self.ensure_zbuffer();
 
         if x1 < 0 || x0 >= width {
             return;
@@ -1239,6 +1318,7 @@ impl Canvas {
 
     /// Resets every z-buffer entry to negative infinity.
     pub fn clear_zbuffer(&mut self) {
+        self.ensure_zbuffer();
         self.zbuffer.fill(f64::NEG_INFINITY);
     }
 
@@ -1646,6 +1726,19 @@ mod tests {
 
         canvas.plot(&Rgb::RED, 0, 0);
         assert!(canvas.pixels().is_empty());
+    }
+
+    #[test]
+    fn rgb_only_canvas_allocates_zbuffer_lazily() {
+        let mut canvas = Canvas::from_pixels_rgb_only(2, 2, vec![Rgb::BLACK; 4], true, false);
+
+        assert!(canvas.zbuffer().is_empty());
+        assert_eq!(canvas.get_zbuffer(0, 0), None);
+
+        canvas.plot_z(&Rgb::RED, 0, 0, 1.0);
+
+        assert_eq!(canvas.zbuffer().len(), 4);
+        assert_eq!(canvas.get_zbuffer(0, 0), Some(1.0));
     }
 
     #[test]

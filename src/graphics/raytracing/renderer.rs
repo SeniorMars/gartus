@@ -4,7 +4,8 @@
 //! [`PathTracer::render_scene`] as a one-shot convenience for renderer-neutral [`SurfaceScene`]
 //! content. For repeated renders of the same surface scene, compile once with
 //! [`SurfaceScene::to_ray_scene`] and pass the resulting [`RayScene`] to
-//! [`PathTracer::render`] or [`PathTracer::render_with_lights`].
+//! [`PathTracer::render_ray_scene`], [`PathTracer::render`], or
+//! [`PathTracer::render_with_lights`].
 
 use super::{Hittable, RayScene};
 use crate::graphics::{camera::RayCamera, display::Canvas, scene::SurfaceScene};
@@ -95,6 +96,20 @@ impl PathTracer {
             || self.camera.render_world(world),
             |tile_size| self.camera.render_world_tiled(world, tile_size),
         )
+    }
+
+    /// Renders a compiled ray scene, automatically importance-sampling emissive primitives.
+    ///
+    /// This is the simplest entry point for [`RayScene`] content. It builds a light-target list
+    /// from [`RayScene::emissive_targets`] and calls [`Self::render_with_lights`] when that list is
+    /// non-empty; scenes without emissive primitives render through [`Self::render`].
+    pub fn render_ray_scene(self, scene: &RayScene) -> Canvas {
+        let lights = scene.emissive_targets();
+        if lights.is_empty() {
+            self.render(scene)
+        } else {
+            self.render_with_lights(scene, &lights)
+        }
     }
 
     /// Compiles and renders a renderer-neutral surface scene.

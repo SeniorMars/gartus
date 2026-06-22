@@ -1,7 +1,7 @@
 //! Probability density functions for importance-sampled path tracing.
 
 use super::{Hittable, PdfContext};
-pub use crate::gmath::sampling::{CosinePdf, MixturePdf, Pdf, SpherePdf};
+pub use crate::gmath::sampling::{CosinePdf, HenyeyGreensteinPdf, MixturePdf, Pdf, SpherePdf};
 use crate::gmath::{random::SampleRng, vector::Vector};
 use std::fmt;
 
@@ -46,6 +46,8 @@ pub enum MaterialPdf {
     Sphere(SpherePdf),
     /// Cosine-weighted hemisphere sampling.
     Cosine(CosinePdf),
+    /// Henyey-Greenstein volume phase-function sampling.
+    HenyeyGreenstein(HenyeyGreensteinPdf),
 }
 
 impl Pdf for MaterialPdf {
@@ -53,6 +55,7 @@ impl Pdf for MaterialPdf {
         match self {
             Self::Sphere(pdf) => pdf.value(direction),
             Self::Cosine(pdf) => pdf.value(direction),
+            Self::HenyeyGreenstein(pdf) => pdf.value(direction),
         }
     }
 
@@ -60,6 +63,7 @@ impl Pdf for MaterialPdf {
         match self {
             Self::Sphere(pdf) => pdf.generate(rng),
             Self::Cosine(pdf) => pdf.generate(rng),
+            Self::HenyeyGreenstein(pdf) => pdf.generate(rng),
         }
     }
 }

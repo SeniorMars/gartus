@@ -3,6 +3,44 @@ use crate::gmath::{ray::Ray, vector::Point};
 
 const BVH_BUCKETS: usize = 12;
 const BVH_BUCKETS_F64: f64 = 12.0;
+const DEFAULT_BVH_LEAF_SIZE: usize = 4;
+
+/// Build-time options for flat BVH acceleration structures.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BvhBuildOptions {
+    leaf_size: usize,
+}
+
+impl BvhBuildOptions {
+    /// Creates options using the default BVH leaf size.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            leaf_size: DEFAULT_BVH_LEAF_SIZE,
+        }
+    }
+
+    /// Sets the maximum number of primitives stored in a leaf node.
+    ///
+    /// A zero value is clamped to one.
+    #[must_use]
+    pub const fn with_leaf_size(mut self, leaf_size: usize) -> Self {
+        self.leaf_size = if leaf_size == 0 { 1 } else { leaf_size };
+        self
+    }
+
+    /// Returns the configured maximum number of primitives per leaf.
+    #[must_use]
+    pub const fn leaf_size(self) -> usize {
+        self.leaf_size
+    }
+}
+
+impl Default for BvhBuildOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct RayTraversal {
@@ -142,7 +180,10 @@ impl BvhHit for HitRecord<'_> {
 }
 
 impl FlatBvh {
-    pub(super) fn build(primitive_info: &[BvhPrimitiveInfo], leaf_size: usize) -> Option<Self> {
+    pub(super) fn build(
+        primitive_info: &[BvhPrimitiveInfo],
+        options: BvhBuildOptions,
+    ) -> Option<Self> {
         if primitive_info.is_empty() {
             return None;
         }
@@ -151,7 +192,7 @@ impl FlatBvh {
             nodes: Vec::with_capacity(primitive_info.len().saturating_mul(2).saturating_sub(1)),
             indices: (0..primitive_info.len()).collect(),
         };
-        bvh.build_range(primitive_info, leaf_size, 0, primitive_info.len());
+        bvh.build_range(primitive_info, options.leaf_size(), 0, primitive_info.len());
         Some(bvh)
     }
 
@@ -463,6 +504,13 @@ mod tests {
 
     fn unit_bounds() -> Aabb {
         Aabb::new((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+    }
+
+    #[test]
+    fn bvh_build_options_clamps_zero_leaf_size() {
+        assert_eq!(BvhBuildOptions::new().leaf_size(), 4);
+        assert_eq!(BvhBuildOptions::new().with_leaf_size(0).leaf_size(), 1);
+        assert_eq!(BvhBuildOptions::new().with_leaf_size(8).leaf_size(), 8);
     }
 
     fn bounds_entry(ray: Ray, t_min: f64, t_max: f64) -> Option<f64> {

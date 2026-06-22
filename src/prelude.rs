@@ -58,11 +58,17 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        ConstantDensity, ConstantMedium, DensityField, DensityFieldRef, Dielectric, DiffuseLight,
-        DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField, Hittable, HittableLayers,
-        HittableList, Lambertian, LinearColor, MaterialRef, MatrixInstance, Metal,
-        NonUniformMedium, PathTracer, Quad, RayGeometry, RayMaterial, RayScene, RaySceneBuilder,
-        RenderOptions, RotateY, SamplingTargetList, SdfObject, Sphere, SurfaceRayMaterialMapper,
+        BvhBuildOptions, ConstantDensity, ConstantMedium, CurlNoiseField, DensityField,
+        DensityFieldRef, Dielectric, DiffuseLight, DirectLightingMode, DistanceField,
+        DistanceFieldRef, DomainWarpedDensityField, FluidParticle, FnDensityField, FnDistanceField,
+        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
+        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
+        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
+        MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
+        MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField, PathTracer,
+        ProceduralDensityField, ProceduralDensityPreset, Quad, RayGeometry, RayMaterial, RayScene,
+        RaySceneBuilder, RenderOptions, RotateY, SamplingTargetList, SdfObject, Sphere,
+        SplatKernel, StableFluidEmitter, StableFluidGrid2, SurfaceRayMaterialMapper,
         SurfaceRayMaterialMode, Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
     },
 };
@@ -103,13 +109,19 @@ pub mod raster {
 /// Path-tracing cameras, materials, primitives, scenes, volumes, SDFs, and sampling targets.
 pub mod ray {
     pub use super::{
-        AdaptiveSampling, ConstantDensity, ConstantMedium, DensityField, DensityFieldRef,
-        Dielectric, DiffuseLight, DistanceField, DistanceFieldRef, FnDensityField, FnDistanceField,
-        Hittable, HittableLayers, HittableList, Lambertian, LinearColor, MaterialRef,
-        MatrixInstance, Metal, NonUniformMedium, PathTracer, PixelSampleMode, Quad, Ray, RayCamera,
+        AdaptiveSampling, BvhBuildOptions, ConstantDensity, ConstantMedium, CurlNoiseField,
+        DensityField, DensityFieldRef, Dielectric, DiffuseLight, DirectLightingMode, DistanceField,
+        DistanceFieldRef, DomainWarpedDensityField, FluidParticle, FnDensityField, FnDistanceField,
+        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
+        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
+        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
+        MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
+        MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField, PathTracer,
+        PixelSampleMode, ProceduralDensityField, ProceduralDensityPreset, Quad, Ray, RayCamera,
         RayGeometry, RayMaterial, RayScene, RaySceneBuilder, RenderOptions, RotateY, SampleRng,
-        SamplingTargetList, SdfObject, Sphere, SurfaceRayMaterialMapper, SurfaceRayMaterialMode,
-        Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
+        SamplingTargetList, SdfObject, Sphere, SplatKernel, StableFluidEmitter, StableFluidGrid2,
+        SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate, TriangleMesh,
+        WeightedSamplingTargetList, box_object,
     };
 }
 

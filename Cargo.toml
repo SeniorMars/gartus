@@ -107,6 +107,14 @@ required-features = ["external"]
 name = "life"
 path = "examples/raytracing/life.rs"
 
-# [[bench]]
-# name = "derp"
-# harness = false
+[[example]]
+name = "simulated_smoke_volume"
+path = "examples/raytracing/simulated_smoke_volume.rs"
+
+[[example]]
+name = "marching_cubes_sphere"
+path = "examples/raytracing/marching_cubes_sphere.rs"
+
+[[example]]
+name = "liquid_blob_surface"
+path = "examples/raytracing/liquid_blob_surface.rs"

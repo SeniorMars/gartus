@@ -3,7 +3,7 @@
 use super::{
     Aabb, HitRecord, Hittable, Interval, Material, MaterialRef, MatrixInstance, SampleRng,
     SurfaceHit,
-    bvh::{BvhPrimitiveInfo, FlatBvh, RayTraversal},
+    bvh::{BvhBuildOptions, BvhPrimitiveInfo, FlatBvh, RayTraversal},
 };
 #[cfg(feature = "external")]
 use super::{Lambertian, material::default_material, texture::ImageTexture};
@@ -143,11 +143,35 @@ impl TriangleMesh {
         Self::with_shared_material(triangles, Arc::new(material))
     }
 
+    /// Creates a triangle mesh from geometry, material, and explicit BVH build options.
+    #[must_use]
+    pub fn new_with_bvh_options(
+        triangles: Vec<TriangleGeometry>,
+        material: impl Material + 'static,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
+        Self::with_shared_material_and_bvh_options(triangles, Arc::new(material), bvh_options)
+    }
+
     /// Creates a triangle mesh from geometry and a shared material handle.
     #[must_use]
     pub fn with_shared_material(triangles: Vec<TriangleGeometry>, material: MaterialRef) -> Self {
+        Self::with_shared_material_and_bvh_options(triangles, material, BvhBuildOptions::default())
+    }
+
+    /// Creates a triangle mesh from geometry, shared material, and explicit BVH build options.
+    #[must_use]
+    pub fn with_shared_material_and_bvh_options(
+        triangles: Vec<TriangleGeometry>,
+        material: MaterialRef,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
         let triangles = triangles.into_iter().map(MeshTriangle::new).collect();
-        Self::with_mesh_triangles_and_shared_material(triangles, material)
+        Self::with_mesh_triangles_and_shared_material_and_bvh_options(
+            triangles,
+            material,
+            bvh_options,
+        )
     }
 
     /// Creates a triangle mesh from mesh triangles and a shared material handle.
@@ -156,8 +180,22 @@ impl TriangleMesh {
         triangles: Vec<MeshTriangle>,
         material: MaterialRef,
     ) -> Self {
+        Self::with_mesh_triangles_and_shared_material_and_bvh_options(
+            triangles,
+            material,
+            BvhBuildOptions::default(),
+        )
+    }
+
+    /// Creates a triangle mesh from mesh triangles, material, and explicit BVH build options.
+    #[must_use]
+    pub fn with_mesh_triangles_and_shared_material_and_bvh_options(
+        triangles: Vec<MeshTriangle>,
+        material: MaterialRef,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
         let bounds = triangle_bounds_for_slice(&triangles);
-        let bvh = TriangleBvh::build(&triangles);
+        let bvh = TriangleBvh::build(&triangles, bvh_options);
         Self {
             triangles,
             material,
@@ -172,9 +210,33 @@ impl TriangleMesh {
         Self::from_shared_polygon_matrix(mesh, Arc::new(material))
     }
 
+    /// Creates a triangle mesh from a polygon matrix, material, and explicit BVH build options.
+    #[must_use]
+    pub fn from_polygon_matrix_with_bvh_options(
+        mesh: &PolygonMatrix,
+        material: impl Material + 'static,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
+        Self::from_shared_polygon_matrix_with_bvh_options(mesh, Arc::new(material), bvh_options)
+    }
+
     /// Creates a triangle mesh from a polygon matrix and shared material handle.
     #[must_use]
     pub fn from_shared_polygon_matrix(mesh: &PolygonMatrix, material: MaterialRef) -> Self {
+        Self::from_shared_polygon_matrix_with_bvh_options(
+            mesh,
+            material,
+            BvhBuildOptions::default(),
+        )
+    }
+
+    /// Creates a triangle mesh from a polygon matrix, material, and explicit BVH build options.
+    #[must_use]
+    pub fn from_shared_polygon_matrix_with_bvh_options(
+        mesh: &PolygonMatrix,
+        material: MaterialRef,
+        bvh_options: BvhBuildOptions,
+    ) -> Self {
         let triangles = mesh
             .iter_triangles()
             .map(|(p0, p1, p2)| {
@@ -185,7 +247,11 @@ impl TriangleMesh {
                 ))
             })
             .collect();
-        Self::with_mesh_triangles_and_shared_material(triangles, material)
+        Self::with_mesh_triangles_and_shared_material_and_bvh_options(
+            triangles,
+            material,
+            bvh_options,
+        )
     }
 
     /// Creates a triangle mesh from one material mesh group and a shared material handle.
@@ -324,6 +390,12 @@ impl TriangleMesh {
         )
     }
 
+    /// Returns the number of flat BVH nodes when this mesh has a built triangle BVH.
+    #[must_use]
+    pub fn bvh_node_count(&self) -> Option<usize> {
+        self.bvh.as_ref().map(TriangleBvh::node_count)
+    }
+
     /// Creates a matrix instance that shares this mesh through an [`Arc`].
     ///
     /// This is useful when placing many transformed copies of the same imported mesh without
@@ -386,15 +458,17 @@ struct TriangleBvh {
 }
 
 impl TriangleBvh {
-    const LEAF_SIZE: usize = 4;
-
-    fn build(triangles: &[MeshTriangle]) -> Option<Self> {
+    fn build(triangles: &[MeshTriangle], options: BvhBuildOptions) -> Option<Self> {
         let primitive_info = triangles
             .iter()
             .enumerate()
             .map(|(index, triangle)| BvhPrimitiveInfo::new(index, triangle.geometry.bounds()))
             .collect::<Vec<_>>();
-        FlatBvh::build(&primitive_info, Self::LEAF_SIZE).map(|bvh| Self { bvh })
+        FlatBvh::build(&primitive_info, options).map(|bvh| Self { bvh })
+    }
+
+    fn node_count(&self) -> usize {
+        self.bvh.node_count()
     }
 
     fn hit<'a>(

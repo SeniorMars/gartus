@@ -343,6 +343,8 @@ impl Canvas {
             return;
         }
 
+        self.ensure_zbuffer();
+
         let [a, b, c] = vertices;
         let dw0_dx = (b.y - c.y) / denom;
         let dw0_dy = (c.x - b.x) / denom;

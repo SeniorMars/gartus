@@ -2,7 +2,7 @@
 
 use super::{
     HitRecord, LinearColor, MaterialPdf, PI, SpherePdf,
-    pdf::CosinePdf,
+    pdf::{CosinePdf, HenyeyGreensteinPdf, Pdf},
     rgb_to_linear_color,
     texture::{CheckerTexture, NoiseTexture, SolidColor, TextureRef},
 };
@@ -66,12 +66,42 @@ pub trait Material: Send + Sync {
     }
 }
 
+#[derive(Clone, Debug)]
+enum MaterialColorSource {
+    Constant(SolidColor),
+    Texture(TextureRef),
+}
+
+impl MaterialColorSource {
+    fn constant(color: LinearColor) -> Self {
+        Self::Constant(SolidColor::new(color))
+    }
+
+    fn texture(texture: TextureRef) -> Self {
+        Self::Texture(texture)
+    }
+
+    fn sample(&self, sample: TextureSample) -> LinearColor {
+        match self {
+            Self::Constant(color) => color.color,
+            Self::Texture(texture) => texture.sample_linear(sample),
+        }
+    }
+
+    fn surface_texture(&self) -> &dyn SurfaceTexture {
+        match self {
+            Self::Constant(color) => color,
+            Self::Texture(texture) => texture.as_ref(),
+        }
+    }
+}
+
 /// Lambertian diffuse material.
 #[derive(Clone)]
 pub struct Lambertian {
     /// Representative diffuse reflectance for constant-color compatibility.
     pub albedo: LinearColor,
-    texture: TextureRef,
+    color: MaterialColorSource,
 }
 
 impl fmt::Debug for Lambertian {
@@ -79,7 +109,7 @@ impl fmt::Debug for Lambertian {
         formatter
             .debug_struct("Lambertian")
             .field("albedo", &self.albedo)
-            .field("texture", &self.texture)
+            .field("color", &self.color)
             .finish()
     }
 }
@@ -95,7 +125,7 @@ impl Lambertian {
         assert!(albedo.is_finite(), "Lambertian albedo must be finite");
         Self {
             albedo,
-            texture: Arc::new(SolidColor::new(albedo)),
+            color: MaterialColorSource::constant(albedo),
         }
     }
 
@@ -104,7 +134,7 @@ impl Lambertian {
     pub fn try_new(albedo: LinearColor) -> Option<Self> {
         albedo.is_finite().then(|| Self {
             albedo,
-            texture: Arc::new(SolidColor::new(albedo)),
+            color: MaterialColorSource::constant(albedo),
         })
     }
 
@@ -113,7 +143,7 @@ impl Lambertian {
     pub fn from_shared_texture(texture: TextureRef) -> Self {
         Self {
             albedo: LinearColor::new(0.5, 0.5, 0.5),
-            texture,
+            color: MaterialColorSource::texture(texture),
         }
     }
 
@@ -144,7 +174,7 @@ impl Lambertian {
     /// Returns the texture sampled for diffuse attenuation.
     #[must_use]
     pub fn texture(&self) -> &dyn SurfaceTexture {
-        self.texture.as_ref()
+        self.color.surface_texture()
     }
 
     /// Creates a Lambertian material from display RGB bytes.
@@ -205,8 +235,8 @@ impl Material for Lambertian {
 
         Some(ScatterRecord::Scattering {
             attenuation: self
-                .texture
-                .sample_linear(TextureSample::new(hit.u, hit.v, hit.point)),
+                .color
+                .sample(TextureSample::new(hit.u, hit.v, hit.point)),
             pdf: MaterialPdf::Cosine(pdf),
         })
     }
@@ -224,7 +254,7 @@ impl Material for Lambertian {
 /// Diffuse light-emitting material.
 #[derive(Clone, Debug)]
 pub struct DiffuseLight {
-    texture: TextureRef,
+    color: MaterialColorSource,
 }
 
 impl DiffuseLight {
@@ -236,20 +266,25 @@ impl DiffuseLight {
     #[must_use]
     pub fn new(emit: LinearColor) -> Self {
         assert!(emit.is_finite(), "diffuse light color must be finite");
-        Self::from_texture(SolidColor::new(emit))
+        Self {
+            color: MaterialColorSource::constant(emit),
+        }
     }
 
     /// Creates a light material only when the emitted color is finite.
     #[must_use]
     pub fn try_new(emit: LinearColor) -> Option<Self> {
-        emit.is_finite()
-            .then(|| Self::from_texture(SolidColor::new(emit)))
+        emit.is_finite().then(|| Self {
+            color: MaterialColorSource::constant(emit),
+        })
     }
 
     /// Creates a light material from a shared texture.
     #[must_use]
     pub fn from_shared_texture(texture: TextureRef) -> Self {
-        Self { texture }
+        Self {
+            color: MaterialColorSource::texture(texture),
+        }
     }
 
     /// Creates a light material from a texture object.
@@ -261,7 +296,7 @@ impl DiffuseLight {
     /// Returns the texture sampled for emitted radiance.
     #[must_use]
     pub fn texture(&self) -> &dyn SurfaceTexture {
-        self.texture.as_ref()
+        self.color.surface_texture()
     }
 }
 
@@ -275,7 +310,7 @@ impl Material for DiffuseLight {
         point: Point,
     ) -> LinearColor {
         if hit.front_face {
-            self.texture.sample_linear(TextureSample::new(u, v, point))
+            self.color.sample(TextureSample::new(u, v, point))
         } else {
             LinearColor::default()
         }
@@ -285,7 +320,7 @@ impl Material for DiffuseLight {
 /// Isotropic phase-function material for constant-density volumes.
 #[derive(Clone, Debug)]
 pub struct Isotropic {
-    texture: TextureRef,
+    color: MaterialColorSource,
 }
 
 impl Isotropic {
@@ -297,21 +332,25 @@ impl Isotropic {
     #[must_use]
     pub fn new(albedo: LinearColor) -> Self {
         assert!(albedo.is_finite(), "isotropic albedo must be finite");
-        Self::from_texture(SolidColor::new(albedo))
+        Self {
+            color: MaterialColorSource::constant(albedo),
+        }
     }
 
     /// Creates an isotropic material only when `albedo` is finite.
     #[must_use]
     pub fn try_new(albedo: LinearColor) -> Option<Self> {
-        albedo
-            .is_finite()
-            .then(|| Self::from_texture(SolidColor::new(albedo)))
+        albedo.is_finite().then(|| Self {
+            color: MaterialColorSource::constant(albedo),
+        })
     }
 
     /// Creates an isotropic material from a shared texture.
     #[must_use]
     pub fn from_shared_texture(texture: TextureRef) -> Self {
-        Self { texture }
+        Self {
+            color: MaterialColorSource::texture(texture),
+        }
     }
 
     /// Creates an isotropic material from a texture object.
@@ -323,7 +362,7 @@ impl Isotropic {
     /// Returns the texture sampled for medium attenuation.
     #[must_use]
     pub fn texture(&self) -> &dyn SurfaceTexture {
-        self.texture.as_ref()
+        self.color.surface_texture()
     }
 }
 
@@ -336,8 +375,8 @@ impl Material for Isotropic {
     ) -> Option<ScatterRecord> {
         Some(ScatterRecord::Scattering {
             attenuation: self
-                .texture
-                .sample_linear(TextureSample::new(hit.u, hit.v, hit.point)),
+                .color
+                .sample(TextureSample::new(hit.u, hit.v, hit.point)),
             pdf: MaterialPdf::Sphere(SpherePdf),
         })
     }
@@ -345,6 +384,116 @@ impl Material for Isotropic {
     fn scattering_pdf(&self, _ray_in: &Ray, _hit: &HitRecord<'_>, _scattered: &Ray) -> f64 {
         1.0 / (4.0 * PI)
     }
+}
+
+/// Henyey-Greenstein anisotropic phase-function material for volumes.
+#[derive(Clone, Debug)]
+pub struct HenyeyGreenstein {
+    color: MaterialColorSource,
+    g: f64,
+}
+
+impl HenyeyGreenstein {
+    /// Creates an anisotropic phase-function material with constant attenuation.
+    ///
+    /// Positive `g` values favor forward scattering, negative values favor back scattering, and
+    /// zero matches isotropic scattering.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any albedo channel is not finite or if `g` is outside `(-1.0, 1.0)`.
+    #[must_use]
+    pub fn new(albedo: LinearColor, g: f64) -> Self {
+        assert!(
+            albedo.is_finite(),
+            "Henyey-Greenstein albedo must be finite"
+        );
+        validate_henyey_greenstein_g(g);
+        Self {
+            color: MaterialColorSource::constant(albedo),
+            g,
+        }
+    }
+
+    /// Creates an anisotropic phase-function material only when its inputs are valid.
+    #[must_use]
+    pub fn try_new(albedo: LinearColor, g: f64) -> Option<Self> {
+        (albedo.is_finite() && is_valid_henyey_greenstein_g(g)).then(|| Self {
+            color: MaterialColorSource::constant(albedo),
+            g,
+        })
+    }
+
+    /// Creates an anisotropic phase-function material from a shared texture.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `g` is outside `(-1.0, 1.0)`.
+    #[must_use]
+    pub fn from_shared_texture(texture: TextureRef, g: f64) -> Self {
+        validate_henyey_greenstein_g(g);
+        Self {
+            color: MaterialColorSource::texture(texture),
+            g,
+        }
+    }
+
+    /// Creates an anisotropic phase-function material from a texture object.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `g` is outside `(-1.0, 1.0)`.
+    #[must_use]
+    pub fn from_texture(texture: impl SurfaceTexture + 'static, g: f64) -> Self {
+        Self::from_shared_texture(Arc::new(texture), g)
+    }
+
+    /// Returns the texture sampled for medium attenuation.
+    #[must_use]
+    pub fn texture(&self) -> &dyn SurfaceTexture {
+        self.color.surface_texture()
+    }
+
+    /// Returns the anisotropy parameter.
+    #[must_use]
+    pub const fn anisotropy(&self) -> f64 {
+        self.g
+    }
+}
+
+impl Material for HenyeyGreenstein {
+    fn scatter(
+        &self,
+        ray_in: &Ray,
+        hit: &HitRecord<'_>,
+        _rng: &mut SampleRng,
+    ) -> Option<ScatterRecord> {
+        let pdf = HenyeyGreensteinPdf::new(*ray_in.direction(), self.g)?;
+        Some(ScatterRecord::Scattering {
+            attenuation: self
+                .color
+                .sample(TextureSample::new(hit.u, hit.v, hit.point)),
+            pdf: MaterialPdf::HenyeyGreenstein(pdf),
+        })
+    }
+
+    fn scattering_pdf(&self, ray_in: &Ray, _hit: &HitRecord<'_>, scattered: &Ray) -> f64 {
+        let Some(pdf) = HenyeyGreensteinPdf::new(*ray_in.direction(), self.g) else {
+            return 0.0;
+        };
+        pdf.value(*scattered.direction())
+    }
+}
+
+fn is_valid_henyey_greenstein_g(g: f64) -> bool {
+    g.is_finite() && g.abs() < 1.0
+}
+
+fn validate_henyey_greenstein_g(g: f64) {
+    assert!(
+        is_valid_henyey_greenstein_g(g),
+        "Henyey-Greenstein anisotropy must be finite and in (-1, 1)"
+    );
 }
 
 /// Reflective metal material.
@@ -560,6 +709,8 @@ pub enum RayMaterial {
     DiffuseLight(DiffuseLight),
     /// Isotropic phase-function material.
     Isotropic(Isotropic),
+    /// Henyey-Greenstein anisotropic phase-function material.
+    HenyeyGreenstein(HenyeyGreenstein),
     /// Reflective metal material.
     Metal(Metal),
     /// Transparent dielectric material.
@@ -601,6 +752,18 @@ impl RayMaterial {
     #[must_use]
     pub fn textured_isotropic(texture: impl SurfaceTexture + 'static) -> Self {
         Self::Isotropic(Isotropic::from_texture(texture))
+    }
+
+    /// Creates a Henyey-Greenstein phase-function material variant.
+    #[must_use]
+    pub fn henyey_greenstein(albedo: LinearColor, g: f64) -> Self {
+        Self::HenyeyGreenstein(HenyeyGreenstein::new(albedo, g))
+    }
+
+    /// Creates a textured Henyey-Greenstein phase-function material variant.
+    #[must_use]
+    pub fn textured_henyey_greenstein(texture: impl SurfaceTexture + 'static, g: f64) -> Self {
+        Self::HenyeyGreenstein(HenyeyGreenstein::from_texture(texture, g))
     }
 
     /// Creates a metal material variant.
@@ -648,13 +811,16 @@ impl RayMaterial {
     /// Returns true for volume phase-function material variants.
     #[must_use]
     pub const fn is_volume_phase(&self) -> bool {
-        matches!(self, Self::Isotropic(_))
+        matches!(self, Self::Isotropic(_) | Self::HenyeyGreenstein(_))
     }
 
     /// Returns true for materials that provide explicit PDF-sampled scattering.
     #[must_use]
     pub const fn has_pdf_scatter(&self) -> bool {
-        matches!(self, Self::Lambertian(_) | Self::Isotropic(_))
+        matches!(
+            self,
+            Self::Lambertian(_) | Self::Isotropic(_) | Self::HenyeyGreenstein(_)
+        )
     }
 }
 
@@ -673,6 +839,12 @@ impl From<DiffuseLight> for RayMaterial {
 impl From<Isotropic> for RayMaterial {
     fn from(material: Isotropic) -> Self {
         Self::Isotropic(material)
+    }
+}
+
+impl From<HenyeyGreenstein> for RayMaterial {
+    fn from(material: HenyeyGreenstein) -> Self {
+        Self::HenyeyGreenstein(material)
     }
 }
 
@@ -701,6 +873,7 @@ impl Material for RayMaterial {
             Self::Lambertian(material) => material.emitted(ray_in, hit, u, v, point),
             Self::DiffuseLight(material) => material.emitted(ray_in, hit, u, v, point),
             Self::Isotropic(material) => material.emitted(ray_in, hit, u, v, point),
+            Self::HenyeyGreenstein(material) => material.emitted(ray_in, hit, u, v, point),
             Self::Metal(material) => material.emitted(ray_in, hit, u, v, point),
             Self::Dielectric(material) => material.emitted(ray_in, hit, u, v, point),
         }
@@ -716,6 +889,7 @@ impl Material for RayMaterial {
             Self::Lambertian(material) => material.scatter(ray_in, hit, rng),
             Self::DiffuseLight(material) => material.scatter(ray_in, hit, rng),
             Self::Isotropic(material) => material.scatter(ray_in, hit, rng),
+            Self::HenyeyGreenstein(material) => material.scatter(ray_in, hit, rng),
             Self::Metal(material) => material.scatter(ray_in, hit, rng),
             Self::Dielectric(material) => material.scatter(ray_in, hit, rng),
         }
@@ -726,6 +900,7 @@ impl Material for RayMaterial {
             Self::Lambertian(material) => material.scattering_pdf(ray_in, hit, scattered),
             Self::DiffuseLight(material) => material.scattering_pdf(ray_in, hit, scattered),
             Self::Isotropic(material) => material.scattering_pdf(ray_in, hit, scattered),
+            Self::HenyeyGreenstein(material) => material.scattering_pdf(ray_in, hit, scattered),
             Self::Metal(material) => material.scattering_pdf(ray_in, hit, scattered),
             Self::Dielectric(material) => material.scattering_pdf(ray_in, hit, scattered),
         }
@@ -742,6 +917,7 @@ pub(crate) fn default_material() -> MaterialRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gmath::vector::Vector;
 
     #[test]
     fn checked_material_constructors_reject_non_finite_values() {
@@ -751,11 +927,36 @@ mod tests {
         assert!(Lambertian::try_new(finite).is_some());
         assert!(DiffuseLight::try_new(finite).is_some());
         assert!(Isotropic::try_new(finite).is_some());
+        assert!(HenyeyGreenstein::try_new(finite, 0.5).is_some());
         assert!(Lambertian::try_new(invalid).is_none());
         assert!(DiffuseLight::try_new(invalid).is_none());
         assert!(Isotropic::try_new(invalid).is_none());
+        assert!(HenyeyGreenstein::try_new(invalid, 0.5).is_none());
+        assert!(HenyeyGreenstein::try_new(finite, 1.0).is_none());
         assert!(Metal::try_new(finite, f64::NAN).is_none());
         assert!(Metal::try_new(invalid, 0.2).is_none());
+    }
+
+    #[test]
+    fn constant_material_texture_accessors_sample_expected_color() {
+        let color = LinearColor::new(0.2, 0.3, 0.4);
+        let sample = TextureSample::new(0.25, 0.75, Point::new(1.0, 2.0, 3.0));
+
+        assert_eq!(
+            Lambertian::new(color).texture().sample_linear(sample),
+            color
+        );
+        assert_eq!(
+            DiffuseLight::new(color).texture().sample_linear(sample),
+            color
+        );
+        assert_eq!(Isotropic::new(color).texture().sample_linear(sample), color);
+        assert_eq!(
+            HenyeyGreenstein::new(color, 0.4)
+                .texture()
+                .sample_linear(sample),
+            color
+        );
     }
 
     #[test]
@@ -771,10 +972,62 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Henyey-Greenstein anisotropy must be finite and in (-1, 1)")]
+    fn henyey_greenstein_constructor_rejects_invalid_anisotropy() {
+        let _ = HenyeyGreenstein::new(LinearColor::new(0.2, 0.3, 0.4), 1.0);
+    }
+
+    #[test]
+    fn henyey_greenstein_scatter_uses_phase_pdf_and_texture_attenuation() {
+        let material = HenyeyGreenstein::new(LinearColor::new(0.25, 0.5, 0.75), 0.65);
+        let ray = Ray::with_time(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0), 0.5);
+        let hit = HitRecord {
+            point: Point::new(0.0, 0.0, -1.0),
+            normal: Vector::new(1.0, 0.0, 0.0),
+            geometric_normal: Vector::new(1.0, 0.0, 0.0),
+            shading_normal: Vector::new(1.0, 0.0, 0.0),
+            t: 1.0,
+            u: 0.0,
+            v: 0.0,
+            front_face: true,
+            material: &material,
+        };
+        let mut rng = SampleRng::new(43);
+
+        let scatter = material
+            .scatter(&ray, &hit, &mut rng)
+            .expect("Henyey-Greenstein medium should scatter");
+
+        assert_eq!(
+            scatter,
+            ScatterRecord::Scattering {
+                attenuation: LinearColor::new(0.25, 0.5, 0.75),
+                pdf: MaterialPdf::HenyeyGreenstein(
+                    HenyeyGreensteinPdf::new(Vector::new(0.0, 0.0, -1.0), 0.65)
+                        .expect("ray should create pdf")
+                )
+            }
+        );
+        assert!(
+            material.scattering_pdf(
+                &ray,
+                &hit,
+                &Ray::new(hit.point, Vector::new(0.0, 0.0, -1.0))
+            ) > material.scattering_pdf(
+                &ray,
+                &hit,
+                &Ray::new(hit.point, Vector::new(0.0, 0.0, 1.0))
+            )
+        );
+    }
+
+    #[test]
     fn ray_material_flags_describe_scattering_behavior() {
         let lambertian = RayMaterial::lambertian(LinearColor::new(0.2, 0.3, 0.4));
         let light = RayMaterial::diffuse_light(LinearColor::new(3.0, 2.0, 1.0));
         let isotropic = RayMaterial::isotropic(LinearColor::new(0.5, 0.5, 0.5));
+        let henyey_greenstein =
+            RayMaterial::henyey_greenstein(LinearColor::new(0.5, 0.5, 0.5), 0.4);
         let metal = RayMaterial::metal(LinearColor::new(0.7, 0.6, 0.5), 0.1);
         let dielectric = RayMaterial::dielectric(RefractiveIndex::GLASS);
 
@@ -785,6 +1038,8 @@ mod tests {
         assert!(!light.has_pdf_scatter());
         assert!(isotropic.has_pdf_scatter());
         assert!(isotropic.is_volume_phase());
+        assert!(henyey_greenstein.has_pdf_scatter());
+        assert!(henyey_greenstein.is_volume_phase());
         assert!(metal.is_delta());
         assert!(dielectric.is_delta());
         assert!(!metal.has_pdf_scatter());

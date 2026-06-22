@@ -47,5 +47,6 @@ Cargo.lock
 *.ppm
 *.png
 *.jpg
+/final/raytracing/cache/
 /doc
 /gifs

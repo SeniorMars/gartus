@@ -186,6 +186,23 @@ let image = PathTracer::new(camera).render(&world);
 - `DensityField` and `NonUniformMedium` support spatially varying fog, dust,
   clouds, nebulae, and animated density fields.
 - `FnDensityField` makes small procedural fields easy to write inline.
+- `ProceduralDensityField` provides smoke, mist, plasma, nebula, and underwater
+  density presets with seed, scale, speed, and majorant controls.
+- `DomainWarpedDensityField` and `CurlNoiseField` add curl-noise coordinate
+  warping for swirling smoke and current-like motion.
+- `GridDensityField` stores baked or imported voxel densities in compact `f32`
+  grids with nearest or trilinear interpolation, raw save/load helpers, and a
+  metadata-backed grid format for dims, bounds, interpolation, and frame index.
+- `ParticleSplatField` turns particles into accelerated density splats for
+  blobs, spray, foam, and particle smoke.
+- `StableFluidGrid2` simulates 2D smoke density with emitter, wind, buoyancy,
+  impulse, vorticity, and obstacle helpers, then exports thick 3D density grids
+  with depth falloff for volume rendering.
+- `MacFluidGrid2` and `MacFluidGrid3` provide staggered-grid smoke solvers with
+  face velocities, SDF obstacles, CFL stepping, pressure projection diagnostics,
+  and density/temperature/fuel exports.
+- `MarchingCubes` extracts triangle surfaces from density grids, and
+  `LiquidSurface` bakes particle splats into a liquid-like triangle mesh.
 
 Non-uniform media use Woodcock/delta tracking against the field's maximum
 density, so empty or low-density regions do not need to be explicitly meshed.
@@ -203,6 +220,93 @@ let medium = NonUniformMedium::new(
     dust,
     LinearColor::new(0.8, 0.65, 0.45),
 );
+
+let smoke = ProceduralDensityField::smoke()
+    .with_seed(42)
+    .with_scale(1.8)
+    .with_speed(0.6)
+    .with_max_density(0.35);
+
+let smoke_medium = NonUniformMedium::new(
+    Sphere::new(Point::new(0.0, 1.0, 0.0), 3.0),
+    smoke,
+    LinearColor::new(0.8, 0.85, 0.9),
+);
+
+let curl_smoke = ProceduralDensityField::smoke()
+    .with_seed(10)
+    .with_max_density(0.4)
+    .domain_warped()
+    .with_warp_seed(99)
+    .with_warp_strength(0.8)
+    .with_warp_scale(1.4)
+    .with_warp_speed(0.5);
+
+let baked = GridDensityField::from_density_field(
+    GridBounds::new(Point::new(-2.0, -2.0, -2.0), Point::new(2.0, 2.0, 2.0)),
+    [64, 64, 64],
+    &curl_smoke,
+    0.5,
+)
+.with_interpolation(GridInterpolation::Trilinear);
+
+let particles = vec![
+    FluidParticle::new(Point::new(0.0, 1.0, 0.0), 0.25, 0.9),
+    FluidParticle::new(Point::new(0.2, 1.1, 0.1), 0.20, 0.7),
+];
+
+let splats = ParticleSplatField::new(particles.clone())
+    .with_kernel(SplatKernel::Poly6)
+    .with_max_density(2.0);
+
+let mut sim = StableFluidGrid2::new([128, 128])
+    .with_dt(1.0 / 60.0)
+    .with_diffusion(0.0001)
+    .with_viscosity(0.00001);
+
+for _ in 0..60 {
+    sim.apply_emitter(
+        StableFluidEmitter::new([64.0, 32.0], 8.0)
+            .with_density(10.0)
+            .with_velocity([0.0, 20.0]),
+    );
+    sim.apply_buoyancy(0.25);
+    sim.apply_vorticity_confinement(2.0);
+    sim.step();
+}
+
+let simulated_smoke = sim.to_density_volume(
+    GridBounds::new(Point::new(-2.0, 0.0, -2.0), Point::new(2.0, 0.5, 2.0)),
+    24,
+    0.75,
+);
+
+let surface = MarchingCubes::new()
+    .with_iso_value(0.5)
+    .extract(&baked);
+
+let liquid = LiquidSurface::from_particles(particles)
+    .with_resolution([64, 64, 64])
+    .with_iso_value(0.35)
+    .build_triangle_mesh();
+```
+
+The stable-fluid examples are:
+
+```text
+cargo run --example stable_fluid_2d
+cargo run --example raytracing_stable_fluid_smoke
+cargo run --example simulated_smoke_volume
+cargo run --example marching_cubes_sphere
+cargo run --example liquid_blob_surface
+```
+
+`simulated_smoke_volume` caches metadata-backed `GridDensityField` frames under
+`final/raytracing/cache/stable_fluid/` before rendering one through
+`NonUniformMedium`. The solver benchmark is dependency-free and can be run with:
+
+```text
+cargo bench --bench stable_fluid
 ```
 
 ### Signed Distance Fields
