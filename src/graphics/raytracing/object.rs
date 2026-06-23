@@ -366,6 +366,12 @@ pub struct HitRecord<'a> {
     pub geometric_normal: Vector,
     /// Unit-length shading normal, always oriented against the incident ray.
     pub shading_normal: Vector,
+    /// Optional tangent vector for tangent-space shading, oriented around [`Self::shading_normal`].
+    pub tangent: Option<Vector>,
+    /// Optional bitangent vector for tangent-space shading, oriented around [`Self::shading_normal`].
+    pub bitangent: Option<Vector>,
+    /// Tangent-space handedness. `-1.0` marks mirrored UV orientation.
+    pub tangent_handedness: f64,
     /// Ray parameter at the hit point.
     pub t: f64,
     /// Horizontal texture coordinate at the hit point.
@@ -386,6 +392,9 @@ impl fmt::Debug for HitRecord<'_> {
             .field("normal", &self.normal)
             .field("geometric_normal", &self.geometric_normal)
             .field("shading_normal", &self.shading_normal)
+            .field("tangent", &self.tangent)
+            .field("bitangent", &self.bitangent)
+            .field("tangent_handedness", &self.tangent_handedness)
             .field("t", &self.t)
             .field("u", &self.u)
             .field("v", &self.v)
@@ -429,6 +438,9 @@ impl<'a> HitRecord<'a> {
             normal: surface.normal,
             geometric_normal: surface.normal,
             shading_normal: surface.normal,
+            tangent: None,
+            bitangent: None,
+            tangent_handedness: 1.0,
             t: surface.t,
             u: surface.u,
             v: surface.v,
@@ -449,6 +461,9 @@ impl<'a> HitRecord<'a> {
         };
         self.geometric_normal = self.normal;
         self.shading_normal = self.normal;
+        self.tangent = None;
+        self.bitangent = None;
+        self.tangent_handedness = 1.0;
     }
 
     /// Replaces the shading normal while preserving geometric front-face state.
@@ -458,6 +473,47 @@ impl<'a> HitRecord<'a> {
         } else {
             -outward_normal
         };
+        self.tangent = None;
+        self.bitangent = None;
+        self.tangent_handedness = 1.0;
+    }
+
+    /// Replaces the shading normal with an already-oriented world-space normal.
+    pub fn set_oriented_shading_normal(&mut self, normal: Vector) {
+        if normal.length_squared() > f64::EPSILON {
+            let tangent_frame = self.tangent.zip(self.bitangent);
+            self.shading_normal = normal.normalized();
+            self.tangent = None;
+            self.bitangent = None;
+            self.tangent_handedness = 1.0;
+            if let Some((tangent, bitangent)) = tangent_frame {
+                self.set_tangent_frame(tangent, bitangent);
+            }
+        }
+    }
+
+    /// Stores a tangent frame orthonormalized around the current shading normal.
+    pub fn set_tangent_frame(&mut self, tangent: Vector, bitangent: Vector) {
+        let normal = self.shading_normal;
+        let tangent = tangent - normal * tangent.dot(normal);
+        if tangent.length_squared() <= f64::EPSILON {
+            return;
+        }
+        let tangent = tangent.normalized();
+        let reference_bitangent = normal.cross(tangent);
+        let mut bitangent = bitangent - normal * bitangent.dot(normal);
+        bitangent = bitangent - tangent * bitangent.dot(tangent);
+        if bitangent.length_squared() <= f64::EPSILON {
+            bitangent = reference_bitangent;
+        }
+        let handedness = if bitangent.dot(reference_bitangent) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        self.tangent = Some(tangent);
+        self.bitangent = Some((reference_bitangent * handedness).normalized());
+        self.tangent_handedness = handedness;
     }
 }
 

@@ -9,6 +9,7 @@ use super::{geometry::OrthonormalBasis, random::SampleRng, vector::Vector};
 
 const SPHERE_AREA: f64 = 4.0 * std::f64::consts::PI;
 const HG_ISOTROPIC_EPSILON: f64 = 1e-3;
+const GGX_MIN_ALPHA: f64 = 1.0e-4;
 
 /// Direction-sampling probability density function over solid angle.
 ///
@@ -162,6 +163,162 @@ impl Pdf for HenyeyGreensteinPdf {
             cosine_theta,
         ))
     }
+}
+
+/// GGX/Trowbridge-Reitz microfacet reflection distribution for one outgoing direction.
+///
+/// This samples half-vectors from the GGX normal distribution function and reflects the outgoing
+/// direction about the sampled half-vector. The resulting PDF is over reflected directions in
+/// solid angle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GgxReflectionPdf {
+    basis: OrthonormalBasis,
+    outgoing: Vector,
+    roughness: f64,
+    alpha: f64,
+}
+
+impl GgxReflectionPdf {
+    /// Creates a GGX reflection PDF around `normal` for a unit outgoing direction.
+    ///
+    /// Returns `None` when the normal cannot form a basis or when `outgoing` is below the surface.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `roughness` is not finite.
+    #[must_use]
+    pub fn new(normal: Vector, outgoing: Vector, roughness: f64) -> Option<Self> {
+        assert!(roughness.is_finite(), "GGX roughness must be finite");
+        let basis = OrthonormalBasis::from_w(normal)?;
+        let outgoing = outgoing.normalized();
+        if outgoing.length_squared() <= f64::EPSILON || outgoing.dot(basis.w()) <= 0.0 {
+            return None;
+        }
+        let roughness = roughness.clamp(0.0, 1.0);
+        let alpha = ggx_alpha_from_roughness(roughness);
+        Some(Self {
+            basis,
+            outgoing,
+            roughness,
+            alpha,
+        })
+    }
+
+    /// Returns the basis used by this PDF.
+    #[must_use]
+    pub const fn basis(self) -> OrthonormalBasis {
+        self.basis
+    }
+
+    /// Returns the unit outgoing direction.
+    #[must_use]
+    pub const fn outgoing(self) -> Vector {
+        self.outgoing
+    }
+
+    /// Returns the perceptual roughness in `0.0..=1.0`.
+    #[must_use]
+    pub const fn roughness(self) -> f64 {
+        self.roughness
+    }
+
+    /// Returns the squared roughness used by the GGX distribution.
+    #[must_use]
+    pub const fn alpha(self) -> f64 {
+        self.alpha
+    }
+
+    /// Evaluates the GGX/Trowbridge-Reitz normal distribution function.
+    #[must_use]
+    pub fn normal_distribution(normal_dot_half: f64, roughness: f64) -> f64 {
+        if !normal_dot_half.is_finite() || normal_dot_half <= 0.0 || !roughness.is_finite() {
+            return 0.0;
+        }
+        let alpha = ggx_alpha_from_roughness(roughness);
+        let alpha2 = alpha * alpha;
+        let cos2 = normal_dot_half * normal_dot_half;
+        let denominator = cos2 * (alpha2 - 1.0) + 1.0;
+        if denominator <= f64::EPSILON {
+            return 0.0;
+        }
+        alpha2 / (std::f64::consts::PI * denominator * denominator)
+    }
+
+    /// Evaluates the Smith masking-shadowing factor for GGX.
+    #[must_use]
+    pub fn smith_masking_shadowing(
+        normal_dot_incoming: f64,
+        normal_dot_outgoing: f64,
+        roughness: f64,
+    ) -> f64 {
+        smith_g1(normal_dot_incoming, roughness) * smith_g1(normal_dot_outgoing, roughness)
+    }
+
+    /// Returns Schlick's Fresnel approximation as a scalar reflectance.
+    #[must_use]
+    pub fn schlick_fresnel(cosine: f64, f0: f64) -> f64 {
+        if !cosine.is_finite() || !f0.is_finite() {
+            return 0.0;
+        }
+        let f0 = f0.clamp(0.0, 1.0);
+        f0 + (1.0 - f0) * (1.0 - cosine.clamp(0.0, 1.0)).powi(5)
+    }
+
+    fn half_vector_pdf(&self, half: Vector) -> f64 {
+        let normal_dot_half = half.dot(self.basis.w());
+        Self::normal_distribution(normal_dot_half, self.roughness) * normal_dot_half.max(0.0)
+    }
+}
+
+impl Pdf for GgxReflectionPdf {
+    fn value(&self, direction: Vector) -> f64 {
+        let incoming = direction.normalized();
+        if incoming.length_squared() <= f64::EPSILON || incoming.dot(self.basis.w()) <= 0.0 {
+            return 0.0;
+        }
+        let half = (incoming + self.outgoing).normalized();
+        let outgoing_dot_half = self.outgoing.dot(half);
+        if half.length_squared() <= f64::EPSILON || outgoing_dot_half <= f64::EPSILON {
+            return 0.0;
+        }
+        self.half_vector_pdf(half) / (4.0 * outgoing_dot_half.abs())
+    }
+
+    fn generate(&self, rng: &mut SampleRng) -> Vector {
+        let r1 = rng.random_double();
+        let r2 = rng.random_double();
+        let phi = 2.0 * std::f64::consts::PI * r1;
+        let alpha2 = self.alpha * self.alpha;
+        let clamped_r2 = r2.min(1.0 - f64::EPSILON);
+        let tan2_theta = alpha2 * clamped_r2 / (1.0 - clamped_r2);
+        let cos_theta = 1.0 / (1.0 + tan2_theta).sqrt();
+        let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+        let half = self.basis.local(Vector::new(
+            phi.cos() * sin_theta,
+            phi.sin() * sin_theta,
+            cos_theta,
+        ));
+        let reflected = (-self.outgoing).reflected(half.normalized());
+        if reflected.dot(self.basis.w()) > 0.0 {
+            reflected
+        } else {
+            self.outgoing
+        }
+    }
+}
+
+fn ggx_alpha_from_roughness(roughness: f64) -> f64 {
+    roughness.clamp(0.0, 1.0).powi(2).max(GGX_MIN_ALPHA)
+}
+
+fn smith_g1(normal_dot_direction: f64, roughness: f64) -> f64 {
+    if !normal_dot_direction.is_finite() || normal_dot_direction <= 0.0 || !roughness.is_finite() {
+        return 0.0;
+    }
+    let alpha = ggx_alpha_from_roughness(roughness);
+    let alpha2 = alpha * alpha;
+    let cos2 = normal_dot_direction * normal_dot_direction;
+    2.0 * normal_dot_direction / (normal_dot_direction + (alpha2 + (1.0 - alpha2) * cos2).sqrt())
 }
 
 /// Weighted mixture of two PDFs.
@@ -355,6 +512,44 @@ mod tests {
         }
 
         assert_within(cosine_sum / f64::from(samples), g, 0.035);
+    }
+
+    #[test]
+    fn ggx_reflection_pdf_evaluates_normal_reflection() {
+        let normal = Vector::new(0.0, 0.0, 1.0);
+        let pdf = GgxReflectionPdf::new(normal, normal, 1.0).expect("basis should be valid");
+
+        assert_close(pdf.value(normal), 1.0 / (4.0 * std::f64::consts::PI));
+        assert_close(pdf.value(Vector::new(0.0, 0.0, -1.0)), 0.0);
+    }
+
+    #[test]
+    fn ggx_distribution_smith_and_schlick_are_well_behaved() {
+        assert!(
+            GgxReflectionPdf::normal_distribution(1.0, 0.2)
+                > GgxReflectionPdf::normal_distribution(1.0, 0.8)
+        );
+        assert_close(
+            GgxReflectionPdf::smith_masking_shadowing(1.0, 1.0, 0.5),
+            1.0,
+        );
+        assert_close(GgxReflectionPdf::schlick_fresnel(1.0, 0.04), 0.04);
+        assert_close(GgxReflectionPdf::schlick_fresnel(0.0, 0.04), 1.0);
+    }
+
+    #[test]
+    fn ggx_reflection_pdf_samples_above_surface() {
+        let normal = Vector::new(0.0, 0.0, 1.0);
+        let pdf = GgxReflectionPdf::new(normal, normal, 0.45).expect("basis should be valid");
+        let mut rng = SampleRng::new(109);
+
+        for _ in 0..64 {
+            let sample = pdf.generate(&mut rng);
+            assert_within(sample.length(), 1.0, 1e-12);
+            assert!(sample.dot(normal) > 0.0);
+            assert!(pdf.value(sample).is_finite());
+            assert!(pdf.value(sample) > 0.0);
+        }
     }
 
     #[test]

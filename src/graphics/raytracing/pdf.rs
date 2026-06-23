@@ -1,7 +1,9 @@
 //! Probability density functions for importance-sampled path tracing.
 
 use super::{Hittable, PdfContext};
-pub use crate::gmath::sampling::{CosinePdf, HenyeyGreensteinPdf, MixturePdf, Pdf, SpherePdf};
+pub use crate::gmath::sampling::{
+    CosinePdf, GgxReflectionPdf, HenyeyGreensteinPdf, MixturePdf, Pdf, SpherePdf,
+};
 use crate::gmath::{random::SampleRng, vector::Vector};
 use std::fmt;
 
@@ -48,6 +50,17 @@ pub enum MaterialPdf {
     Cosine(CosinePdf),
     /// Henyey-Greenstein volume phase-function sampling.
     HenyeyGreenstein(HenyeyGreensteinPdf),
+    /// GGX/Trowbridge-Reitz microfacet reflection sampling.
+    GgxReflection(GgxReflectionPdf),
+    /// Mixture of diffuse cosine and GGX reflection sampling.
+    DiffuseGgx {
+        /// Diffuse cosine-weighted PDF.
+        diffuse: CosinePdf,
+        /// GGX reflection PDF.
+        specular: GgxReflectionPdf,
+        /// Probability of sampling the specular lobe.
+        specular_weight: f64,
+    },
 }
 
 impl Pdf for MaterialPdf {
@@ -56,6 +69,16 @@ impl Pdf for MaterialPdf {
             Self::Sphere(pdf) => pdf.value(direction),
             Self::Cosine(pdf) => pdf.value(direction),
             Self::HenyeyGreenstein(pdf) => pdf.value(direction),
+            Self::GgxReflection(pdf) => pdf.value(direction),
+            Self::DiffuseGgx {
+                diffuse,
+                specular,
+                specular_weight,
+            } => {
+                let specular_weight = (*specular_weight).clamp(0.0, 1.0);
+                (1.0 - specular_weight) * diffuse.value(direction)
+                    + specular_weight * specular.value(direction)
+            }
         }
     }
 
@@ -64,6 +87,18 @@ impl Pdf for MaterialPdf {
             Self::Sphere(pdf) => pdf.generate(rng),
             Self::Cosine(pdf) => pdf.generate(rng),
             Self::HenyeyGreenstein(pdf) => pdf.generate(rng),
+            Self::GgxReflection(pdf) => pdf.generate(rng),
+            Self::DiffuseGgx {
+                diffuse,
+                specular,
+                specular_weight,
+            } => {
+                if rng.random_double() < (*specular_weight).clamp(0.0, 1.0) {
+                    specular.generate(rng)
+                } else {
+                    diffuse.generate(rng)
+                }
+            }
         }
     }
 }

@@ -34,11 +34,15 @@ pub use crate::{
     graphics::{
         animation::{AnimationRenderOptions, FrameRecorder},
         camera::{
-            AdaptiveSampling, Camera3D, PixelSampleMode, ProjectedSegment, ScreenPoint,
-            sort_segments_back_to_front,
+            AdaptiveSampling, Camera3D, DenoisingAovs, PixelSampleMode, ProgressiveRenderUpdate,
+            ProjectedSegment, RayBackground, RayBackgroundSource, RenderProgress, RenderTile,
+            SamplingStrategy, ScreenPoint, sort_segments_back_to_front,
         },
         colors::{ColorRamp, ColorSpace, Hsl, Hsv, LinearRgb, Rgb},
-        display::{Canvas, CanvasBuildError, Domain2D, PolygonColorMode, RgbImage, ShadingMode},
+        display::{
+            Canvas, CanvasBuildError, Domain2D, HdrImage, PolygonColorMode, RgbImage, ShadingMode,
+            ToneMap, ToneMappingOperator,
+        },
         draw::TexturedVertex,
         lighting::{
             LightAttenuation, Lighting, PhongMaterial, PointLight, ReflectionConstants,
@@ -58,19 +62,29 @@ pub use crate::{
     gmath::ray::Ray,
     graphics::camera::RayCamera,
     graphics::raytracing::{
-        BvhBuildOptions, ConstantDensity, ConstantMedium, CurlNoiseField, DensityField,
-        DensityFieldRef, Dielectric, DiffuseLight, DirectLightingMode, DistanceField,
-        DistanceFieldRef, DomainWarpedDensityField, FluidParticle, FnDensityField, FnDistanceField,
-        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
-        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
-        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
+        BvhBuildOptions, BvhTraversalStats, ConstantDensity, ConstantMedium, CurlNoiseField,
+        DensityField, DensityFieldRef, Dielectric, DiffuseLight, DirectLightingMode, DistanceField,
+        DistanceFieldRef, DomainWarpedDensityField, EnvironmentLight, FluidParticle,
+        FnDensityField, FnDistanceField, GgxMicrofacet, GgxReflectionPdf, GridBounds,
+        GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
+        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LayeredDiffuseGgx,
+        LinearColor, LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
         MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
-        MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField, PathTracer,
-        ProceduralDensityField, ProceduralDensityPreset, Quad, RayGeometry, RayMaterial, RayScene,
-        RaySceneBuilder, RenderOptions, RotateY, SamplingTargetList, SdfObject, Sphere,
-        SplatKernel, StableFluidEmitter, StableFluidGrid2, SurfaceRayMaterialMapper,
-        SurfaceRayMaterialMode, Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
+        MaterialRef, MatrixInstance, Metal, NonUniformMedium, NormalMap, NormalMapGreenChannel,
+        NormalMapRef, ParticleSplatField, PathTracer, ProceduralDensityField,
+        ProceduralDensityPreset, Quad, RayGeometry, RayMaterial, RayScene, RaySceneBuilder,
+        RenderOptions, RotateY, SamplingTargetList, SdfObject, Sphere, SplatKernel,
+        StableFluidEmitter, StableFluidGrid2, SurfaceRayMaterialMapper, SurfaceRayMaterialMode,
+        Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
     },
+};
+
+#[cfg(feature = "spectral")]
+pub use crate::graphics::raytracing::{
+    ConductorFresnel, ConductorOpticalConstants, DielectricFresnel, MeasuredSpectrum,
+    MuellerMatrix, PolarizationFrame, RenderTransportMode, SampledWavelength, SpectralImage,
+    SpectralTransportMode, Spectrum, StokesVector, VISIBLE_WAVELENGTH_MAX_NM,
+    VISIBLE_WAVELENGTH_MIN_NM, conductor_fresnel, dielectric_fresnel,
 };
 
 #[cfg(feature = "external")]
@@ -97,31 +111,43 @@ pub mod math {
 pub mod raster {
     pub use super::{
         AnimationRenderOptions, Bounds3, Camera3D, Canvas, CanvasBuildError, ColorRamp, ColorSpace,
-        Domain2D, EdgeMatrix, FrameRecorder, HeightMapOptions, Hsl, Hsv, Lighting, LinearRgb,
-        Matrix, MatrixShapeError, MatrixStack, PhongMaterial, PixelSampleMode, Point, PointLight,
-        PolygonColorMode, PolygonMatrix, ProjectedSegment, ReflectionConstants, RefractiveIndex,
-        Rgb, RgbImage, ScreenPoint, ShadingMode, SurfaceMaterial, SurfaceMesh, SurfaceScene,
-        SurfaceTexture, SurfaceTextureRef, Texture, TextureCache, TextureFilter, TextureSample,
-        TextureWrap, TexturedVertex, Vector, sort_segments_back_to_front,
+        Domain2D, EdgeMatrix, FrameRecorder, HdrImage, HeightMapOptions, Hsl, Hsv, Lighting,
+        LinearRgb, Matrix, MatrixShapeError, MatrixStack, PhongMaterial, PixelSampleMode, Point,
+        PointLight, PolygonColorMode, PolygonMatrix, ProgressiveRenderUpdate, ProjectedSegment,
+        ReflectionConstants, RefractiveIndex, RenderProgress, RenderTile, Rgb, RgbImage,
+        ScreenPoint, ShadingMode, SurfaceMaterial, SurfaceMesh, SurfaceScene, SurfaceTexture,
+        SurfaceTextureRef, Texture, TextureCache, TextureFilter, TextureSample, TextureWrap,
+        TexturedVertex, ToneMap, ToneMappingOperator, Vector, sort_segments_back_to_front,
     };
 }
 
 /// Path-tracing cameras, materials, primitives, scenes, volumes, SDFs, and sampling targets.
 pub mod ray {
     pub use super::{
-        AdaptiveSampling, BvhBuildOptions, ConstantDensity, ConstantMedium, CurlNoiseField,
-        DensityField, DensityFieldRef, Dielectric, DiffuseLight, DirectLightingMode, DistanceField,
-        DistanceFieldRef, DomainWarpedDensityField, FluidParticle, FnDensityField, FnDistanceField,
-        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
-        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
-        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
-        MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
-        MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField, PathTracer,
-        PixelSampleMode, ProceduralDensityField, ProceduralDensityPreset, Quad, Ray, RayCamera,
-        RayGeometry, RayMaterial, RayScene, RaySceneBuilder, RenderOptions, RotateY, SampleRng,
-        SamplingTargetList, SdfObject, Sphere, SplatKernel, StableFluidEmitter, StableFluidGrid2,
-        SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate, TriangleMesh,
-        WeightedSamplingTargetList, box_object,
+        AdaptiveSampling, BvhBuildOptions, BvhTraversalStats, ConstantDensity, ConstantMedium,
+        CurlNoiseField, DenoisingAovs, DensityField, DensityFieldRef, Dielectric, DiffuseLight,
+        DirectLightingMode, DistanceField, DistanceFieldRef, DomainWarpedDensityField,
+        EnvironmentLight, FluidParticle, FnDensityField, FnDistanceField, GgxMicrofacet,
+        GgxReflectionPdf, GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation,
+        HdrImage, HenyeyGreenstein, HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList,
+        Lambertian, LayeredDiffuseGgx, LinearColor, LiquidSurface, MacCellFlags, MacFluidEmitter,
+        MacFluidGrid2, MacFluidGrid3, MacProjectionStats, MacScalarAdvection, MacScalarGrid3,
+        MacStepStats, MarchingCubes, MaterialRef, MatrixInstance, Metal, NonUniformMedium,
+        NormalMap, NormalMapGreenChannel, NormalMapRef, ParticleSplatField, PathTracer,
+        PixelSampleMode, ProceduralDensityField, ProceduralDensityPreset, ProgressiveRenderUpdate,
+        Quad, Ray, RayBackground, RayBackgroundSource, RayCamera, RayGeometry, RayMaterial,
+        RayScene, RaySceneBuilder, RenderOptions, RenderProgress, RenderTile, RotateY, SampleRng,
+        SamplingStrategy, SamplingTargetList, SdfObject, Sphere, SplatKernel, StableFluidEmitter,
+        StableFluidGrid2, SurfaceRayMaterialMapper, SurfaceRayMaterialMode, ToneMap,
+        ToneMappingOperator, Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
+    };
+
+    #[cfg(feature = "spectral")]
+    pub use super::{
+        ConductorFresnel, ConductorOpticalConstants, DielectricFresnel, MeasuredSpectrum,
+        MuellerMatrix, PolarizationFrame, RenderTransportMode, SampledWavelength, SpectralImage,
+        SpectralTransportMode, Spectrum, StokesVector, VISIBLE_WAVELENGTH_MAX_NM,
+        VISIBLE_WAVELENGTH_MIN_NM, conductor_fresnel, dielectric_fresnel,
     };
 }
 

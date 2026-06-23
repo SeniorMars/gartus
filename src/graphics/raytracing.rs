@@ -18,8 +18,18 @@
 //! to importance-sample real emitters or other important geometry without mixing those targets into
 //! the world intersection container.
 
-pub use crate::{gmath::random::SampleRng, graphics::camera::DirectLightingMode};
+#[cfg(feature = "spectral")]
+pub use crate::graphics::camera::RenderTransportMode;
+pub use crate::{
+    gmath::random::SampleRng,
+    graphics::camera::{
+        DenoisingAovs, DirectLightingMode, ProgressiveRenderUpdate, RayBackground,
+        RayBackgroundSource, RenderProgress, RenderTile, SamplingStrategy,
+    },
+    graphics::display::{HdrImage, ToneMap, ToneMappingOperator},
+};
 mod bvh;
+pub mod environment;
 pub mod instance;
 pub mod material;
 pub mod mesh;
@@ -29,6 +39,8 @@ pub mod renderer;
 pub mod scene;
 pub mod scenes;
 pub mod sdf;
+#[cfg(feature = "spectral")]
+pub mod spectrum;
 pub mod texture;
 pub mod volume;
 pub mod weekend;
@@ -37,11 +49,12 @@ use crate::{
     gmath::polygon_matrix::Bounds3,
     graphics::colors::{LinearRgb, Rgb},
 };
-pub use bvh::BvhBuildOptions;
+pub use bvh::{BvhBuildOptions, BvhTraversalStats};
+pub use environment::EnvironmentLight;
 pub use instance::{MatrixInstance, RotateY, Translate};
 pub use material::{
-    Dielectric, DiffuseLight, HenyeyGreenstein, Isotropic, Lambertian, Material, MaterialRef,
-    Metal, RayMaterial, ScatterRecord,
+    Dielectric, DiffuseLight, GgxMicrofacet, HenyeyGreenstein, Isotropic, Lambertian,
+    LayeredDiffuseGgx, Material, MaterialRef, Metal, RayMaterial, ScatterRecord,
 };
 pub use mesh::{MeshTriangle, TriangleMesh};
 pub use object::{
@@ -49,7 +62,8 @@ pub use object::{
     SceneObject, Sphere, SurfaceHit, box_object, hit_sphere, hit_sphere_in_interval, hit_triangle,
 };
 pub use pdf::{
-    CosinePdf, HenyeyGreensteinPdf, HittablePdf, MaterialPdf, MixturePdf, Pdf, SpherePdf,
+    CosinePdf, GgxReflectionPdf, HenyeyGreensteinPdf, HittablePdf, MaterialPdf, MixturePdf, Pdf,
+    SpherePdf,
 };
 pub use renderer::{PathTracer, RenderOptions};
 #[doc(hidden)]
@@ -60,7 +74,17 @@ pub use scene::{
     WeightedSamplingTargetList,
 };
 pub use sdf::{DistanceField, DistanceFieldRef, FnDistanceField, SdfObject};
-pub use texture::{CheckerTexture, ImageTexture, NoiseTexture, SolidColor, TextureRef};
+#[cfg(feature = "spectral")]
+pub use spectrum::{
+    ConductorFresnel, ConductorOpticalConstants, DielectricFresnel, MeasuredSpectrum,
+    MuellerMatrix, PolarizationFrame, SampledWavelength, SpectralImage, SpectralTransportMode,
+    Spectrum, StokesVector, VISIBLE_WAVELENGTH_MAX_NM, VISIBLE_WAVELENGTH_MIN_NM,
+    conductor_fresnel, dielectric_fresnel,
+};
+pub use texture::{
+    CheckerTexture, ImageTexture, NoiseTexture, NormalMap, NormalMapGreenChannel, NormalMapRef,
+    SolidColor, TextureRef,
+};
 pub use volume::{
     ConstantDensity, ConstantMedium, CurlNoiseField, DensityField, DensityFieldRef,
     DomainWarpedDensityField, ExtractedSurface, FluidParticle, FnDensityField, GridBounds,
@@ -74,21 +98,33 @@ pub use volume::{
 /// Common ray-tracing types for `use gartus::graphics::raytracing::prelude::*`.
 pub mod prelude {
     pub use super::{
-        BvhBuildOptions, BvhNode, ConstantDensity, ConstantMedium, CurlNoiseField, DensityField,
-        DensityFieldRef, Dielectric, DiffuseLight, DistanceField, DistanceFieldRef,
-        DomainWarpedDensityField, ExtractedSurface, FluidParticle, FnDensityField, FnDistanceField,
-        GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation, HenyeyGreenstein,
-        HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian, LinearColor,
-        LiquidSurface, MacCellFlags, MacFluidEmitter, MacFluidGrid2, MacFluidGrid3,
-        MacProjectionStats, MacScalarAdvection, MacScalarGrid3, MacStepStats, MarchingCubes,
-        MaterialId, MaterialRef, MatrixInstance, Metal, NonUniformMedium, ParticleSplatField,
-        PathTracer, ProceduralDensityField, ProceduralDensityPreset, Quad, RayGeometry,
-        RayMaterial, RayPrimitive, RayScene, RaySceneBuilder, RenderOptions, RotateY,
-        SamplingTargetList, SdfObject, Sphere, SplatKernel, StableFluidEmitter, StableFluidGrid2,
-        SurfaceRayMaterialMapper, SurfaceRayMaterialMode, Translate, TriangleMesh,
-        WeightedSamplingTargetList, box_object,
+        BvhBuildOptions, BvhNode, BvhTraversalStats, ConstantDensity, ConstantMedium,
+        CurlNoiseField, DenoisingAovs, DensityField, DensityFieldRef, Dielectric, DiffuseLight,
+        DistanceField, DistanceFieldRef, DomainWarpedDensityField, EnvironmentLight,
+        ExtractedSurface, FluidParticle, FnDensityField, FnDistanceField, GgxMicrofacet,
+        GgxReflectionPdf, GridBounds, GridDensityField, GridDensityMetadata, GridInterpolation,
+        HenyeyGreenstein, HenyeyGreensteinPdf, Hittable, HittableLayers, HittableList, Lambertian,
+        LayeredDiffuseGgx, LinearColor, LiquidSurface, MacCellFlags, MacFluidEmitter,
+        MacFluidGrid2, MacFluidGrid3, MacProjectionStats, MacScalarAdvection, MacScalarGrid3,
+        MacStepStats, MarchingCubes, MaterialId, MaterialRef, MatrixInstance, Metal,
+        NonUniformMedium, NormalMap, NormalMapGreenChannel, NormalMapRef, ParticleSplatField,
+        PathTracer, ProceduralDensityField, ProceduralDensityPreset, ProgressiveRenderUpdate, Quad,
+        RayGeometry, RayMaterial, RayPrimitive, RayScene, RaySceneBuilder, RenderOptions,
+        RenderProgress, RenderTile, RotateY, SamplingTargetList, SdfObject, Sphere, SplatKernel,
+        StableFluidEmitter, StableFluidGrid2, SurfaceRayMaterialMapper, SurfaceRayMaterialMode,
+        Translate, TriangleMesh, WeightedSamplingTargetList, box_object,
     };
-    pub use crate::graphics::camera::{AdaptiveSampling, DirectLightingMode, RayCamera};
+    #[cfg(feature = "spectral")]
+    pub use super::{
+        ConductorFresnel, ConductorOpticalConstants, DielectricFresnel, MeasuredSpectrum,
+        MuellerMatrix, PolarizationFrame, RenderTransportMode, SampledWavelength, SpectralImage,
+        SpectralTransportMode, Spectrum, StokesVector, VISIBLE_WAVELENGTH_MAX_NM,
+        VISIBLE_WAVELENGTH_MIN_NM, conductor_fresnel, dielectric_fresnel,
+    };
+    pub use crate::graphics::camera::{
+        AdaptiveSampling, DirectLightingMode, RayBackground, RayBackgroundSource, RayCamera,
+        SamplingStrategy,
+    };
 }
 
 /// Floating-point infinity for ray intervals.
@@ -158,7 +194,10 @@ mod tests {
     use crate::graphics::raytracing::object::sphere_uv;
     use crate::graphics::texture::{SurfaceTexture, TextureSample};
     use crate::graphics::{
-        camera::RayCamera, display::Canvas, material::SurfaceMaterial, scene::SurfaceScene,
+        camera::RayCamera,
+        display::{Canvas, ToneMap, ToneMappingOperator},
+        material::SurfaceMaterial,
+        scene::SurfaceScene,
     };
     use std::sync::Arc;
 
@@ -593,6 +632,9 @@ mod tests {
             normal: Vector::new(0.0, 1.0, 0.0),
             geometric_normal: Vector::new(0.0, 1.0, 0.0),
             shading_normal: Vector::new(0.0, 1.0, 0.0),
+            tangent: None,
+            bitangent: None,
+            tangent_handedness: 1.0,
             t: 1.0,
             u: 0.0,
             v: 0.0,
@@ -625,6 +667,9 @@ mod tests {
             normal: Vector::new(0.0, 0.0, 1.0),
             geometric_normal: Vector::new(0.0, 0.0, 1.0),
             shading_normal: Vector::new(0.0, 0.0, 1.0),
+            tangent: None,
+            bitangent: None,
+            tangent_handedness: 1.0,
             t: 1.0,
             u: 0.25,
             v: 0.75,
@@ -649,6 +694,9 @@ mod tests {
             normal: Vector::new(0.0, 0.0, -1.0),
             geometric_normal: Vector::new(0.0, 0.0, -1.0),
             shading_normal: Vector::new(0.0, 0.0, -1.0),
+            tangent: None,
+            bitangent: None,
+            tangent_handedness: 1.0,
             t: 1.0,
             u: 0.25,
             v: 0.75,
@@ -671,6 +719,9 @@ mod tests {
             normal: Vector::new(1.0, 0.0, 0.0),
             geometric_normal: Vector::new(1.0, 0.0, 0.0),
             shading_normal: Vector::new(1.0, 0.0, 0.0),
+            tangent: None,
+            bitangent: None,
+            tangent_handedness: 1.0,
             t: 1.0,
             u: 0.0,
             v: 0.0,
@@ -1264,6 +1315,28 @@ mod tests {
     }
 
     #[test]
+    fn ray_scene_reports_bvh_traversal_stats() {
+        let mut scene = RayScene::new();
+        let material = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.4, 0.4, 0.4)));
+        scene.add_sphere(Point::new(-0.5, 0.0, -2.0), 0.4, material);
+        scene.add_sphere(Point::new(0.5, 0.0, -3.0), 0.4, material);
+        scene.build_bvh_with_options(BvhBuildOptions::new().with_leaf_size(1));
+        let rays = [
+            Ray::new(Point::new(-0.5, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+            Ray::new(Point::new(0.5, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+        ];
+
+        let stats = scene.bvh_traversal_stats_for_rays(&rays, Interval::new(0.001, INFINITY));
+
+        assert_eq!(stats.rays, 2);
+        assert!(stats.node_bounds_tests >= 2);
+        assert!(stats.node_bounds_hits >= 2);
+        assert!(stats.leaf_visits > 0);
+        assert!(stats.primitive_candidates > 0);
+        assert!(!stats.is_empty());
+    }
+
+    #[test]
     fn randomized_ray_scene_bvh_matches_bruteforce_hits() {
         for seed in 1_u64..=16 {
             let scene = randomized_ray_scene(seed);
@@ -1428,6 +1501,27 @@ mod tests {
     }
 
     #[test]
+    fn path_tracer_can_render_with_explicit_tone_mapping() {
+        let world = HittableList::new();
+        let tracer = PathTracer::new(
+            RayCamera::new(1, 1.0)
+                .with_background(LinearColor::new(4.0, 1.0, 0.25))
+                .with_samples_per_pixel(1),
+        );
+
+        let clipped = tracer.render(&world);
+        let tone_mapped = tracer.render_tone_mapped(
+            &world,
+            ToneMap::new()
+                .with_operator(ToneMappingOperator::Reinhard)
+                .with_gamma(1.0),
+        );
+
+        assert_eq!(clipped.pixels()[0], Rgb::new(255, 255, 128));
+        assert_eq!(tone_mapped.pixels()[0], Rgb::new(204, 128, 51));
+    }
+
+    #[test]
     fn path_tracer_render_options_can_select_tile_size() {
         let world = normal_sphere_world();
         let tracer = PathTracer::new(RayCamera::new(4, 1.0).with_samples_per_pixel(1))
@@ -1438,6 +1532,89 @@ mod tests {
         assert_eq!(tracer.options().tile_size_override(), Some(2));
         assert_eq!(canvas.width(), 4);
         assert!(canvas.upper_left_origin());
+    }
+
+    #[test]
+    fn path_tracer_progressive_render_matches_regular_render() {
+        let world = normal_sphere_world();
+        let tracer = PathTracer::new(
+            RayCamera::new(4, 1.0)
+                .with_samples_per_pixel(1)
+                .with_rng_seed(777),
+        )
+        .with_options(RenderOptions::new().tile_size(2));
+        let expected = tracer.render(&world);
+        let mut update_count = 0;
+
+        let actual = tracer
+            .render_progressive(&world, |update| {
+                update_count += 1;
+                assert_eq!(update.image_width(), 4);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .expect("infallible progress callback");
+
+        assert_eq!(actual.pixels(), expected.pixels());
+        assert_eq!(update_count, 4);
+    }
+
+    #[cfg(feature = "spectral")]
+    #[test]
+    fn path_tracer_spectral_render_produces_image() {
+        let world = normal_sphere_world();
+        let tracer = PathTracer::new(
+            RayCamera::new(4, 1.0)
+                .with_samples_per_pixel(4)
+                .with_rng_seed(222),
+        )
+        .with_options(RenderOptions::new().tile_size(2));
+
+        let canvas = tracer.render_spectral(&world);
+
+        assert_eq!(canvas.width(), 4);
+        assert!(canvas.pixels().iter().any(|pixel| *pixel != Rgb::BLACK));
+    }
+
+    #[cfg(feature = "spectral")]
+    #[test]
+    fn path_tracer_spectral_image_preserves_linear_output() {
+        let world = normal_sphere_world();
+        let tracer = PathTracer::new(
+            RayCamera::new(4, 1.0)
+                .with_samples_per_pixel(4)
+                .with_rng_seed(333),
+        )
+        .with_options(RenderOptions::new().tile_size(2));
+
+        let image = tracer.render_spectral_image(&world);
+
+        assert_eq!(image.width, 4);
+        assert_eq!(image.linear_rgb.len(), 16);
+        assert_eq!(image.transport_mode, SpectralTransportMode::Polarized);
+        assert!(image.polarization.is_some());
+        assert!(
+            image
+                .linear_rgb
+                .iter()
+                .any(|pixel| pixel.max_component() > 0.0)
+        );
+    }
+
+    #[cfg(feature = "spectral")]
+    #[test]
+    fn path_tracer_default_render_can_use_spectral_transport() {
+        let world = HittableList::new();
+        let camera = RayCamera::new(2, 1.0)
+            .with_samples_per_pixel(4)
+            .with_rng_seed(444)
+            .with_background(LinearColor::new(0.5, 0.25, 0.75))
+            .with_spectral_render_transport();
+        let tracer = PathTracer::new(camera).with_options(RenderOptions::new().tile_size(1));
+
+        let default = tracer.render_hdr_image(&world);
+        let explicit = tracer.render_spectral_image(&world).to_hdr_image();
+
+        assert_eq!(default.pixels(), explicit.pixels());
     }
 
     #[test]
@@ -1547,6 +1724,54 @@ mod tests {
 
         assert_eq!(canvas.width(), 2);
         assert_eq!(canvas.height(), 2);
+    }
+
+    #[test]
+    fn path_tracer_light_connection_render_auto_samples_emissive_targets() {
+        let mut scene = RayScene::new();
+        let diffuse = scene.add_material(RayMaterial::lambertian(LinearColor::new(0.7, 0.7, 0.7)));
+        let light = scene.add_material(RayMaterial::diffuse_light(LinearColor::new(4.0, 4.0, 4.0)));
+        scene.add_sphere(Point::new(0.0, 0.0, -1.0), 0.5, diffuse);
+        scene.add_quad(
+            Point::new(-0.5, 1.0, -1.5),
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            light,
+        );
+
+        let lights = scene.emissive_targets();
+        let tracer = PathTracer::new(
+            RayCamera::new(2, 1.0)
+                .with_samples_per_pixel(2)
+                .with_max_depth(3)
+                .with_background(LinearColor::default())
+                .with_rng_seed(29),
+        )
+        .with_options(RenderOptions::new().tile_size(1));
+        let expected = tracer.render_with_light_connections(&scene, &lights);
+        let auto = tracer.render_ray_scene_with_light_connections(&scene);
+        let mut updates = 0;
+        let progressive = tracer
+            .render_with_light_connections_progressive(&scene, &lights, |update| {
+                updates += 1;
+                assert_eq!(update.image_width(), 2);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .expect("infallible progress callback");
+        let mut auto_updates = 0;
+        let auto_progressive = tracer
+            .render_ray_scene_with_light_connections_progressive(&scene, |update| {
+                auto_updates += 1;
+                assert_eq!(update.image_height(), 2);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .expect("infallible progress callback");
+
+        assert_eq!(auto.pixels(), expected.pixels());
+        assert_eq!(progressive.pixels(), expected.pixels());
+        assert_eq!(auto_progressive.pixels(), expected.pixels());
+        assert_eq!(updates, 4);
+        assert_eq!(auto_updates, 4);
     }
 
     #[test]
@@ -1679,6 +1904,28 @@ mod tests {
     }
 
     #[test]
+    fn triangle_mesh_reports_bvh_traversal_stats() {
+        let mut polygons = PolygonMatrix::new();
+        for index in 0..4 {
+            let x = f64::from(u32::try_from(index).expect("test index fits u32"));
+            polygons.add_polygon((x, 0.0, -2.0), (x + 0.5, 0.0, -2.0), (x, 0.5, -2.0));
+        }
+        let mesh = TriangleMesh::from_polygon_matrix_with_bvh_options(
+            &polygons,
+            Lambertian::new(LinearColor::new(0.2, 0.2, 0.2)),
+            BvhBuildOptions::new().with_leaf_size(1),
+        );
+        let ray = Ray::new(Point::new(0.1, 0.1, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let stats = mesh.bvh_traversal_stats(&ray, Interval::new(0.001, INFINITY));
+
+        assert_eq!(stats.rays, 1);
+        assert!(stats.node_bounds_tests > 0);
+        assert!(stats.leaf_visits > 0);
+        assert!(stats.primitive_candidates > 0);
+    }
+
+    #[test]
     fn triangle_mesh_preserves_texture_coordinates_and_shading_normals() {
         let triangle = MeshTriangle::new(TriangleGeometry::new(
             Point::new(0.0, 0.0, -1.0),
@@ -1707,6 +1954,85 @@ mod tests {
         assert_eq!(record.normal, Vector::new(0.0, 0.0, 1.0));
         assert_eq!(record.geometric_normal, Vector::new(0.0, 0.0, 1.0));
         assert_eq!(record.shading_normal, Vector::new(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn triangle_mesh_applies_tangent_space_normal_map() {
+        let normal_map = NormalMap::from_canvas(Canvas::from_pixels_rgb_only(
+            1,
+            1,
+            vec![Rgb::new(255, 128, 128)],
+            true,
+            false,
+        ));
+        let material = Lambertian::new(LinearColor::new(0.2, 0.2, 0.2))
+            .with_shared_normal_map(Arc::new(normal_map));
+        let triangle = MeshTriangle::new(TriangleGeometry::new(
+            Point::new(0.0, 0.0, -1.0),
+            Point::new(1.0, 0.0, -1.0),
+            Point::new(0.0, 1.0, -1.0),
+        ))
+        .with_texcoords([(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]);
+        let mesh = TriangleMesh::with_mesh_triangles_and_shared_material(
+            vec![triangle],
+            Arc::new(material),
+        );
+        let ray = Ray::new(Point::new(0.25, 0.25, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let record = mesh
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("triangle mesh should be hit");
+
+        assert!(record.shading_normal.x() > 0.7);
+    }
+
+    #[test]
+    fn normal_map_can_flip_green_channel_convention() {
+        let sample = TextureSample::new(0.5, 0.5, Point::default());
+        let normal_map = NormalMap::from_canvas(Canvas::from_pixels_rgb_only(
+            1,
+            1,
+            vec![Rgb::new(128, 255, 255)],
+            true,
+            false,
+        ));
+        let flipped = normal_map.clone().with_flip_y(true);
+
+        assert_eq!(normal_map.green_channel(), NormalMapGreenChannel::PositiveY);
+        assert_eq!(flipped.green_channel(), NormalMapGreenChannel::NegativeY);
+        assert!(normal_map.sample_tangent_normal(sample).y() > 0.7);
+        assert!(flipped.sample_tangent_normal(sample).y() < -0.7);
+    }
+
+    #[test]
+    fn triangle_mesh_preserves_mirrored_uv_tangent_handedness() {
+        let normal_map = NormalMap::from_canvas(Canvas::from_pixels_rgb_only(
+            1,
+            1,
+            vec![Rgb::new(128, 255, 128)],
+            true,
+            false,
+        ));
+        let material = Lambertian::new(LinearColor::new(0.2, 0.2, 0.2))
+            .with_shared_normal_map(Arc::new(normal_map));
+        let triangle = MeshTriangle::new(TriangleGeometry::new(
+            Point::new(0.0, 0.0, -1.0),
+            Point::new(1.0, 0.0, -1.0),
+            Point::new(0.0, 1.0, -1.0),
+        ))
+        .with_texcoords([(0.0, 0.0), (1.0, 0.0), (0.0, -1.0)]);
+        let mesh = TriangleMesh::with_mesh_triangles_and_shared_material(
+            vec![triangle],
+            Arc::new(material),
+        );
+        let ray = Ray::new(Point::new(0.25, 0.25, 0.0), Vector::new(0.0, 0.0, -1.0));
+
+        let record = mesh
+            .hit(&ray, Interval::new(0.0, INFINITY))
+            .expect("triangle mesh should be hit");
+
+        assert!(record.tangent_handedness < 0.0);
+        assert!(record.shading_normal.y() < -0.7);
     }
 
     #[cfg(feature = "external")]
@@ -1776,6 +2102,25 @@ mod tests {
             .expect("BVH world should be hit");
 
         assert_close(record.t, 0.75);
+    }
+
+    #[test]
+    fn object_bvh_reports_traversal_stats() {
+        let mut world = HittableList::new();
+        world.add(Sphere::new(Point::new(0.0, 0.0, -2.0), 0.5));
+        world.add(Sphere::new(Point::new(0.75, 0.0, -3.0), 0.5));
+        let bvh = world.into_bvh().expect("bounded world should build bvh");
+        let rays = [
+            Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+            Ray::new(Point::new(0.75, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0)),
+        ];
+
+        let stats = bvh.bvh_traversal_stats_for_rays(&rays, Interval::new(0.001, INFINITY));
+
+        assert_eq!(stats.rays, 2);
+        assert!(stats.node_bounds_tests >= 2);
+        assert!(stats.leaf_visits > 0);
+        assert!(stats.primitive_candidates > 0);
     }
 
     #[test]

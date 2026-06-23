@@ -12,7 +12,7 @@
 use super::{
     Aabb, HitRecord, Hittable, Intersect, Interval, MovingSphere, PdfContext, Quad, RayGeometry,
     RayMaterial, SampleRng, Sphere,
-    bvh::{BvhBuildOptions, BvhPrimitiveInfo, FlatBvh, RayTraversal},
+    bvh::{BvhBuildOptions, BvhPrimitiveInfo, BvhTraversalStats, FlatBvh, RayTraversal},
 };
 use crate::{
     gmath::{
@@ -663,6 +663,31 @@ impl BvhNode {
         let mut rng = SampleRng::default();
         hit_object_indices(&self.objects, 0..self.objects.len(), ray, ray_t, &mut rng)
     }
+
+    /// Returns traversal counters for one ray through this object BVH.
+    #[must_use]
+    pub fn bvh_traversal_stats(&self, ray: &Ray, ray_t: Interval) -> BvhTraversalStats {
+        let mut rng = SampleRng::default();
+        self.bvh
+            .traversal_stats(&self.objects, ray, ray_t, &mut rng)
+    }
+
+    /// Returns aggregate traversal counters for several rays through this object BVH.
+    #[must_use]
+    pub fn bvh_traversal_stats_for_rays<'r, I>(&self, rays: I, ray_t: Interval) -> BvhTraversalStats
+    where
+        I: IntoIterator<Item = &'r Ray>,
+    {
+        let mut stats = BvhTraversalStats::default();
+        let mut rng = SampleRng::default();
+        for ray in rays {
+            stats.merge(
+                self.bvh
+                    .traversal_stats(&self.objects, ray, ray_t, &mut rng),
+            );
+        }
+        stats
+    }
 }
 
 impl Hittable for BvhNode {
@@ -749,6 +774,23 @@ impl ObjectBvh {
             })
     }
 
+    fn traversal_stats(
+        &self,
+        objects: &[Box<dyn Hittable>],
+        ray: &Ray,
+        ray_t: Interval,
+        rng: &mut SampleRng,
+    ) -> BvhTraversalStats {
+        let mut stats = BvhTraversalStats::default();
+        let _ = self.bvh.hit_with_stats(
+            ray_t,
+            RayTraversal::new(ray),
+            &mut stats,
+            |indices, ray_t| hit_object_indices(objects, indices.iter().copied(), ray, ray_t, rng),
+        );
+        stats
+    }
+
     fn hit_ray_scene<'a>(
         &'a self,
         primitives: &'a [RayPrimitive],
@@ -760,6 +802,25 @@ impl ObjectBvh {
             .hit_with(ray_t, RayTraversal::new(ray), |indices, ray_t| {
                 hit_ray_scene_indices(primitives, materials, indices.iter().copied(), ray, ray_t)
             })
+    }
+
+    fn traversal_stats_ray_scene(
+        &self,
+        primitives: &[RayPrimitive],
+        materials: &[RayMaterial],
+        ray: &Ray,
+        ray_t: Interval,
+    ) -> BvhTraversalStats {
+        let mut stats = BvhTraversalStats::default();
+        let _ = self.bvh.hit_with_stats(
+            ray_t,
+            RayTraversal::new(ray),
+            &mut stats,
+            |indices, ray_t| {
+                hit_ray_scene_indices(primitives, materials, indices.iter().copied(), ray, ray_t)
+            },
+        );
+        stats
     }
 }
 
@@ -1405,6 +1466,31 @@ impl RayScene {
         )
     }
 
+    /// Returns traversal counters for one ray.
+    ///
+    /// Scenes with a cached or buildable BVH report BVH node and leaf counters. Scenes that cannot
+    /// build a BVH still report the ray and primitive-candidate counts for the linear fallback.
+    #[must_use]
+    pub fn bvh_traversal_stats(&self, ray: &Ray, ray_t: Interval) -> BvhTraversalStats {
+        self.cached_bvh().map_or_else(
+            || linear_traversal_stats(self.primitives.len()),
+            |bvh| bvh.traversal_stats_ray_scene(&self.primitives, &self.materials, ray, ray_t),
+        )
+    }
+
+    /// Returns aggregate traversal counters for several rays.
+    #[must_use]
+    pub fn bvh_traversal_stats_for_rays<'r, I>(&self, rays: I, ray_t: Interval) -> BvhTraversalStats
+    where
+        I: IntoIterator<Item = &'r Ray>,
+    {
+        let mut stats = BvhTraversalStats::default();
+        for ray in rays {
+            stats.merge(self.bvh_traversal_stats(ray, ray_t));
+        }
+        stats
+    }
+
     /// Converts a renderer-neutral surface scene using an explicit material conversion policy.
     ///
     /// The returned scene has its primitive BVH built before return. Diffuse texture paths remain
@@ -1488,6 +1574,14 @@ impl RayScene {
 
     fn invalidate_bvh(&mut self) {
         self.bvh = OnceLock::new();
+    }
+}
+
+fn linear_traversal_stats(primitive_count: usize) -> BvhTraversalStats {
+    BvhTraversalStats {
+        rays: 1,
+        primitive_candidates: u64::try_from(primitive_count).unwrap_or(u64::MAX),
+        ..BvhTraversalStats::default()
     }
 }
 

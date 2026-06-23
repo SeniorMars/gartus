@@ -85,7 +85,7 @@ fn build_scene(t: f64) -> (HittableList, WeightedSamplingTargetList, RayCamera) 
         Point::new(100.0, -57.735, 0.0),
         Vector::new(-200.0, 0.0, 0.0),
         Vector::new(0.0, 0.0, length),
-        mirror,
+        mirror.clone(),
     ));
 
     // Wall 2: Right wall (between A and C, normal points down-left)
@@ -93,7 +93,7 @@ fn build_scene(t: f64) -> (HittableList, WeightedSamplingTargetList, RayCamera) 
         Point::new(0.0, 115.47, 0.0),
         Vector::new(100.0, -173.205, 0.0),
         Vector::new(0.0, 0.0, length),
-        mirror,
+        mirror.clone(),
     ));
 
     // Wall 3: Left wall (between B and A, normal points down-right)

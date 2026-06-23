@@ -133,6 +133,8 @@ pub struct MeshMaterial {
     pub illumination_model: Option<u32>,
     /// Diffuse texture map from `map_Kd`, resolved relative to the MTL file.
     pub diffuse_texture: Option<PathBuf>,
+    /// Tangent-space normal map from `map_Bump`, `bump`, or `norm`, resolved relative to the MTL file.
+    pub normal_texture: Option<PathBuf>,
 }
 
 impl MeshMaterial {
@@ -157,6 +159,7 @@ impl From<MeshMaterial> for SurfaceMaterial {
         );
         surface.refractive_index = material.optical_density.and_then(RefractiveIndex::try_new);
         surface.diffuse_texture = material.diffuse_texture;
+        surface.normal_texture = material.normal_texture;
         surface
     }
 }
@@ -697,6 +700,7 @@ fn load_mtl_materials(path: &Path) -> MeshResult<HashMap<String, MeshMaterial>> 
     parse_mtl(BufReader::new(file), path)
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String, MeshMaterial>> {
     let mut materials = HashMap::new();
     let mut current_material = None::<String>;
@@ -782,8 +786,17 @@ fn parse_mtl<R: BufRead>(reader: R, source: &Path) -> MeshResult<HashMap<String,
                 if let Some(material) =
                     current_mtl_material(&mut materials, current_material.as_ref())
                 {
-                    let filename = parse_mtl_texture_filename(parts, source, line_num)?;
+                    let filename = parse_mtl_texture_filename(parts, source, line_num, "map_Kd")?;
                     material.diffuse_texture = Some(resolve_sibling_path(source, &filename));
+                }
+            }
+            Some("map_Bump" | "map_bump" | "bump" | "norm") => {
+                if let Some(material) =
+                    current_mtl_material(&mut materials, current_material.as_ref())
+                {
+                    let filename =
+                        parse_mtl_texture_filename(parts, source, line_num, "normal map")?;
+                    material.normal_texture = Some(resolve_sibling_path(source, &filename));
                 }
             }
             _ => {}
@@ -825,6 +838,7 @@ fn parse_mtl_texture_filename<'a>(
     parts: impl Iterator<Item = &'a str>,
     source: &Path,
     line_num: usize,
+    label: &str,
 ) -> MeshResult<String> {
     let tokens = parts.collect::<Vec<_>>();
     let mut index = 0;
@@ -854,7 +868,7 @@ fn parse_mtl_texture_filename<'a>(
                     return Err(MeshError::at_line(
                         source,
                         line_num,
-                        format!("map_Kd option `{option}` requires at least one numeric value"),
+                        format!("{label} option `{option}` requires at least one numeric value"),
                     ));
                 }
             }
@@ -862,7 +876,7 @@ fn parse_mtl_texture_filename<'a>(
                 return Err(MeshError::at_line(
                     source,
                     line_num,
-                    format!("unsupported map_Kd option `{option}`"),
+                    format!("unsupported {label} option `{option}`"),
                 ));
             }
         }
@@ -873,7 +887,7 @@ fn parse_mtl_texture_filename<'a>(
         return Err(MeshError::at_line(
             source,
             line_num,
-            "missing diffuse texture filename",
+            format!("missing {label} texture filename"),
         ));
     }
     Ok(filename)
@@ -914,6 +928,7 @@ fn empty_mesh_material() -> MeshMaterial {
         alpha: None,
         illumination_model: None,
         diffuse_texture: None,
+        normal_texture: None,
     }
 }
 
@@ -1699,7 +1714,7 @@ endsolid bad
 
         fs::write(
             &mtl_path,
-            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nNs 42\nNi 1.5\nd -halo 0.75\nillum 4\nmap_Kd textures/red.ppm\nnewmtl green\nKd 0 0.5 0\nTr 0.25\n",
+            b"newmtl red\nKa 0.1 0.2 0.3\nKd 1 0 0\nKs 0.4 0.5 0.6\nNs 42\nNi 1.5\nd -halo 0.75\nillum 4\nmap_Kd textures/red.ppm\nmap_Bump -bm 0.5 textures/red-normal.ppm\nnewmtl green\nKd 0 0.5 0\nTr 0.25\n",
         )
         .expect("write temp mtl");
         fs::write(
@@ -1749,6 +1764,15 @@ f 1/1 2/2 4/4 3/3
                     .parent()
                     .expect("mtl parent")
                     .join("textures/red.ppm")
+            )
+        );
+        assert_eq!(
+            red_material.normal_texture,
+            Some(
+                mtl_path
+                    .parent()
+                    .expect("mtl parent")
+                    .join("textures/red-normal.ppm")
             )
         );
         assert_eq!(mesh.groups[0].textured_triangles[0][2].texcoord, (1.0, 1.0));

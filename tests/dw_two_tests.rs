@@ -1,3 +1,5 @@
+#[cfg(feature = "external")]
+use gartus::mdl::run_source;
 use gartus::{
     gmath::{matrix::Matrix, polygon_matrix::PolygonMatrix},
     graphics::colors::Rgb,
@@ -6,7 +8,7 @@ use gartus::{
         lighting::ReflectionConstants,
     },
     mdl::executor::execute_compiled_frame,
-    mdl::{Command, RenderConfig, compile_file, parse_file, run_file, run_source},
+    mdl::{Command, RenderConfig, compile_file, parse_file, run_file},
 };
 
 const REFERENCE_3D_STEPS: usize = 100;

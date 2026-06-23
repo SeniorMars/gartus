@@ -143,14 +143,33 @@ Core pieces include:
 - `Hittable`, `HittableList`, `HittableLayers`, and `RayScene`
 - analytic `Sphere`, `MovingSphere`, `Quad`, triangle meshes, boxes, transforms,
   and matrix instances
-- `Lambertian`, `Metal`, `Dielectric`, `DiffuseLight`, and `Isotropic`
-  materials
+- `Lambertian`, `GgxMicrofacet`, `Metal`, `Dielectric`, `DiffuseLight`,
+  `Isotropic`, and `HenyeyGreenstein` materials
 - checker, image, solid, noise, turbulence, and marble textures
 - BVH acceleration for built-in geometry and arbitrary bounded hittables
 - explicit light sampling with `SamplingTargetList` and
   `WeightedSamplingTargetList`
+- configurable `SamplingStrategy` policies for material/light PDF continuation
+- forced next-event light-connection helpers with
+  `PathTracer::render_with_light_connections` and
+  `RayCamera::render_world_with_light_connections`
+- constant, gradient, function, trait-backed, and environment-map backgrounds
+- lat-long environment light importance sampling with `EnvironmentLight`
+- feature-gated sampled-wavelength spectral rendering with polarized `SpectralImage` output by default
+- linear HDR render buffers with `HdrImage`, renderer-level tone mapping, and `.pfm`/`.hdr` output
+- imported diffuse, specular, and normal-map hints for ray-traced triangle meshes
+- denoising-friendly float beauty, albedo, and normal AOVs with
+  `PathTracer::render_denoising_aovs`
 - stratified sampling, adaptive sampling, defocus blur, motion blur, and
   configurable recursion depth
+- tiled parallel rendering, progressive tile callbacks, and BVH traversal stats
+
+The `raytracing_ggx_microfacet` example renders a GGX/Trowbridge-Reitz
+roughness sweep:
+
+```text
+cargo run --example raytracing_ggx_microfacet
+```
 
 For mesh-heavy renderer-neutral scenes, call `SurfaceScene::to_ray_scene()` once
 and render the compiled `RayScene` repeatedly. `PathTracer::render_scene` is
@@ -178,6 +197,32 @@ world.add(Sphere::with_material(
 let image = PathTracer::new(camera).render(&world);
 ```
 
+`RenderOptions::tile_size` controls tile scheduling. `PathTracer::render_progressive`
+and `RayCamera::render_world_tiled_progressive` call back with a
+`ProgressiveRenderUpdate` after each tile is copied, so applications can save or
+display partial images. `RayScene::bvh_traversal_stats_for_rays`,
+`BvhNode::bvh_traversal_stats_for_rays`, and
+`TriangleMesh::bvh_traversal_stats_for_rays` expose accelerator counters for
+profiling traversal quality.
+
+The optional `spectral` feature enables sampled-wavelength rendering. It adds
+`MeasuredSpectrum`, `Spectrum`, `SampledWavelength`, `SpectralImage`,
+`SpectralTransportMode`, `StokesVector`, `MuellerMatrix`, and `PolarizationFrame` helpers plus
+`PathTracer::render_spectral_image` /
+`RayCamera::render_world_spectral_image` entrypoints. The spectral image stores
+linear floating-point output before display encoding; `render_spectral` remains
+as a convenience wrapper that converts that output to a display `Canvas`.
+Spectral renders use Stokes/Mueller transport by default and fill
+`SpectralImage::polarization` with visible-band averaged Stokes samples; call
+`RayCamera::with_unpolarized_spectral_transport` for scalar spectral transport.
+The ordinary `render` / `render_world` entrypoints stay RGB-compatible unless a
+camera is configured with `RayCamera::with_spectral_render_transport`, which
+routes those Canvas/HDR helpers through the sampled-wavelength path.
+Use `MeasuredSpectrum` for measured reflectance, emission, dielectric eta, and
+conductor eta/k data loaded from CSV/SPD samples. `Spectrum::Rgb` remains the
+compatibility fallback for RGB materials and textures, but measured spectra are
+preferred when real spectral data is available.
+
 ### Volumes
 
 `gartus` supports both constant and non-uniform participating media.
@@ -201,6 +246,12 @@ let image = PathTracer::new(camera).render(&world);
 - `MacFluidGrid2` and `MacFluidGrid3` provide staggered-grid smoke solvers with
   face velocities, SDF obstacles, CFL stepping, pressure projection diagnostics,
   and density/temperature/fuel exports.
+  `MacFluidGrid3` also has a single-phase liquid path with a liquid level set,
+  `MacCellFlags::LIQUID` active cells, free-surface pressure projection, velocity
+  extrapolation into nearby air, CFL substepping, and explicit viscosity
+  damping. The default smoke path still treats every non-solid cell as gas;
+  multiphase liquid/gas coupling with density-ratio interface jumps is future
+  work.
 - `MarchingCubes` extracts triangle surfaces from density grids, and
   `LiquidSurface` bakes particle splats into a liquid-like triangle mesh.
 
@@ -433,6 +484,7 @@ Use the render profile for full path-traced images:
 ```bash
 cargo run --profile render --example life
 cargo run --profile render --example raytracing_mandelbulb
+cargo bench --bench render_performance
 ```
 
 For path-tracing iteration, lower image width, depth, and samples first:
@@ -460,7 +512,29 @@ RayCamera::new(400, 1.0)
 
 Indoor path-traced scenes with small emitters usually converge faster when you
 pass a dedicated `SamplingTargetList` or `WeightedSamplingTargetList` to
-`PathTracer::render_with_lights`.
+`PathTracer::render_with_lights`. `RayCamera::with_sampling_strategy` controls
+whether continuation rays use material-only sampling, next-event estimation, or
+a weighted material/light-target mixture; `SamplingStrategy::with_light_pdf_weight`
+selects current-path continuation because the weight only applies to that mode.
+`RayCamera::with_background_source`, `RayCamera::with_background_fn`,
+`PathTracer::render_with_background`, and their spectral background variants
+accept constant/gradient/function/trait-backed miss radiance; `EnvironmentLight`
+also implements the background trait, while `render_with_environment` adds
+luminance-weighted environment importance sampling.
+
+For path-space work, BDPT and MLT are still future work. The current
+`PathTracer::render_with_light_connections` helper is ordinary next-event
+estimation over camera subpaths; true BDPT still needs light subpaths,
+path-space MIS, emitter-surface sampling, and reusable path state.
+
+For production-style lighting and post work, use `EnvironmentLight::from_file`
+or `EnvironmentLight::from_canvas` with `PathTracer::render_with_environment`
+for luminance-weighted lat-long environment sampling. Use
+`TriangleMesh::from_material_mesh_imported_materials` to resolve imported
+`map_Kd`, layered GGX `Ks`/`Ns` hints, and common normal-map MTL keys
+(`map_Bump`, `bump`, `norm`). Use
+`PathTracer::render_denoising_aovs` when an external denoiser needs matching
+linear-float beauty, albedo, and shading-normal buffers plus preview canvases.
 
 ## Feature Flags
 
@@ -474,6 +548,10 @@ Default features:
 Optional compatibility feature:
 
 - `old_parser`: legacy parser API
+
+Optional renderer prototype feature:
+
+- `spectral`: measured spectra, sampled-wavelength path tracing, `SpectralImage`, and Stokes/Mueller helpers
 
 ## Project Layout
 

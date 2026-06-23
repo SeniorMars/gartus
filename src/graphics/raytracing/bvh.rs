@@ -5,6 +5,52 @@ const BVH_BUCKETS: usize = 12;
 const BVH_BUCKETS_F64: f64 = 12.0;
 const DEFAULT_BVH_LEAF_SIZE: usize = 4;
 
+/// Aggregate counters collected during flat BVH traversal.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BvhTraversalStats {
+    /// Number of rays traced through the BVH.
+    pub rays: u64,
+    /// Number of node bounding boxes tested, including the root node.
+    pub node_bounds_tests: u64,
+    /// Number of node bounding-box tests that accepted the ray interval.
+    pub node_bounds_hits: u64,
+    /// Number of leaf nodes visited.
+    pub leaf_visits: u64,
+    /// Number of primitive indices handed to leaf intersection routines.
+    pub primitive_candidates: u64,
+    /// Number of leaf callbacks that returned a hit.
+    pub leaf_hit_results: u64,
+    /// Largest pending traversal stack depth observed for any ray.
+    pub max_stack_depth: usize,
+}
+
+impl BvhTraversalStats {
+    /// Adds another traversal sample into this aggregate.
+    pub fn merge(&mut self, other: Self) {
+        self.rays = self.rays.saturating_add(other.rays);
+        self.node_bounds_tests = self
+            .node_bounds_tests
+            .saturating_add(other.node_bounds_tests);
+        self.node_bounds_hits = self.node_bounds_hits.saturating_add(other.node_bounds_hits);
+        self.leaf_visits = self.leaf_visits.saturating_add(other.leaf_visits);
+        self.primitive_candidates = self
+            .primitive_candidates
+            .saturating_add(other.primitive_candidates);
+        self.leaf_hit_results = self.leaf_hit_results.saturating_add(other.leaf_hit_results);
+        self.max_stack_depth = self.max_stack_depth.max(other.max_stack_depth);
+    }
+
+    /// Returns true when no rays have contributed to this aggregate.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.rays == 0
+    }
+
+    fn record_stack_depth(&mut self, depth: usize) {
+        self.max_stack_depth = self.max_stack_depth.max(depth);
+    }
+}
+
 /// Build-time options for flat BVH acceleration structures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BvhBuildOptions {
@@ -167,6 +213,10 @@ impl TraversalStack {
             None
         }
     }
+
+    fn len(&self) -> usize {
+        self.stack_len + self.overflow.len()
+    }
 }
 
 pub(super) trait BvhHit {
@@ -247,8 +297,29 @@ impl FlatBvh {
         H: BvhHit,
         F: FnMut(&[usize], Interval) -> Option<H>,
     {
+        let mut stats = BvhTraversalStats::default();
+        self.hit_with_stats(ray_t, traversal, &mut stats, |indices, ray_t| {
+            hit_leaf(indices, ray_t)
+        })
+    }
+
+    pub(super) fn hit_with_stats<H, F>(
+        &self,
+        ray_t: Interval,
+        traversal: RayTraversal,
+        stats: &mut BvhTraversalStats,
+        mut hit_leaf: F,
+    ) -> Option<H>
+    where
+        H: BvhHit,
+        F: FnMut(&[usize], Interval) -> Option<H>,
+    {
+        stats.rays = stats.rays.saturating_add(1);
+        stats.node_bounds_tests = stats.node_bounds_tests.saturating_add(1);
         let root_entry = traversal.hit_bounds(self.nodes[0].bounds, ray_t.min, ray_t.max)?;
+        stats.node_bounds_hits = stats.node_bounds_hits.saturating_add(1);
         let mut stack = TraversalStack::new(root_entry);
+        stats.record_stack_depth(stack.len());
 
         let mut closest = ray_t.max;
         let mut closest_hit = None;
@@ -260,19 +331,29 @@ impl FlatBvh {
 
             match self.nodes[entry.node].kind {
                 FlatBvhNodeKind::Leaf { first, count } => {
+                    stats.leaf_visits = stats.leaf_visits.saturating_add(1);
+                    stats.primitive_candidates = stats
+                        .primitive_candidates
+                        .saturating_add(usize_to_u64(count));
                     if let Some(hit) = hit_leaf(
                         &self.indices[first..first + count],
                         Interval::new(ray_t.min, closest),
                     ) {
+                        stats.leaf_hit_results = stats.leaf_hit_results.saturating_add(1);
                         closest = hit.hit_t();
                         closest_hit = Some(hit);
                     }
                 }
                 FlatBvhNodeKind::Internal { left, right } => {
+                    stats.node_bounds_tests = stats.node_bounds_tests.saturating_add(2);
                     let left_entry =
                         traversal.hit_bounds(self.nodes[left].bounds, ray_t.min, closest);
                     let right_entry =
                         traversal.hit_bounds(self.nodes[right].bounds, ray_t.min, closest);
+                    stats.node_bounds_hits = stats
+                        .node_bounds_hits
+                        .saturating_add(u64::from(left_entry.is_some()))
+                        .saturating_add(u64::from(right_entry.is_some()));
 
                     match (left_entry, right_entry) {
                         (Some(left_entry), Some(right_entry)) if right_entry < left_entry => {
@@ -309,6 +390,7 @@ impl FlatBvh {
                         }
                         (None, None) => {}
                     }
+                    stats.record_stack_depth(stack.len());
                 }
             }
         }
@@ -482,6 +564,10 @@ fn point_axis(point: Point, axis: usize) -> f64 {
     }
 }
 
+fn usize_to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +660,52 @@ mod tests {
 
         assert_eq!(hit, Some(TestHit { t: 1.5 }));
         assert_eq!(visited, vec![0]);
+    }
+
+    #[test]
+    fn flat_bvh_reports_traversal_stats() {
+        let left = z_bounds(1.0, 2.0);
+        let right = z_bounds(10.0, 11.0);
+        let bvh = FlatBvh {
+            nodes: vec![
+                FlatBvhNode {
+                    bounds: left.union(right),
+                    kind: FlatBvhNodeKind::Internal { left: 1, right: 2 },
+                },
+                FlatBvhNode {
+                    bounds: left,
+                    kind: FlatBvhNodeKind::Leaf { first: 0, count: 1 },
+                },
+                FlatBvhNode {
+                    bounds: right,
+                    kind: FlatBvhNodeKind::Leaf { first: 1, count: 1 },
+                },
+            ],
+            indices: vec![0, 1],
+        };
+        let ray = Ray::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0));
+        let traversal = RayTraversal::new(&ray);
+        let mut stats = BvhTraversalStats::default();
+
+        let hit = bvh.hit_with_stats(
+            Interval::new(0.0, 20.0),
+            traversal,
+            &mut stats,
+            |indices, _| match indices[0] {
+                0 => Some(TestHit { t: 1.5 }),
+                1 => Some(TestHit { t: 10.5 }),
+                _ => None,
+            },
+        );
+
+        assert_eq!(hit, Some(TestHit { t: 1.5 }));
+        assert_eq!(stats.rays, 1);
+        assert_eq!(stats.node_bounds_tests, 3);
+        assert_eq!(stats.node_bounds_hits, 3);
+        assert_eq!(stats.leaf_visits, 1);
+        assert_eq!(stats.primitive_candidates, 1);
+        assert_eq!(stats.leaf_hit_results, 1);
+        assert!(stats.max_stack_depth >= 1);
     }
 
     #[test]

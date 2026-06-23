@@ -1649,10 +1649,14 @@ fn filter_f32(name: &str, value: f64) -> Result<f32, ExecutionError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "external")]
+    use super::execute_into;
     use super::{
         ExecutionError, RequiredPipelineStage, execute_compiled_frame,
-        execute_compiled_frames_to_files, execute_compiled_program, execute_into, execute_program,
+        execute_compiled_frames_to_files, execute_compiled_program, execute_program,
     };
+    #[cfg(feature = "external")]
+    use crate::mdl::runtime::Runtime;
     use crate::{
         gmath::matrix::Matrix,
         graphics::{
@@ -1663,7 +1667,7 @@ mod tests {
             animation::FrameOutputConfig,
             ast::Vec3,
             parser::parse_script,
-            runtime::{Light, RenderConfig, Runtime, Symbol},
+            runtime::{Light, RenderConfig, Symbol},
             semantic::compile,
         },
         prelude::AnimationRenderOptions,

@@ -1,4 +1,7 @@
-use crate::graphics::{colors::Rgb, lighting::Lighting};
+use crate::graphics::{
+    colors::{LinearRgb, Rgb},
+    lighting::Lighting,
+};
 
 use core::slice;
 #[cfg(feature = "rayon")]
@@ -154,6 +157,314 @@ pub struct RgbImage {
     width: u32,
     height: u32,
     pixels: Vec<Rgb>,
+}
+
+/// Tone mapping operator used when converting linear HDR samples to display RGB.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ToneMappingOperator {
+    /// Applies only exposure and gamma conversion, clipping values above display white.
+    #[default]
+    None,
+    /// Reinhard tone mapping: `x / (1 + x)`.
+    Reinhard,
+    /// ACES filmic approximation.
+    Aces,
+}
+
+impl ToneMappingOperator {
+    fn map_component(self, value: f64) -> f64 {
+        let value = if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        };
+        match self {
+            Self::None => value,
+            Self::Reinhard => value / (1.0 + value),
+            Self::Aces => {
+                let mapped = value * (2.51 * value + 0.03) / (value * (2.43 * value + 0.59) + 0.14);
+                mapped.clamp(0.0, 1.0)
+            }
+        }
+    }
+}
+
+/// Display conversion controls for linear HDR image buffers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToneMap {
+    /// Exposure multiplier applied before the tone-mapping operator.
+    pub exposure: f64,
+    /// Tone-mapping curve.
+    pub operator: ToneMappingOperator,
+    /// Gamma exponent used for display encoding.
+    pub gamma: f64,
+}
+
+impl Default for ToneMap {
+    fn default() -> Self {
+        Self {
+            exposure: 1.0,
+            operator: ToneMappingOperator::None,
+            gamma: 2.0,
+        }
+    }
+}
+
+impl ToneMap {
+    /// Creates default display conversion with exposure `1.0`, no tone map, and gamma `2.0`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            exposure: 1.0,
+            operator: ToneMappingOperator::None,
+            gamma: 2.0,
+        }
+    }
+
+    /// Sets exposure multiplier.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `exposure` is not finite or is negative.
+    #[must_use]
+    pub fn with_exposure(mut self, exposure: f64) -> Self {
+        assert!(
+            exposure.is_finite() && exposure >= 0.0,
+            "tone-map exposure must be finite and non-negative"
+        );
+        self.exposure = exposure;
+        self
+    }
+
+    /// Sets the tone-mapping operator.
+    #[must_use]
+    pub const fn with_operator(mut self, operator: ToneMappingOperator) -> Self {
+        self.operator = operator;
+        self
+    }
+
+    /// Sets display gamma.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `gamma` is not positive and finite.
+    #[must_use]
+    pub fn with_gamma(mut self, gamma: f64) -> Self {
+        assert!(
+            gamma.is_finite() && gamma > 0.0,
+            "tone-map gamma must be positive and finite"
+        );
+        self.gamma = gamma;
+        self
+    }
+
+    /// Converts one linear HDR sample to display RGB.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn map_color(self, color: LinearRgb) -> Rgb {
+        let encode = |component: f64| {
+            let mapped = self.operator.map_component(component * self.exposure);
+            let gamma_encoded = if (self.gamma - 2.0).abs() <= f64::EPSILON {
+                Rgb::linear_to_gamma_component(mapped)
+            } else if mapped <= 0.0 {
+                0.0
+            } else {
+                mapped.powf(1.0 / self.gamma)
+            };
+            (256.0 * gamma_encoded.clamp(0.0, 0.999)) as u8
+        };
+        Rgb::new(encode(color.red), encode(color.green), encode(color.blue))
+    }
+}
+
+/// Linear floating-point RGB image buffer for HDR render output.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HdrImage {
+    width: u32,
+    height: u32,
+    pixels: Vec<LinearRgb>,
+}
+
+impl HdrImage {
+    /// Creates an HDR image from exact linear RGB pixel data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixels.len()` is not `width * height`.
+    #[must_use]
+    pub fn from_pixels(width: u32, height: u32, pixels: Vec<LinearRgb>) -> Self {
+        assert_eq!(
+            pixels.len(),
+            Canvas::pixel_count(width, height),
+            "HDR image pixel count must match dimensions"
+        );
+        Self {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// Returns the image width.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Returns the image height.
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Returns immutable linear HDR pixel data.
+    #[must_use]
+    pub fn pixels(&self) -> &[LinearRgb] {
+        &self.pixels
+    }
+
+    /// Consumes the image and returns the linear HDR pixel data.
+    #[must_use]
+    pub fn into_pixels(self) -> Vec<LinearRgb> {
+        self.pixels
+    }
+
+    /// Converts this HDR image to a display canvas with default gamma-2 clipping.
+    pub fn to_canvas(&self) -> Canvas {
+        self.to_canvas_tone_mapped(ToneMap::default())
+    }
+
+    /// Converts this HDR image to a display canvas with explicit tone-mapping controls.
+    pub fn to_canvas_tone_mapped(&self, tone_map: ToneMap) -> Canvas {
+        Canvas::from_pixels_rgb_only(
+            self.width,
+            self.height,
+            self.pixels
+                .iter()
+                .copied()
+                .map(|pixel| tone_map.map_color(pixel))
+                .collect(),
+            true,
+            false,
+        )
+    }
+
+    /// Saves the image as portable float-map data (`PF`).
+    ///
+    /// PFM stores 32-bit float RGB channels and preserves HDR values without tone mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying I/O fails.
+    pub fn save_pfm(&self, file_name: &str) -> io::Result<()> {
+        let file = File::create(file_name)?;
+        let mut out = BufWriter::new(file);
+        self.write_pfm(&mut out)
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn write_pfm<W: Write>(&self, mut out: W) -> io::Result<()> {
+        writeln!(out, "PF")?;
+        writeln!(out, "{} {}", self.width, self.height)?;
+        writeln!(out, "-1.0")?;
+        for y in (0..self.height).rev() {
+            let row_start = usize::try_from(y).expect("image y should fit usize")
+                * usize::try_from(self.width).expect("image width should fit usize");
+            for pixel in &self.pixels[row_start
+                ..row_start + usize::try_from(self.width).expect("image width should fit usize")]
+            {
+                for component in [pixel.red, pixel.green, pixel.blue] {
+                    let value = if component.is_finite() {
+                        component as f32
+                    } else {
+                        0.0
+                    };
+                    out.write_all(&value.to_le_bytes())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Saves the image as Radiance RGBE HDR data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying I/O fails.
+    pub fn save_radiance_hdr(&self, file_name: &str) -> io::Result<()> {
+        let file = File::create(file_name)?;
+        let mut out = BufWriter::new(file);
+        self.write_radiance_hdr(&mut out)
+    }
+
+    fn write_radiance_hdr<W: Write>(&self, mut out: W) -> io::Result<()> {
+        writeln!(out, "#?RADIANCE")?;
+        writeln!(out, "FORMAT=32-bit_rle_rgbe")?;
+        writeln!(out)?;
+        writeln!(out, "-Y {} +X {}", self.height, self.width)?;
+        for pixel in &self.pixels {
+            out.write_all(&encode_rgbe(*pixel))?;
+        }
+        Ok(())
+    }
+
+    /// Saves this image by extension.
+    ///
+    /// `.pfm`, `.hdr`, and `.rgbe` preserve HDR data. Other extensions are tone-mapped with
+    /// default settings and delegated to [`Canvas::save_extension`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the output cannot be written.
+    pub fn save_extension(&self, file_name: &str) -> io::Result<()> {
+        match std::path::Path::new(file_name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("pfm") => self.save_pfm(file_name),
+            Some("hdr" | "rgbe") => self.save_radiance_hdr(file_name),
+            _ => self.to_canvas().save_extension(file_name),
+        }
+    }
+
+    /// Saves a tone-mapped display image by extension.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the output cannot be written.
+    pub fn save_tone_mapped(&self, file_name: &str, tone_map: ToneMap) -> io::Result<()> {
+        self.to_canvas_tone_mapped(tone_map)
+            .save_extension(file_name)
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn encode_rgbe(color: LinearRgb) -> [u8; 4] {
+    let sanitize = |component: f64| {
+        if component.is_finite() {
+            component.max(0.0)
+        } else {
+            0.0
+        }
+    };
+    let red = sanitize(color.red);
+    let green = sanitize(color.green);
+    let blue = sanitize(color.blue);
+    let max_component = red.max(green).max(blue);
+    if max_component <= 1.0e-32 {
+        return [0, 0, 0, 0];
+    }
+
+    let exponent = max_component.log2().floor() as i32 + 1;
+    let scale = 256.0 * 2.0_f64.powi(-exponent);
+    [
+        (red * scale).clamp(0.0, 255.0) as u8,
+        (green * scale).clamp(0.0, 255.0) as u8,
+        (blue * scale).clamp(0.0, 255.0) as u8,
+        (exponent + 128).clamp(0, 255) as u8,
+    ]
 }
 
 impl RgbImage {
@@ -1840,6 +2151,53 @@ mod tests {
                 actual: 3,
             })
         );
+    }
+
+    #[test]
+    fn hdr_image_preserves_linear_values_and_tone_maps_to_canvas() {
+        let image = HdrImage::from_pixels(1, 1, vec![LinearRgb::new(4.0, 1.0, 0.25)]);
+
+        assert_eq!(image.pixels()[0], LinearRgb::new(4.0, 1.0, 0.25));
+        assert_eq!(image.to_canvas().pixels()[0], Rgb::new(255, 255, 128));
+
+        let tone_mapped = image.to_canvas_tone_mapped(
+            ToneMap::new()
+                .with_operator(ToneMappingOperator::Reinhard)
+                .with_gamma(1.0),
+        );
+        assert_eq!(tone_mapped.pixels()[0], Rgb::new(204, 128, 51));
+    }
+
+    #[test]
+    fn hdr_image_writes_pfm_header_and_float_data() {
+        let path =
+            std::env::temp_dir().join(format!("gartus-hdr-image-{}.pfm", std::process::id()));
+        let image = HdrImage::from_pixels(1, 1, vec![LinearRgb::new(2.0, 0.5, 0.25)]);
+
+        image
+            .save_pfm(path.to_str().expect("temp path should be utf8"))
+            .expect("write pfm");
+        let bytes = std::fs::read(&path).expect("read pfm");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(bytes.starts_with(b"PF\n1 1\n-1.0\n"));
+        assert_eq!(bytes.len(), b"PF\n1 1\n-1.0\n".len() + 12);
+    }
+
+    #[test]
+    fn hdr_image_writes_radiance_hdr_data_by_extension() {
+        let path =
+            std::env::temp_dir().join(format!("gartus-hdr-image-{}.hdr", std::process::id()));
+        let image = HdrImage::from_pixels(1, 1, vec![LinearRgb::new(1.0, 0.5, 0.25)]);
+
+        image
+            .save_extension(path.to_str().expect("temp path should be utf8"))
+            .expect("write hdr");
+        let bytes = std::fs::read(&path).expect("read hdr");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(bytes.starts_with(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n"));
+        assert_eq!(&bytes[bytes.len() - 4..], &[128, 64, 32, 129]);
     }
 
     #[test]

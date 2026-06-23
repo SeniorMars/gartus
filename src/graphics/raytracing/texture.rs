@@ -3,6 +3,7 @@
 use super::{LinearColor, rgb_to_linear_color};
 use crate::{
     gmath::perlin::{Perlin, scale_point},
+    gmath::vector::Vector,
     graphics::{
         colors::Rgb,
         display::Canvas,
@@ -13,6 +14,9 @@ use std::sync::Arc;
 
 /// Shared renderer-neutral surface texture handle used by ray-tracing materials.
 pub type TextureRef = SurfaceTextureRef;
+
+/// Shared tangent-space normal map handle used by ray-tracing materials.
+pub type NormalMapRef = Arc<NormalMap>;
 
 /// A texture that always returns one linear color.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +150,128 @@ impl SurfaceTexture for ImageTexture {
             return rgb_to_linear_color(Rgb::CYAN);
         }
         self.texture.sample_linear(sample)
+    }
+}
+
+/// Tangent-space normal map sampled from bitmap RGB data.
+///
+/// Normal maps are data textures, so samples use raw texture bytes instead of the gamma-decoded
+/// [`SurfaceTexture`] path used for color textures.
+#[derive(Clone, Debug)]
+pub struct NormalMap {
+    texture: BitmapTexture,
+    strength: f64,
+    green_channel: NormalMapGreenChannel,
+}
+
+/// Green-channel convention for tangent-space normal maps.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NormalMapGreenChannel {
+    /// OpenGL-style `+Y` green channel.
+    #[default]
+    PositiveY,
+    /// DirectX-style `-Y` green channel.
+    NegativeY,
+}
+
+impl NormalMap {
+    /// Creates a full-strength normal map from an existing bitmap texture.
+    #[must_use]
+    pub const fn new(texture: BitmapTexture) -> Self {
+        Self {
+            texture,
+            strength: 1.0,
+            green_channel: NormalMapGreenChannel::PositiveY,
+        }
+    }
+
+    /// Creates a normal map from an existing canvas.
+    #[must_use]
+    pub const fn from_canvas(canvas: Canvas) -> Self {
+        Self::new(BitmapTexture::from_canvas(canvas))
+    }
+
+    /// Loads a normal-map image file through the library's external image loader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image cannot be loaded or converted into a canvas.
+    #[cfg(feature = "external")]
+    pub fn from_file(path: impl AsRef<str>) -> Result<Self, Box<dyn std::error::Error>> {
+        let canvas = crate::external::ppmify(path.as_ref(), false)?;
+        Ok(Self::from_canvas(canvas))
+    }
+
+    /// Sets normal-map strength. `0.0` is flat, `1.0` uses the map as-is.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `strength` is not finite.
+    #[must_use]
+    pub fn with_strength(mut self, strength: f64) -> Self {
+        assert!(strength.is_finite(), "normal-map strength must be finite");
+        self.strength = strength.max(0.0);
+        self
+    }
+
+    /// Sets the tangent-space green-channel convention.
+    #[must_use]
+    pub const fn with_green_channel(mut self, green_channel: NormalMapGreenChannel) -> Self {
+        self.green_channel = green_channel;
+        self
+    }
+
+    /// Flips the sampled tangent-space Y channel when `flip_y` is true.
+    #[must_use]
+    pub const fn with_flip_y(self, flip_y: bool) -> Self {
+        self.with_green_channel(if flip_y {
+            NormalMapGreenChannel::NegativeY
+        } else {
+            NormalMapGreenChannel::PositiveY
+        })
+    }
+
+    /// Returns the underlying bitmap texture.
+    #[must_use]
+    pub const fn texture(&self) -> &BitmapTexture {
+        &self.texture
+    }
+
+    /// Returns the normal-map strength.
+    #[must_use]
+    pub const fn strength(&self) -> f64 {
+        self.strength
+    }
+
+    /// Returns the tangent-space green-channel convention.
+    #[must_use]
+    pub const fn green_channel(&self) -> NormalMapGreenChannel {
+        self.green_channel
+    }
+
+    /// Samples a unit tangent-space normal where `+z` is the unperturbed surface normal.
+    #[must_use]
+    pub fn sample_tangent_normal(&self, sample: TextureSample) -> Vector {
+        if self.texture.image().is_empty() {
+            return Vector::new(0.0, 0.0, 1.0);
+        }
+
+        let color = self.texture.sample(sample.u, sample.v);
+        let decode = |channel: u8| 2.0 * (f64::from(channel) / 255.0) - 1.0;
+        let green = match self.green_channel {
+            NormalMapGreenChannel::PositiveY => decode(color.green),
+            NormalMapGreenChannel::NegativeY => -decode(color.green),
+        };
+        let normal = Vector::new(
+            self.strength * decode(color.red),
+            self.strength * green,
+            decode(color.blue).max(0.0),
+        );
+        if normal.length_squared() <= f64::EPSILON {
+            Vector::new(0.0, 0.0, 1.0)
+        } else {
+            normal.normalized()
+        }
     }
 }
 

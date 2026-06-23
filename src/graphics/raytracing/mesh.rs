@@ -3,10 +3,14 @@
 use super::{
     Aabb, HitRecord, Hittable, Interval, Material, MaterialRef, MatrixInstance, SampleRng,
     SurfaceHit,
-    bvh::{BvhBuildOptions, BvhPrimitiveInfo, FlatBvh, RayTraversal},
+    bvh::{BvhBuildOptions, BvhPrimitiveInfo, BvhTraversalStats, FlatBvh, RayTraversal},
 };
 #[cfg(feature = "external")]
-use super::{Lambertian, material::default_material, texture::ImageTexture};
+use super::{
+    Lambertian, LayeredDiffuseGgx, LinearColor,
+    material::default_material,
+    texture::{ImageTexture, NormalMap},
+};
 use crate::gmath::{
     geometry::TriangleGeometry, matrix::Matrix, polygon_matrix::PolygonMatrix, ray::Ray,
     vector::Point, vector::Vector,
@@ -93,6 +97,12 @@ impl MeshTriangle {
         {
             record.set_shading_normal(shading_normal);
         }
+        if let Some((tangent, bitangent)) = self.tangent_frame() {
+            record.set_tangent_frame(tangent, bitangent);
+        }
+        if let Some(shading_normal) = record.material.normal_map_shading_normal(&record) {
+            record.set_oriented_shading_normal(shading_normal);
+        }
         Some(record)
     }
 
@@ -107,6 +117,26 @@ impl MeshTriangle {
             + (barycentric_u * normals[1])
             + (barycentric_v * normals[2]);
         (normal.length_squared() > f64::EPSILON).then(|| normal.normalized())
+    }
+
+    fn tangent_frame(self) -> Option<(Vector, Vector)> {
+        let texcoords = self.texcoords?;
+        let [p0, p1, p2] = self.geometry.vertices();
+        let edge1 = p1 - p0;
+        let edge2 = p2 - p0;
+        let du1 = texcoords[1].0 - texcoords[0].0;
+        let dv1 = texcoords[1].1 - texcoords[0].1;
+        let du2 = texcoords[2].0 - texcoords[0].0;
+        let dv2 = texcoords[2].1 - texcoords[0].1;
+        let determinant = du1 * dv2 - du2 * dv1;
+        if determinant.abs() <= f64::EPSILON {
+            return None;
+        }
+        let inv = 1.0 / determinant;
+        let tangent = (edge1 * dv2 - edge2 * dv1) * inv;
+        let bitangent = (edge2 * du1 - edge1 * du2) * inv;
+        (tangent.length_squared() > f64::EPSILON && bitangent.length_squared() > f64::EPSILON)
+            .then_some((tangent, bitangent))
     }
 }
 
@@ -346,7 +376,32 @@ impl TriangleMesh {
             .iter()
             .filter(|group| !group.polygons.is_empty())
             .map(|group| {
-                let material = material_for_mesh_group_with_texture(group)?;
+                let material = lambertian_material_for_mesh_group_with_texture(group)?;
+                Ok(Self::from_material_mesh_group_with_shared_material(
+                    group, material,
+                ))
+            })
+            .collect()
+    }
+
+    /// Creates one triangle mesh per material group, resolving imported texture and specular hints.
+    ///
+    /// Groups with `map_Kd` use textured Lambertian materials. Groups with specular coefficients
+    /// and no diffuse map use GGX roughness derived from `Ns`. Common normal-map keys are applied
+    /// when the group has texture coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a referenced diffuse or normal texture cannot be loaded.
+    #[cfg(feature = "external")]
+    pub fn from_material_mesh_imported_materials(
+        mesh: &crate::external::MaterialMesh,
+    ) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+        mesh.groups
+            .iter()
+            .filter(|group| !group.polygons.is_empty())
+            .map(|group| {
+                let material = imported_material_for_mesh_group(group)?;
                 Ok(Self::from_material_mesh_group_with_shared_material(
                     group, material,
                 ))
@@ -396,6 +451,31 @@ impl TriangleMesh {
         self.bvh.as_ref().map(TriangleBvh::node_count)
     }
 
+    /// Returns traversal counters for one ray through this mesh.
+    ///
+    /// Meshes without a built triangle BVH still report the ray and primitive-candidate counts for
+    /// the linear fallback.
+    #[must_use]
+    pub fn bvh_traversal_stats(&self, ray: &Ray, ray_t: Interval) -> BvhTraversalStats {
+        self.bvh.as_ref().map_or_else(
+            || mesh_linear_traversal_stats(self.triangles.len()),
+            |bvh| bvh.traversal_stats(&self.triangles, self.material(), ray, ray_t),
+        )
+    }
+
+    /// Returns aggregate traversal counters for several rays through this mesh.
+    #[must_use]
+    pub fn bvh_traversal_stats_for_rays<'r, I>(&self, rays: I, ray_t: Interval) -> BvhTraversalStats
+    where
+        I: IntoIterator<Item = &'r Ray>,
+    {
+        let mut stats = BvhTraversalStats::default();
+        for ray in rays {
+            stats.merge(self.bvh_traversal_stats(ray, ray_t));
+        }
+        stats
+    }
+
     /// Creates a matrix instance that shares this mesh through an [`Arc`].
     ///
     /// This is useful when placing many transformed copies of the same imported mesh without
@@ -418,20 +498,125 @@ fn default_material_for_mesh_group(group: &crate::external::MaterialMeshGroup) -
 }
 
 #[cfg(feature = "external")]
-fn material_for_mesh_group_with_texture(
+fn lambertian_material_for_mesh_group_with_texture(
     group: &crate::external::MaterialMeshGroup,
 ) -> Result<MaterialRef, Box<dyn std::error::Error>> {
+    let normal_map = group
+        .material
+        .as_ref()
+        .and_then(|material| material.normal_texture.as_ref())
+        .map(|texture_path| NormalMap::from_file(texture_path.to_string_lossy()).map(Arc::new))
+        .transpose()?;
+
     if let Some(texture_path) = group
         .material
         .as_ref()
         .and_then(|material| material.diffuse_texture.as_ref())
     {
-        return Ok(Arc::new(Lambertian::from_texture(ImageTexture::from_file(
-            texture_path.to_string_lossy(),
-        )?)));
+        let mut material =
+            Lambertian::from_texture(ImageTexture::from_file(texture_path.to_string_lossy())?);
+        if let Some(normal_map) = normal_map {
+            material = material.with_shared_normal_map(normal_map);
+        }
+        return Ok(Arc::new(material));
+    }
+
+    if let Some(normal_map) = normal_map {
+        let base = if let Some(material) = group.material.clone() {
+            Lambertian::from(SurfaceMaterial::from(material))
+        } else if let Some(diffuse_color) = group.diffuse_color {
+            Lambertian::from(diffuse_color)
+        } else {
+            Lambertian::new(crate::graphics::colors::LinearRgb::new(0.5, 0.5, 0.5))
+        };
+        return Ok(Arc::new(base.with_shared_normal_map(normal_map)));
     }
 
     Ok(default_material_for_mesh_group(group))
+}
+
+#[cfg(feature = "external")]
+fn imported_material_for_mesh_group(
+    group: &crate::external::MaterialMeshGroup,
+) -> Result<MaterialRef, Box<dyn std::error::Error>> {
+    let normal_map = group
+        .material
+        .as_ref()
+        .and_then(|material| material.normal_texture.as_ref())
+        .map(|texture_path| NormalMap::from_file(texture_path.to_string_lossy()).map(Arc::new))
+        .transpose()?;
+    let specular = group.material.as_ref().and_then(imported_specular_lobe);
+
+    if let Some(texture_path) = group
+        .material
+        .as_ref()
+        .and_then(|material| material.diffuse_texture.as_ref())
+    {
+        let diffuse = ImageTexture::from_file(texture_path.to_string_lossy())?;
+        if let Some((specular_color, roughness)) = specular {
+            let mut material =
+                LayeredDiffuseGgx::from_diffuse_texture(diffuse, specular_color, roughness);
+            if let Some(normal_map) = normal_map {
+                material = material.with_shared_normal_map(normal_map);
+            }
+            return Ok(Arc::new(material));
+        }
+
+        let mut material = Lambertian::from_texture(diffuse);
+        if let Some(normal_map) = normal_map {
+            material = material.with_shared_normal_map(normal_map);
+        }
+        return Ok(Arc::new(material));
+    }
+
+    if let Some((specular_color, roughness)) = specular {
+        let diffuse_color = group.material.clone().map_or_else(
+            || {
+                group.diffuse_color.map_or_else(
+                    || LinearColor::new(0.5, 0.5, 0.5),
+                    LinearColor::from_rgb_srgb,
+                )
+            },
+            |material| SurfaceMaterial::from(material).base_color,
+        );
+        let mut material = LayeredDiffuseGgx::new(diffuse_color, specular_color, roughness);
+        if let Some(normal_map) = normal_map {
+            material = material.with_shared_normal_map(normal_map);
+        }
+        return Ok(Arc::new(material));
+    }
+
+    if let Some(normal_map) = normal_map {
+        let base = if let Some(material) = group.material.clone() {
+            Lambertian::from(SurfaceMaterial::from(material))
+        } else if let Some(diffuse_color) = group.diffuse_color {
+            Lambertian::from(diffuse_color)
+        } else {
+            Lambertian::new(crate::graphics::colors::LinearRgb::new(0.5, 0.5, 0.5))
+        };
+        return Ok(Arc::new(base.with_shared_normal_map(normal_map)));
+    }
+
+    Ok(default_material_for_mesh_group(group))
+}
+
+#[cfg(feature = "external")]
+fn imported_specular_lobe(material: &crate::external::MeshMaterial) -> Option<(LinearColor, f64)> {
+    let specular = material.specular.unwrap_or([0.0, 0.0, 0.0]);
+    let specular_color =
+        crate::graphics::colors::LinearRgb::new(specular[0], specular[1], specular[2]);
+    (specular_color.max_component() > 0.0).then(|| {
+        (
+            specular_color,
+            roughness_from_mtl_shininess(material.shininess),
+        )
+    })
+}
+
+#[cfg(feature = "external")]
+fn roughness_from_mtl_shininess(shininess: Option<f64>) -> f64 {
+    let shininess = shininess.unwrap_or(32.0).max(0.0);
+    (2.0 / (shininess + 2.0)).sqrt().clamp(0.02, 1.0)
 }
 
 impl Hittable for TriangleMesh {
@@ -482,6 +667,33 @@ impl TriangleBvh {
             .hit_with(ray_t, RayTraversal::new(ray), |indices, ray_t| {
                 hit_triangle_indices(triangles, material, indices.iter().copied(), ray, ray_t)
             })
+    }
+
+    fn traversal_stats(
+        &self,
+        triangles: &[MeshTriangle],
+        material: &dyn Material,
+        ray: &Ray,
+        ray_t: Interval,
+    ) -> BvhTraversalStats {
+        let mut stats = BvhTraversalStats::default();
+        let _ = self.bvh.hit_with_stats(
+            ray_t,
+            RayTraversal::new(ray),
+            &mut stats,
+            |indices, ray_t| {
+                hit_triangle_indices(triangles, material, indices.iter().copied(), ray, ray_t)
+            },
+        );
+        stats
+    }
+}
+
+fn mesh_linear_traversal_stats(primitive_count: usize) -> BvhTraversalStats {
+    BvhTraversalStats {
+        rays: 1,
+        primitive_candidates: u64::try_from(primitive_count).unwrap_or(u64::MAX),
+        ..BvhTraversalStats::default()
     }
 }
 

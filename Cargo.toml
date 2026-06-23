@@ -46,6 +46,7 @@ filters = []
 turtle = []
 old_parser = []
 rayon = ["dep:rayon"]
+spectral = []
 
 [[example]]
 name = "frac_tree"
@@ -99,6 +100,10 @@ name = "raytracing_weekend"
 path = "examples/raytracing/weekend.rs"
 
 [[example]]
+name = "raytracing_ggx_microfacet"
+path = "examples/raytracing/ggx_microfacet.rs"
+
+[[example]]
 name = "next_weekend"
 path = "examples/raytracing/next_weekend.rs"
 required-features = ["external"]
@@ -118,3 +123,7 @@ path = "examples/raytracing/marching_cubes_sphere.rs"
 [[example]]
 name = "liquid_blob_surface"
 path = "examples/raytracing/liquid_blob_surface.rs"
+
+[[bench]]
+name = "render_performance"
+harness = false

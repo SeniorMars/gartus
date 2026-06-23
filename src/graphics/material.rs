@@ -27,6 +27,11 @@ pub struct SurfaceMaterial {
     /// do not resolve or sample this path; use the lower-level textured raster or ray APIs when a
     /// render needs texture sampling.
     pub diffuse_texture: Option<PathBuf>,
+    /// Optional tangent-space normal texture path or cache key.
+    ///
+    /// Like [`Self::diffuse_texture`], this is renderer-neutral metadata. Ray-tracing mesh helpers
+    /// that resolve textures can use it to perturb mesh shading normals.
+    pub normal_texture: Option<PathBuf>,
 }
 
 impl SurfaceMaterial {
@@ -56,6 +61,7 @@ impl SurfaceMaterial {
             shininess,
             refractive_index: None,
             diffuse_texture: None,
+            normal_texture: None,
         }
     }
 
@@ -78,6 +84,7 @@ impl SurfaceMaterial {
             shininess,
             refractive_index: None,
             diffuse_texture: None,
+            normal_texture: None,
         })
     }
 
@@ -96,6 +103,13 @@ impl SurfaceMaterial {
     #[must_use]
     pub fn with_diffuse_texture(mut self, diffuse_texture: impl Into<PathBuf>) -> Self {
         self.diffuse_texture = Some(diffuse_texture.into());
+        self
+    }
+
+    /// Adds tangent-space normal texture metadata.
+    #[must_use]
+    pub fn with_normal_texture(mut self, normal_texture: impl Into<PathBuf>) -> Self {
+        self.normal_texture = Some(normal_texture.into());
         self
     }
 }

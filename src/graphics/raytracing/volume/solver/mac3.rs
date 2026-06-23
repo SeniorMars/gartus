@@ -8,7 +8,10 @@ const DEFAULT_PRESSURE_TOLERANCE: f64 = 1.0e-5;
 const SOLID_PHI_DEFAULT: f32 = 1.0;
 const FACE_WEIGHT_EPSILON: f32 = 1.0e-4;
 
-/// Classification flags for a MAC fluid cell.
+/// Classification flags for a MAC cell.
+///
+/// Smoke projection and advection treat every non-solid cell as active gas. Liquid projection uses
+/// only [`Self::LIQUID`] cells as active liquid and treats [`Self::OPEN`] cells as inactive air.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MacCellFlags(u8);
 
@@ -17,7 +20,10 @@ impl MacCellFlags {
     pub const OPEN: Self = Self(0b001);
     /// Solid obstacle cell.
     pub const SOLID: Self = Self(0b010);
-    /// Liquid cell placeholder for coupled liquid/gas solvers.
+    /// Liquid cell classification.
+    ///
+    /// Liquid projection treats this as active liquid. Smoke solves continue to treat this like an
+    /// open non-solid cell.
     pub const LIQUID: Self = Self(0b100);
 
     /// Returns true when this cell is open gas.
@@ -32,7 +38,7 @@ impl MacCellFlags {
         self.0 & Self::SOLID.0 != 0
     }
 
-    /// Returns true when this cell is marked liquid.
+    /// Returns true when this cell is classified as liquid.
     #[must_use]
     pub const fn is_liquid(self) -> bool {
         self.0 & Self::LIQUID.0 != 0
@@ -105,10 +111,14 @@ impl MacScalarGrid3 {
     }
 }
 
-/// Three-dimensional smoke solver using a Marker-and-Cell layout.
+/// Three-dimensional smoke/liquid solver using a Marker-and-Cell layout.
 ///
 /// Density, temperature, fuel, and pressure are stored at cell centers. Velocity is stored on cell
 /// faces: `u` is x-face velocity, `v` is y-face velocity, and `w` is z-face velocity.
+///
+/// The default [`Self::step`] path remains a gas/smoke solve over all non-solid cells. Liquid
+/// callers opt into single-phase free-surface behavior with [`Self::set_liquid_phi`] and
+/// [`Self::step_liquid`].
 #[derive(Clone, Debug)]
 pub struct MacFluidGrid3 {
     dims: [usize; 3],
@@ -124,11 +134,14 @@ pub struct MacFluidGrid3 {
     v: Vec<f32>,
     w: Vec<f32>,
     solid_phi: Vec<f32>,
+    liquid_phi: Vec<f32>,
     flags: Vec<MacCellFlags>,
     u_weights: Vec<f32>,
     v_weights: Vec<f32>,
     w_weights: Vec<f32>,
+    liquid_viscosity: f64,
     last_projection: MacProjectionStats,
+    last_liquid_projection: MacProjectionStats,
 }
 
 impl MacFluidGrid3 {
@@ -158,11 +171,14 @@ impl MacFluidGrid3 {
             v: vec![0.0; v_count],
             w: vec![0.0; w_count],
             solid_phi: vec![SOLID_PHI_DEFAULT; cell_count],
+            liquid_phi: vec![SOLID_PHI_DEFAULT; cell_count],
             flags: vec![MacCellFlags::OPEN; cell_count],
             u_weights: vec![1.0; u_count],
             v_weights: vec![1.0; v_count],
             w_weights: vec![1.0; w_count],
+            liquid_viscosity: 0.0,
             last_projection: MacProjectionStats::default(),
+            last_liquid_projection: MacProjectionStats::default(),
         };
         grid.rebuild_face_weights();
         grid
@@ -230,6 +246,21 @@ impl MacFluidGrid3 {
         self
     }
 
+    /// Returns a copy with explicit liquid viscosity used by [`Self::step_liquid`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `viscosity` is negative or not finite.
+    #[must_use]
+    pub fn with_liquid_viscosity(mut self, viscosity: f64) -> Self {
+        assert!(
+            viscosity.is_finite() && viscosity >= 0.0,
+            "3D MAC liquid viscosity must be non-negative and finite"
+        );
+        self.liquid_viscosity = viscosity;
+        self
+    }
+
     /// Returns grid dimensions as `[width, height, depth]`.
     #[must_use]
     pub const fn dims(&self) -> [usize; 3] {
@@ -246,6 +277,12 @@ impl MacFluidGrid3 {
     #[must_use]
     pub const fn cell_size(&self) -> [f64; 3] {
         self.cell_size
+    }
+
+    /// Returns explicit liquid viscosity used by [`Self::step_liquid`].
+    #[must_use]
+    pub const fn liquid_viscosity(&self) -> f64 {
+        self.liquid_viscosity
     }
 
     /// Returns all center density samples.
@@ -296,6 +333,14 @@ impl MacFluidGrid3 {
         &self.solid_phi
     }
 
+    /// Returns center-cell liquid signed distances.
+    ///
+    /// Negative values are liquid and positive values are air unless the cell is solid.
+    #[must_use]
+    pub fn liquid_phi(&self) -> &[f32] {
+        &self.liquid_phi
+    }
+
     /// Returns center-cell flags.
     #[must_use]
     pub fn flags(&self) -> &[MacCellFlags] {
@@ -324,6 +369,12 @@ impl MacFluidGrid3 {
     #[must_use]
     pub const fn last_projection(&self) -> MacProjectionStats {
         self.last_projection
+    }
+
+    /// Returns liquid projection diagnostics from the most recent free-surface projection.
+    #[must_use]
+    pub const fn last_liquid_projection(&self) -> MacProjectionStats {
+        self.last_liquid_projection
     }
 
     /// Returns the center-cell flattened index.
@@ -419,9 +470,30 @@ impl MacFluidGrid3 {
         self.flags[self.index(cell)].is_solid()
     }
 
-    /// Sets a cell's liquid flag.
+    /// Returns true when one center cell is active liquid.
     ///
-    /// Solid cells remain solid even when `liquid` is true.
+    /// # Panics
+    ///
+    /// Panics if `cell` is outside the grid.
+    #[must_use]
+    pub fn is_liquid(&self, cell: [usize; 3]) -> bool {
+        self.flags[self.index(cell)].is_liquid()
+    }
+
+    /// Returns true when one center cell is non-solid inactive air for liquid solves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `cell` is outside the grid.
+    #[must_use]
+    pub fn is_air(&self, cell: [usize; 3]) -> bool {
+        self.flags[self.index(cell)].is_open()
+    }
+
+    /// Sets a cell's liquid classification through the liquid level set.
+    ///
+    /// Solid cells remain solid even when `liquid` is true. Non-solid liquid cells are active in
+    /// [`Self::project_liquid_velocity`], while open cells are inactive air for liquid solves.
     ///
     /// # Panics
     ///
@@ -429,13 +501,11 @@ impl MacFluidGrid3 {
     pub fn set_liquid(&mut self, cell: [usize; 3], liquid: bool) {
         let index = self.index(cell);
         if self.flags[index].is_solid() {
+            self.liquid_phi[index] = SOLID_PHI_DEFAULT;
             return;
         }
-        self.flags[index] = if liquid {
-            MacCellFlags::LIQUID
-        } else {
-            MacCellFlags::OPEN
-        };
+        self.liquid_phi[index] = if liquid { -0.5 } else { 0.5 };
+        self.rebuild_flags_from_phi();
     }
 
     /// Adds density to one center cell.
@@ -604,10 +674,77 @@ impl MacFluidGrid3 {
         });
     }
 
+    /// Replaces the center-cell liquid signed distance field.
+    ///
+    /// Negative values are liquid, positive values are air. Solid SDF classification remains
+    /// separate and overrides liquid classification.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `liquid_phi` has the wrong length or contains non-finite values.
+    pub fn set_liquid_phi(&mut self, liquid_phi: Vec<f32>) {
+        assert_eq!(
+            liquid_phi.len(),
+            self.liquid_phi.len(),
+            "3D MAC liquid SDF length must match grid dimensions"
+        );
+        assert!(
+            liquid_phi.iter().all(|value| value.is_finite()),
+            "3D MAC liquid SDF values must be finite"
+        );
+        self.liquid_phi = liquid_phi;
+        self.rebuild_flags_from_phi();
+        self.apply_solid_constraints();
+    }
+
+    /// Samples a center-cell liquid signed distance field from a closure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the closure returns a non-finite value.
+    pub fn set_liquid_sdf<F>(&mut self, mut sdf: F)
+    where
+        F: FnMut([f64; 3]) -> f64,
+    {
+        for z in 0..self.dims[2] {
+            for y in 0..self.dims[1] {
+                for x in 0..self.dims[0] {
+                    let value = sdf([usize_to_f64(x), usize_to_f64(y), usize_to_f64(z)]);
+                    assert!(value.is_finite(), "3D MAC liquid SDF values must be finite");
+                    self.liquid_phi[cell_index_for_dims3(self.dims, x, y, z)] = finite_f32(value);
+                }
+            }
+        }
+        self.rebuild_flags_from_phi();
+        self.apply_solid_constraints();
+    }
+
+    /// Replaces liquid geometry with one spherical level set.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `center` is not finite or if `radius` is not positive and finite.
+    pub fn set_liquid_sphere(&mut self, center: [f64; 3], radius: f64) {
+        validate_point3(center, "3D MAC liquid sphere center");
+        validate_radius3(radius, "3D MAC liquid sphere radius");
+        self.set_liquid_sdf(|cell| {
+            let dx = cell[0] - center[0];
+            let dy = cell[1] - center[1];
+            let dz = cell[2] - center[2];
+            (dx * dx + dy * dy + dz * dz).sqrt() - radius
+        });
+    }
+
     /// Returns the root-mean-square weighted divergence.
     #[must_use]
     pub fn velocity_divergence_l2(&self) -> f64 {
         self.divergence_l2()
+    }
+
+    /// Returns root-mean-square divergence over active liquid cells only.
+    #[must_use]
+    pub fn liquid_velocity_divergence_l2(&self) -> f64 {
+        self.liquid_divergence_l2()
     }
 
     /// Returns a conservative maximum velocity magnitude from open face speeds.
@@ -671,6 +808,27 @@ impl MacFluidGrid3 {
         self.last_projection
     }
 
+    /// Projects liquid velocity with a single-phase free-surface pressure solve.
+    ///
+    /// Liquid cells are active. Air cells are inactive and impose a zero-pressure Dirichlet
+    /// boundary at liquid-air faces. Solid faces keep no-penetration Neumann behavior through the
+    /// solid face weights.
+    pub fn project_liquid_velocity(&mut self) -> MacProjectionStats {
+        self.apply_solid_velocity_constraints();
+        let divergence_before_l2 = self.liquid_divergence_l2();
+        let (iterations, pressure_residual_l2) = self.solve_liquid_pressure_pcg();
+        self.apply_liquid_pressure_gradient();
+        self.apply_solid_velocity_constraints();
+        let divergence_after_l2 = self.liquid_divergence_l2();
+        self.last_liquid_projection = MacProjectionStats {
+            divergence_before_l2,
+            divergence_after_l2,
+            pressure_residual_l2,
+            iterations,
+        };
+        self.last_liquid_projection
+    }
+
     /// Advances scalar fields and projects velocity.
     pub fn step(&mut self) -> MacStepStats {
         let initial_projection = self.project_velocity();
@@ -731,6 +889,63 @@ impl MacFluidGrid3 {
         stats
     }
 
+    /// Advances liquid level set and velocity, then applies free-surface projection.
+    pub fn step_liquid(&mut self) -> MacStepStats {
+        let initial_projection = self.project_liquid_velocity();
+        let previous_u = self.u.clone();
+        let previous_v = self.v.clone();
+        let previous_w = self.w.clone();
+
+        self.advect_velocity_semi_lagrangian(&previous_u, &previous_v, &previous_w);
+        self.advect_liquid_level_set(&previous_u, &previous_v, &previous_w);
+        self.extrapolate_velocity_into_air(3);
+        if self.liquid_viscosity > 0.0 {
+            self.apply_liquid_viscosity(self.liquid_viscosity);
+        }
+        let final_projection = self.project_liquid_velocity();
+        MacStepStats {
+            initial_projection,
+            final_projection,
+        }
+    }
+
+    /// Advances liquid with enough substeps to satisfy a CFL limit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `cfl_number` is not positive and finite.
+    pub fn step_liquid_cfl(&mut self, cfl_number: f64) -> Vec<MacStepStats> {
+        let original_dt = self.dt;
+        let substeps = self.cfl_substeps(cfl_number);
+        self.dt = original_dt / usize_to_f64(substeps);
+        let mut stats = Vec::with_capacity(substeps);
+        for _ in 0..substeps {
+            stats.push(self.step_liquid());
+        }
+        self.dt = original_dt;
+        stats
+    }
+
+    /// Applies simple explicit viscosity smoothing to liquid-adjacent face velocities.
+    ///
+    /// This is a conservative explicit smoother intended for stability tests and light damping.
+    /// Strong viscosity should eventually move to an implicit solve.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `viscosity` is negative or not finite.
+    pub fn apply_liquid_viscosity(&mut self, viscosity: f64) {
+        assert!(
+            viscosity.is_finite() && viscosity >= 0.0,
+            "3D MAC liquid viscosity must be non-negative and finite"
+        );
+        if viscosity <= f64::EPSILON {
+            return;
+        }
+        self.apply_explicit_viscosity(viscosity);
+        self.apply_solid_velocity_constraints();
+    }
+
     /// Exports density as a 3D grid field.
     #[must_use]
     pub fn to_density_grid(&self, bounds: GridBounds) -> GridDensityField {
@@ -772,10 +987,15 @@ impl MacFluidGrid3 {
     }
 
     fn rebuild_flags_from_phi(&mut self) {
-        for (flag, phi) in self.flags.iter_mut().zip(&self.solid_phi) {
-            if *phi <= 0.0 {
+        for ((flag, solid_phi), liquid_phi) in self
+            .flags
+            .iter_mut()
+            .zip(&self.solid_phi)
+            .zip(&self.liquid_phi)
+        {
+            if *solid_phi <= 0.0 {
                 *flag = MacCellFlags::SOLID;
-            } else if flag.is_liquid() {
+            } else if *liquid_phi <= 0.0 {
                 *flag = MacCellFlags::LIQUID;
             } else {
                 *flag = MacCellFlags::OPEN;
@@ -931,6 +1151,44 @@ impl MacFluidGrid3 {
         }
     }
 
+    fn liquid_divergence_l2(&self) -> f64 {
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for z in 0..self.dims[2] {
+            for y in 0..self.dims[1] {
+                for x in 0..self.dims[0] {
+                    let index = cell_index_for_dims3(self.dims, x, y, z);
+                    if !self.flags[index].is_liquid() {
+                        continue;
+                    }
+                    let divergence = self.cell_divergence(x, y, z);
+                    sum += divergence * divergence;
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            0.0
+        } else {
+            (sum / usize_to_f64(count)).sqrt()
+        }
+    }
+
+    fn liquid_cell_has_air_neighbor(&self, x: usize, y: usize, z: usize) -> bool {
+        let neighbors = [
+            x.checked_sub(1).map(|next_x| [next_x, y, z]),
+            (x + 1 < self.dims[0]).then_some([x + 1, y, z]),
+            y.checked_sub(1).map(|next_y| [x, next_y, z]),
+            (y + 1 < self.dims[1]).then_some([x, y + 1, z]),
+            z.checked_sub(1).map(|next_z| [x, y, next_z]),
+            (z + 1 < self.dims[2]).then_some([x, y, z + 1]),
+        ];
+        neighbors.into_iter().flatten().any(|[nx, ny, nz]| {
+            let index = cell_index_for_dims3(self.dims, nx, ny, nz);
+            self.flags[index].is_open()
+        })
+    }
+
     fn cell_divergence(&self, x: usize, y: usize, z: usize) -> f64 {
         let right = u_index_for_dims3(self.dims, x + 1, y, z);
         let left = u_index_for_dims3(self.dims, x, y, z);
@@ -1020,6 +1278,88 @@ impl MacFluidGrid3 {
         (iterations, residual_l2)
     }
 
+    fn solve_liquid_pressure_pcg(&mut self) -> (usize, f64) {
+        let cell_count = cell_count_for_dims3(self.dims);
+        self.pressure.fill(0.0);
+        let mut rhs = vec![0.0_f64; cell_count];
+        let mut has_liquid = false;
+        let mut has_free_surface = false;
+        for z in 0..self.dims[2] {
+            for y in 0..self.dims[1] {
+                for x in 0..self.dims[0] {
+                    let index = cell_index_for_dims3(self.dims, x, y, z);
+                    if self.flags[index].is_liquid() {
+                        has_liquid = true;
+                        has_free_surface |= self.liquid_cell_has_air_neighbor(x, y, z);
+                        rhs[index] = -self.cell_divergence(x, y, z) / self.dt;
+                    }
+                }
+            }
+        }
+        if !has_liquid {
+            return (0, 0.0);
+        }
+        if !has_free_surface {
+            subtract_liquid_component_means(
+                self.dims,
+                &self.u_weights,
+                &self.v_weights,
+                &self.w_weights,
+                &mut rhs,
+                &self.flags,
+            );
+        }
+
+        let mut residual = rhs.clone();
+        let mut z_preconditioned = vec![0.0_f64; cell_count];
+        self.apply_liquid_pressure_preconditioner(&residual, &mut z_preconditioned);
+        let mut direction = z_preconditioned.clone();
+        let mut rz = dot_liquid(&residual, &z_preconditioned, &self.flags);
+        let mut residual_l2 = liquid_l2(&residual, &self.flags);
+        if residual_l2 <= self.pressure_tolerance || rz.abs() <= f64::MIN_POSITIVE {
+            return (0, residual_l2);
+        }
+
+        let mut matrix_direction = vec![0.0_f64; cell_count];
+        let mut iterations = 0usize;
+        for iteration in 0..self.pressure_iterations {
+            self.apply_liquid_pressure_matrix(&direction, &mut matrix_direction);
+            let denom = dot_liquid(&direction, &matrix_direction, &self.flags);
+            if denom.abs() <= f64::MIN_POSITIVE {
+                break;
+            }
+            let alpha = rz / denom;
+            for i in 0..cell_count {
+                if !self.flags[i].is_liquid() {
+                    continue;
+                }
+                self.pressure[i] = finite_f32(f64::from(self.pressure[i]) + alpha * direction[i]);
+                residual[i] -= alpha * matrix_direction[i];
+            }
+            iterations = iteration + 1;
+            residual_l2 = liquid_l2(&residual, &self.flags);
+            if residual_l2 <= self.pressure_tolerance {
+                break;
+            }
+
+            self.apply_liquid_pressure_preconditioner(&residual, &mut z_preconditioned);
+            let rz_next = dot_liquid(&residual, &z_preconditioned, &self.flags);
+            if rz.abs() <= f64::MIN_POSITIVE {
+                break;
+            }
+            let beta = rz_next / rz;
+            for i in 0..cell_count {
+                direction[i] = if self.flags[i].is_liquid() {
+                    z_preconditioned[i] + beta * direction[i]
+                } else {
+                    0.0
+                };
+            }
+            rz = rz_next;
+        }
+        (iterations, residual_l2)
+    }
+
     fn apply_pressure_preconditioner(&self, residual: &[f64], out: &mut [f64]) {
         out.fill(0.0);
         for z in 0..self.dims[2] {
@@ -1030,6 +1370,24 @@ impl MacFluidGrid3 {
                         continue;
                     }
                     let diagonal = self.pressure_diagonal(x, y, z);
+                    if diagonal > f64::MIN_POSITIVE {
+                        out[index] = residual[index] / diagonal;
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_liquid_pressure_preconditioner(&self, residual: &[f64], out: &mut [f64]) {
+        out.fill(0.0);
+        for z in 0..self.dims[2] {
+            for y in 0..self.dims[1] {
+                for x in 0..self.dims[0] {
+                    let index = cell_index_for_dims3(self.dims, x, y, z);
+                    if !self.flags[index].is_liquid() {
+                        continue;
+                    }
+                    let diagonal = self.liquid_pressure_diagonal(x, y, z);
                     if diagonal > f64::MIN_POSITIVE {
                         out[index] = residual[index] / diagonal;
                     }
@@ -1060,10 +1418,37 @@ impl MacFluidGrid3 {
         }
     }
 
+    fn apply_liquid_pressure_matrix(&self, pressure: &[f64], out: &mut [f64]) {
+        out.fill(0.0);
+        for z in 0..self.dims[2] {
+            for y in 0..self.dims[1] {
+                for x in 0..self.dims[0] {
+                    let index = cell_index_for_dims3(self.dims, x, y, z);
+                    if !self.flags[index].is_liquid() {
+                        continue;
+                    }
+                    let mut value = 0.0;
+                    for neighbor in self.liquid_pressure_neighbors(x, y, z) {
+                        value += neighbor.coeff
+                            * (pressure[index] - neighbor.cell.map_or(0.0, |cell| pressure[cell]));
+                    }
+                    out[index] = value;
+                }
+            }
+        }
+    }
+
     fn pressure_diagonal(&self, x: usize, y: usize, z: usize) -> f64 {
         self.pressure_neighbors(x, y, z)
             .into_iter()
             .filter(|neighbor| !self.flags[neighbor.cell].is_solid())
+            .map(|neighbor| neighbor.coeff)
+            .sum()
+    }
+
+    fn liquid_pressure_diagonal(&self, x: usize, y: usize, z: usize) -> f64 {
+        self.liquid_pressure_neighbors(x, y, z)
+            .into_iter()
             .map(|neighbor| neighbor.coeff)
             .sum()
     }
@@ -1113,6 +1498,78 @@ impl MacFluidGrid3 {
             });
         }
         neighbors
+    }
+
+    fn liquid_pressure_neighbors(
+        &self,
+        x: usize,
+        y: usize,
+        z: usize,
+    ) -> Vec<LiquidPressureNeighbor> {
+        let mut neighbors = Vec::with_capacity(6);
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            x.checked_sub(1).map(|next_x| [next_x, y, z]),
+            self.u_weights[u_index_for_dims3(self.dims, x, y, z)],
+            self.cell_size[0],
+        );
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            (x + 1 < self.dims[0]).then_some([x + 1, y, z]),
+            self.u_weights[u_index_for_dims3(self.dims, x + 1, y, z)],
+            self.cell_size[0],
+        );
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            y.checked_sub(1).map(|next_y| [x, next_y, z]),
+            self.v_weights[v_index_for_dims3(self.dims, x, y, z)],
+            self.cell_size[1],
+        );
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            (y + 1 < self.dims[1]).then_some([x, y + 1, z]),
+            self.v_weights[v_index_for_dims3(self.dims, x, y + 1, z)],
+            self.cell_size[1],
+        );
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            z.checked_sub(1).map(|next_z| [x, y, next_z]),
+            self.w_weights[w_index_for_dims3(self.dims, x, y, z)],
+            self.cell_size[2],
+        );
+        self.push_liquid_pressure_neighbor(
+            &mut neighbors,
+            (z + 1 < self.dims[2]).then_some([x, y, z + 1]),
+            self.w_weights[w_index_for_dims3(self.dims, x, y, z + 1)],
+            self.cell_size[2],
+        );
+        neighbors
+    }
+
+    fn push_liquid_pressure_neighbor(
+        &self,
+        neighbors: &mut Vec<LiquidPressureNeighbor>,
+        neighbor: Option<[usize; 3]>,
+        face_weight: f32,
+        cell_size: f64,
+    ) {
+        if face_weight <= FACE_WEIGHT_EPSILON {
+            return;
+        }
+        let Some(neighbor) = neighbor else {
+            return;
+        };
+        let neighbor_index = cell_index_for_dims3(self.dims, neighbor[0], neighbor[1], neighbor[2]);
+        if self.flags[neighbor_index].is_solid() {
+            return;
+        }
+        let coeff = f64::from(face_weight) / (cell_size * cell_size);
+        neighbors.push(LiquidPressureNeighbor {
+            cell: self.flags[neighbor_index]
+                .is_liquid()
+                .then_some(neighbor_index),
+            coeff,
+        });
     }
 
     fn apply_pressure_gradient(&mut self) {
@@ -1169,6 +1626,96 @@ impl MacFluidGrid3 {
         }
     }
 
+    fn apply_liquid_pressure_gradient(&mut self) {
+        let [width, height, depth] = self.dims;
+        for z in 0..depth {
+            for y in 0..height {
+                for x_face in 1..width {
+                    let face = u_index_for_dims3(self.dims, x_face, y, z);
+                    if self.u_weights[face] <= FACE_WEIGHT_EPSILON {
+                        self.u[face] = 0.0;
+                        continue;
+                    }
+                    let left = cell_index_for_dims3(self.dims, x_face - 1, y, z);
+                    let right = cell_index_for_dims3(self.dims, x_face, y, z);
+                    if !self.flags[left].is_liquid() && !self.flags[right].is_liquid() {
+                        continue;
+                    }
+                    let left_pressure = if self.flags[left].is_liquid() {
+                        f64::from(self.pressure[left])
+                    } else {
+                        0.0
+                    };
+                    let right_pressure = if self.flags[right].is_liquid() {
+                        f64::from(self.pressure[right])
+                    } else {
+                        0.0
+                    };
+                    let gradient = (right_pressure - left_pressure) / self.cell_size[0];
+                    self.u[face] = finite_f32(f64::from(self.u[face]) - self.dt * gradient);
+                }
+            }
+        }
+
+        for z in 0..depth {
+            for y_face in 1..height {
+                for x in 0..width {
+                    let face = v_index_for_dims3(self.dims, x, y_face, z);
+                    if self.v_weights[face] <= FACE_WEIGHT_EPSILON {
+                        self.v[face] = 0.0;
+                        continue;
+                    }
+                    let below = cell_index_for_dims3(self.dims, x, y_face - 1, z);
+                    let above = cell_index_for_dims3(self.dims, x, y_face, z);
+                    if !self.flags[below].is_liquid() && !self.flags[above].is_liquid() {
+                        continue;
+                    }
+                    let below_pressure = if self.flags[below].is_liquid() {
+                        f64::from(self.pressure[below])
+                    } else {
+                        0.0
+                    };
+                    let above_pressure = if self.flags[above].is_liquid() {
+                        f64::from(self.pressure[above])
+                    } else {
+                        0.0
+                    };
+                    let gradient = (above_pressure - below_pressure) / self.cell_size[1];
+                    self.v[face] = finite_f32(f64::from(self.v[face]) - self.dt * gradient);
+                }
+            }
+        }
+
+        for z_face in 1..depth {
+            for y in 0..height {
+                for x in 0..width {
+                    let face = w_index_for_dims3(self.dims, x, y, z_face);
+                    if self.w_weights[face] <= FACE_WEIGHT_EPSILON {
+                        self.w[face] = 0.0;
+                        continue;
+                    }
+                    let back = cell_index_for_dims3(self.dims, x, y, z_face - 1);
+                    let front = cell_index_for_dims3(self.dims, x, y, z_face);
+                    if !self.flags[back].is_liquid() && !self.flags[front].is_liquid() {
+                        continue;
+                    }
+                    let back_pressure = if self.flags[back].is_liquid() {
+                        f64::from(self.pressure[back])
+                    } else {
+                        0.0
+                    };
+                    let front_pressure = if self.flags[front].is_liquid() {
+                        f64::from(self.pressure[front])
+                    } else {
+                        0.0
+                    };
+                    let gradient = (front_pressure - back_pressure) / self.cell_size[2];
+                    self.w[face] = finite_f32(f64::from(self.w[face]) - self.dt * gradient);
+                }
+            }
+        }
+    }
+
     fn advect_center_field(
         &self,
         source: &[f32],
@@ -1204,6 +1751,14 @@ impl MacFluidGrid3 {
             rescale_scalar_mass(&mut out, &self.flags, source_mass);
         }
         out
+    }
+
+    fn advect_liquid_level_set(&mut self, old_u: &[f32], old_v: &[f32], old_w: &[f32]) {
+        let previous_phi = self.liquid_phi.clone();
+        self.liquid_phi =
+            self.advect_center_field(&previous_phi, old_u, old_v, old_w, false, false);
+        self.rebuild_flags_from_phi();
+        self.apply_solid_constraints();
     }
 
     fn advect_velocity_semi_lagrangian(&mut self, old_u: &[f32], old_v: &[f32], old_w: &[f32]) {
@@ -1281,6 +1836,158 @@ impl MacFluidGrid3 {
         self.apply_solid_velocity_constraints();
     }
 
+    fn extrapolate_velocity_into_air(&mut self, iterations: usize) {
+        let [width, height, depth] = self.dims;
+        let mut u_known = vec![false; self.u.len()];
+        for z in 0..depth {
+            for y in 0..height {
+                for x_face in 0..=width {
+                    let index = u_index_for_dims3(self.dims, x_face, y, z);
+                    u_known[index] = self.u_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((x_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x_face - 1, y, z)]
+                                .is_liquid())
+                            || (x_face < width
+                                && self.flags[cell_index_for_dims3(self.dims, x_face, y, z)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        extrapolate_face_grid(
+            &mut self.u,
+            &self.u_weights,
+            [width + 1, height, depth],
+            &mut u_known,
+            iterations,
+        );
+
+        let mut v_known = vec![false; self.v.len()];
+        for z in 0..depth {
+            for y_face in 0..=height {
+                for x in 0..width {
+                    let index = v_index_for_dims3(self.dims, x, y_face, z);
+                    v_known[index] = self.v_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((y_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x, y_face - 1, z)]
+                                .is_liquid())
+                            || (y_face < height
+                                && self.flags[cell_index_for_dims3(self.dims, x, y_face, z)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        extrapolate_face_grid(
+            &mut self.v,
+            &self.v_weights,
+            [width, height + 1, depth],
+            &mut v_known,
+            iterations,
+        );
+
+        let mut w_known = vec![false; self.w.len()];
+        for z_face in 0..=depth {
+            for y in 0..height {
+                for x in 0..width {
+                    let index = w_index_for_dims3(self.dims, x, y, z_face);
+                    w_known[index] = self.w_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((z_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x, y, z_face - 1)]
+                                .is_liquid())
+                            || (z_face < depth
+                                && self.flags[cell_index_for_dims3(self.dims, x, y, z_face)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        extrapolate_face_grid(
+            &mut self.w,
+            &self.w_weights,
+            [width, height, depth + 1],
+            &mut w_known,
+            iterations,
+        );
+        self.apply_solid_velocity_constraints();
+    }
+
+    fn apply_explicit_viscosity(&mut self, viscosity: f64) {
+        let min_cell = self.cell_size[0]
+            .min(self.cell_size[1])
+            .min(self.cell_size[2]);
+        let alpha = (viscosity * self.dt / (min_cell * min_cell)).clamp(0.0, 0.2);
+        if alpha <= f64::EPSILON {
+            return;
+        }
+        let [width, height, depth] = self.dims;
+        let mut u_active = vec![false; self.u.len()];
+        for z in 0..depth {
+            for y in 0..height {
+                for x_face in 0..=width {
+                    let index = u_index_for_dims3(self.dims, x_face, y, z);
+                    u_active[index] = self.u_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((x_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x_face - 1, y, z)]
+                                .is_liquid())
+                            || (x_face < width
+                                && self.flags[cell_index_for_dims3(self.dims, x_face, y, z)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        smooth_face_grid(
+            &mut self.u,
+            &self.u_weights,
+            [width + 1, height, depth],
+            &u_active,
+            alpha,
+        );
+
+        let mut v_active = vec![false; self.v.len()];
+        for z in 0..depth {
+            for y_face in 0..=height {
+                for x in 0..width {
+                    let index = v_index_for_dims3(self.dims, x, y_face, z);
+                    v_active[index] = self.v_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((y_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x, y_face - 1, z)]
+                                .is_liquid())
+                            || (y_face < height
+                                && self.flags[cell_index_for_dims3(self.dims, x, y_face, z)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        smooth_face_grid(
+            &mut self.v,
+            &self.v_weights,
+            [width, height + 1, depth],
+            &v_active,
+            alpha,
+        );
+
+        let mut w_active = vec![false; self.w.len()];
+        for z_face in 0..=depth {
+            for y in 0..height {
+                for x in 0..width {
+                    let index = w_index_for_dims3(self.dims, x, y, z_face);
+                    w_active[index] = self.w_weights[index] > FACE_WEIGHT_EPSILON
+                        && ((z_face > 0
+                            && self.flags[cell_index_for_dims3(self.dims, x, y, z_face - 1)]
+                                .is_liquid())
+                            || (z_face < depth
+                                && self.flags[cell_index_for_dims3(self.dims, x, y, z_face)]
+                                    .is_liquid()));
+                }
+            }
+        }
+        smooth_face_grid(
+            &mut self.w,
+            &self.w_weights,
+            [width, height, depth + 1],
+            &w_active,
+            alpha,
+        );
+    }
+
     fn velocity_at_position_from_faces(
         &self,
         u_faces: &[f32],
@@ -1323,6 +2030,12 @@ impl MacFluidGrid3 {
 #[derive(Clone, Copy)]
 struct PressureNeighbor {
     cell: usize,
+    coeff: f64,
+}
+
+#[derive(Clone, Copy)]
+struct LiquidPressureNeighbor {
+    cell: Option<usize>,
     coeff: f64,
 }
 
@@ -1537,6 +2250,95 @@ fn active_l2(values: &[f64], flags: &[MacCellFlags]) -> f64 {
     }
 }
 
+fn subtract_liquid_component_means(
+    dims: [usize; 3],
+    u_weights: &[f32],
+    v_weights: &[f32],
+    w_weights: &[f32],
+    values: &mut [f64],
+    flags: &[MacCellFlags],
+) {
+    let mut visited = vec![false; values.len()];
+    for z in 0..dims[2] {
+        for y in 0..dims[1] {
+            for x in 0..dims[0] {
+                let start = cell_index_for_dims3(dims, x, y, z);
+                if visited[start] || !flags[start].is_liquid() {
+                    continue;
+                }
+
+                let mut stack = vec![[x, y, z]];
+                let mut component = Vec::new();
+                visited[start] = true;
+                while let Some([cell_x, cell_y, cell_z]) = stack.pop() {
+                    let index = cell_index_for_dims3(dims, cell_x, cell_y, cell_z);
+                    component.push(index);
+
+                    for [next_x, next_y, next_z] in active_liquid_neighbors(
+                        dims,
+                        u_weights,
+                        v_weights,
+                        w_weights,
+                        flags,
+                        [cell_x, cell_y, cell_z],
+                    ) {
+                        let next = cell_index_for_dims3(dims, next_x, next_y, next_z);
+                        if !visited[next] {
+                            visited[next] = true;
+                            stack.push([next_x, next_y, next_z]);
+                        }
+                    }
+                }
+
+                let mean = component.iter().map(|index| values[*index]).sum::<f64>()
+                    / usize_to_f64(component.len());
+                for index in component {
+                    values[index] -= mean;
+                }
+            }
+        }
+    }
+}
+
+fn active_liquid_neighbors(
+    dims: [usize; 3],
+    u_weights: &[f32],
+    v_weights: &[f32],
+    w_weights: &[f32],
+    flags: &[MacCellFlags],
+    cell: [usize; 3],
+) -> Vec<[usize; 3]> {
+    active_neighbors(dims, u_weights, v_weights, w_weights, flags, cell)
+        .into_iter()
+        .filter(|[x, y, z]| flags[cell_index_for_dims3(dims, *x, *y, *z)].is_liquid())
+        .collect()
+}
+
+fn dot_liquid(lhs: &[f64], rhs: &[f64], flags: &[MacCellFlags]) -> f64 {
+    lhs.iter()
+        .zip(rhs)
+        .zip(flags)
+        .filter_map(|((lhs, rhs), flag)| flag.is_liquid().then_some(lhs * rhs))
+        .sum()
+}
+
+fn liquid_l2(values: &[f64], flags: &[MacCellFlags]) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for (value, flag) in values.iter().zip(flags) {
+        if !flag.is_liquid() {
+            continue;
+        }
+        sum += value * value;
+        count += 1;
+    }
+    if count == 0 {
+        0.0
+    } else {
+        (sum / usize_to_f64(count)).sqrt()
+    }
+}
+
 fn sanitize_advected_scalar(values: &mut [f32], nonnegative: bool) {
     for value in values {
         if !value.is_finite() || (nonnegative && *value < 0.0) {
@@ -1593,6 +2395,113 @@ fn sample_grid3(field: &[f32], dims: [usize; 3], position: [f64; 3]) -> f32 {
     let c0 = c00 * (1.0 - ty) + c10 * ty;
     let c1 = c01 * (1.0 - ty) + c11 * ty;
     finite_f32(c0 * (1.0 - tz) + c1 * tz)
+}
+
+fn extrapolate_face_grid(
+    field: &mut [f32],
+    weights: &[f32],
+    dims: [usize; 3],
+    known: &mut [bool],
+    iterations: usize,
+) {
+    debug_assert_eq!(field.len(), cell_count_for_dims3(dims));
+    debug_assert_eq!(weights.len(), field.len());
+    debug_assert_eq!(known.len(), field.len());
+
+    for _ in 0..iterations {
+        let previous = field.to_vec();
+        let previous_known = known.to_vec();
+        let mut changed = false;
+        for z in 0..dims[2] {
+            for y in 0..dims[1] {
+                for x in 0..dims[0] {
+                    let index = cell_index_for_dims3(dims, x, y, z);
+                    if previous_known[index] || weights[index] <= FACE_WEIGHT_EPSILON {
+                        continue;
+                    }
+                    let mut sum = 0.0;
+                    let mut count = 0usize;
+                    for [nx, ny, nz] in grid_neighbors3(dims, [x, y, z]) {
+                        let neighbor = cell_index_for_dims3(dims, nx, ny, nz);
+                        if previous_known[neighbor] {
+                            sum += f64::from(previous[neighbor]);
+                            count += 1;
+                        }
+                    }
+                    if count > 0 {
+                        field[index] = finite_f32(sum / usize_to_f64(count));
+                        known[index] = true;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn smooth_face_grid(
+    field: &mut [f32],
+    weights: &[f32],
+    dims: [usize; 3],
+    active: &[bool],
+    alpha: f64,
+) {
+    debug_assert_eq!(field.len(), cell_count_for_dims3(dims));
+    debug_assert_eq!(weights.len(), field.len());
+    debug_assert_eq!(active.len(), field.len());
+    let previous = field.to_vec();
+    for z in 0..dims[2] {
+        for y in 0..dims[1] {
+            for x in 0..dims[0] {
+                let index = cell_index_for_dims3(dims, x, y, z);
+                if !active[index] || weights[index] <= FACE_WEIGHT_EPSILON {
+                    continue;
+                }
+                let mut sum = 0.0;
+                let mut count = 0usize;
+                for [nx, ny, nz] in grid_neighbors3(dims, [x, y, z]) {
+                    let neighbor = cell_index_for_dims3(dims, nx, ny, nz);
+                    if active[neighbor] && weights[neighbor] > FACE_WEIGHT_EPSILON {
+                        sum += f64::from(previous[neighbor]);
+                        count += 1;
+                    }
+                }
+                if count > 0 {
+                    let average = sum / usize_to_f64(count);
+                    field[index] = finite_f32(
+                        f64::from(previous[index]) + alpha * (average - f64::from(previous[index])),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn grid_neighbors3(dims: [usize; 3], cell: [usize; 3]) -> Vec<[usize; 3]> {
+    let [x, y, z] = cell;
+    let mut neighbors = Vec::with_capacity(6);
+    if x > 0 {
+        neighbors.push([x - 1, y, z]);
+    }
+    if x + 1 < dims[0] {
+        neighbors.push([x + 1, y, z]);
+    }
+    if y > 0 {
+        neighbors.push([x, y - 1, z]);
+    }
+    if y + 1 < dims[1] {
+        neighbors.push([x, y + 1, z]);
+    }
+    if z > 0 {
+        neighbors.push([x, y, z - 1]);
+    }
+    if z + 1 < dims[2] {
+        neighbors.push([x, y, z + 1]);
+    }
+    neighbors
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -1823,6 +2732,135 @@ mod tests {
                 assert_close(f64::from(*velocity), 0.0);
             }
         }
+    }
+
+    #[test]
+    fn mac3_liquid_level_set_classifies_liquid_air_and_solid_separately() {
+        let mut sim = MacFluidGrid3::new([6, 6, 6]);
+        sim.set_liquid_sphere([3.0, 3.0, 3.0], 1.75);
+        sim.set_solid_sphere([3.0, 3.0, 3.0], 0.75);
+
+        assert!(sim.is_solid([3, 3, 3]));
+        assert!(!sim.is_liquid([3, 3, 3]));
+        assert!(sim.is_liquid([4, 3, 3]));
+        assert!(sim.is_air([0, 0, 0]));
+        assert!(sim.liquid_phi()[sim.index([4, 3, 3])] <= 0.0);
+
+        sim.set_liquid([0, 0, 0], true);
+
+        assert!(sim.is_liquid([0, 0, 0]));
+        assert!(!sim.is_solid([0, 0, 0]));
+    }
+
+    #[test]
+    fn mac3_free_surface_projection_reduces_liquid_divergence_and_leaves_air_pressure_zero() {
+        let mut sim = MacFluidGrid3::new([8, 8, 8])
+            .with_dt(0.2)
+            .with_pressure_iterations(180)
+            .with_pressure_tolerance(1.0e-7);
+        sim.set_liquid_sphere([4.0, 4.0, 4.0], 2.3);
+        for z in 2..6 {
+            for y in 2..6 {
+                for x in 2..7 {
+                    sim.set_u([x, y, z], usize_to_f64(x) - 4.0);
+                }
+            }
+        }
+
+        let smoke_divergence_before = sim.velocity_divergence_l2();
+        let stats = sim.project_liquid_velocity();
+
+        assert!(stats.divergence_before_l2 > 0.0);
+        assert!(
+            stats.divergence_after_l2 < stats.divergence_before_l2,
+            "{stats:?}"
+        );
+        assert_eq!(sim.last_liquid_projection(), stats);
+        assert!(sim.velocity_divergence_l2() <= smoke_divergence_before);
+        for (pressure, flag) in sim.pressures().iter().zip(sim.flags()) {
+            if flag.is_open() {
+                assert_close(f64::from(*pressure), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn mac3_liquid_projection_keeps_no_penetration_around_obstacle() {
+        let mut sim = MacFluidGrid3::new([10, 10, 10]).with_pressure_iterations(180);
+        sim.set_liquid_sphere([5.0, 5.0, 5.0], 3.5);
+        sim.set_solid_sphere([5.0, 5.0, 5.0], 1.8);
+        for z in 0..10 {
+            for y in 0..10 {
+                for x in 1..10 {
+                    sim.set_u([x, y, z], 1.0);
+                }
+            }
+        }
+
+        let stats = sim.project_liquid_velocity();
+
+        assert!(
+            stats.divergence_after_l2 < stats.divergence_before_l2,
+            "{stats:?}"
+        );
+        for (velocity, weight) in sim.u().iter().zip(sim.u_weights()) {
+            if *weight <= FACE_WEIGHT_EPSILON {
+                assert_close(f64::from(*velocity), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn mac3_liquid_level_set_advects_with_velocity() {
+        let mut sim = MacFluidGrid3::new([6, 4, 4]).with_dt(0.5);
+        sim.set_liquid_sdf(|cell| cell[0] - 2.5);
+        for z in 0..4 {
+            for y in 0..4 {
+                for x in 1..6 {
+                    sim.set_u([x, y, z], 1.0);
+                }
+            }
+        }
+        let old_phi = sim.liquid_phi().to_vec();
+        let old_u = sim.u.clone();
+        let old_v = sim.v.clone();
+        let old_w = sim.w.clone();
+
+        sim.advect_liquid_level_set(&old_u, &old_v, &old_w);
+
+        assert!(
+            sim.liquid_phi()
+                .iter()
+                .zip(old_phi)
+                .any(|(current, previous)| (*current - previous).abs() > 1.0e-5)
+        );
+        assert!(sim.flags().iter().any(|flag| flag.is_liquid()));
+        assert!(sim.flags().iter().any(|flag| flag.is_open()));
+    }
+
+    #[test]
+    fn mac3_extrapolates_liquid_velocity_into_nearby_air() {
+        let mut sim = MacFluidGrid3::new([6, 4, 4]);
+        sim.set_liquid([2, 2, 2], true);
+        sim.set_u([2, 2, 2], 2.0);
+        let air_face = u_index_for_dims3(sim.dims(), 1, 2, 2);
+        assert_close(f64::from(sim.u()[air_face]), 0.0);
+
+        sim.extrapolate_velocity_into_air(3);
+
+        assert!(f64::from(sim.u()[air_face]).abs() > 0.0);
+    }
+
+    #[test]
+    fn mac3_explicit_liquid_viscosity_damps_velocity_peak() {
+        let mut sim = MacFluidGrid3::new([6, 6, 6]).with_dt(0.1);
+        sim.set_liquid_sphere([3.0, 3.0, 3.0], 2.0);
+        sim.set_u([3, 3, 3], 5.0);
+        let peak = f64::from(sim.u()[u_index_for_dims3(sim.dims(), 3, 3, 3)]);
+
+        sim.apply_liquid_viscosity(1.0);
+
+        assert!(f64::from(sim.u()[u_index_for_dims3(sim.dims(), 3, 3, 3)]) < peak);
     }
 
     #[test]
